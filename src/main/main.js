@@ -62,7 +62,33 @@ protocol.registerSchemesAsPrivileged([{
 }]);
 
 // Only one sidebar at a time: a second launch just shows the existing one.
-if (!app.requestSingleInstanceLock()) {
+// `be-aero-desktop --doctor` prints platform diagnostics and exits - the
+// first thing to ask for when a Linux desktop misbehaves. It must run even
+// while the app itself is running, so it skips the single-instance lock.
+const DOCTOR = process.argv.includes('--doctor');
+if (DOCTOR) {
+  app.whenReady().then(() => {
+    const probe = new BrowserWindow({ show: false, frame: false, transparent: true });
+    const report = {
+      app: app.getVersion(),
+      electron: process.versions.electron,
+      platform: process.platform,
+      sessionType: process.env.XDG_SESSION_TYPE || null,
+      waylandDisplay: process.env.WAYLAND_DISPLAY || null,
+      desktop: process.env.XDG_CURRENT_DESKTOP || null,
+      ozoneForcedX11: process.platform === 'linux',
+      setShapeAvailable: typeof probe.setShape === 'function',
+      displays: screen.getAllDisplays().map((d) => ({
+        id: d.id, bounds: d.bounds, workArea: d.workArea, scaleFactor: d.scaleFactor
+      }))
+    };
+    probe.destroy();
+    process.stdout.write(JSON.stringify(report, null, 2) + '\n');
+    app.exit(0);
+  });
+}
+
+if (!DOCTOR && !app.requestSingleInstanceLock()) {
   app.quit();
 } else {
   app.on('second-instance', () => showWindow());
@@ -216,10 +242,37 @@ function applyBounds() {
   }
 }
 
-// Click-through with a way back. Windows/macOS forward mouse moves to the
-// renderer even while ignoring, so it can reclaim the mouse over a widget.
-// Linux has no forwarding: while ignoring, poll the cursor and hand the
-// renderer window-relative probe points to make the same decision with.
+// Input model.
+// Windows/macOS: click-through with forwarded mouse moves - the renderer
+// reclaims the mouse over a widget (setIgnoreMouseEvents + forward).
+// Linux: forwarding does not exist, and the cursor-poll fallback dies under
+// XWayland, where the global cursor freezes the moment the pointer is over
+// a Wayland surface (i.e. the desktop behind us). So on Linux the window
+// always TAKES input and the X11 SHAPE region decides where: docked mode is
+// the whole strip, free-form mode is the widget rects the renderer reports.
+function linuxShapeInput() {
+  return process.platform === 'linux' && win && typeof win.setShape === 'function';
+}
+
+function applyInputModel() {
+  if (!win) return;
+  if (!linuxShapeInput()) { setIgnoreMouse(true); return; }
+  win.setIgnoreMouseEvents(false);
+  if (store.get('dock') !== 'free') {
+    win.setShape([]); // rectangular again: the whole docked strip is ours
+  }
+  // free: the renderer's rect reports (window:input-shape) take over
+}
+
+ipcMain.on('window:input-shape', (_e, rects) => {
+  if (!linuxShapeInput() || store.get('dock') !== 'free') return;
+  try {
+    win.setShape((Array.isArray(rects) ? rects : [])
+      .map((r) => ({ x: r.x | 0, y: r.y | 0, width: r.width | 0, height: r.height | 0 }))
+      .filter((r) => r.width > 0 && r.height > 0));
+  } catch { /* window going away */ }
+});
+
 let mousePollTimer = null;
 function setIgnoreMouse(ignore) {
   if (!win) return;
@@ -277,7 +330,7 @@ function createWindow() {
   win.setOpacity(s.opacity);
   // Transparent areas let clicks fall through to the desktop; the renderer
   // turns mouse capture back on whenever the pointer is over a widget.
-  setIgnoreMouse(true);
+  applyInputModel();
 
   if (!app.isPackaged) {
     // Surface renderer warnings/errors in the terminal during development.
@@ -314,8 +367,21 @@ function createWindow() {
   win.once('ready-to-show', () => {
     win.showInactive();
     // Linux WMs often override the pre-map position of a frameless window
-    // (GNOME centers it); re-assert the computed bounds once it is mapped.
-    if (process.platform === 'linux') setTimeout(() => applyBounds(), 300);
+    // (GNOME centers it, sometimes well after mapping); re-assert the
+    // computed bounds twice and say what the WM actually honoured.
+    if (process.platform === 'linux') {
+      const assert = () => { if (win) applyBounds(); };
+      setTimeout(assert, 300);
+      setTimeout(() => {
+        assert();
+        if (!win) return;
+        const want = computeBounds();
+        const got = win.getBounds();
+        if (want.x !== got.x || want.y !== got.y) {
+          console.warn(`[linux] WM ignored position: wanted ${want.x},${want.y} got ${got.x},${got.y}`);
+        }
+      }, 1500);
+    }
   });
 
   win.on('close', (e) => {
@@ -368,7 +434,7 @@ function updateSettings(patch) {
       if (!s.alwaysOnTop) sinkToDesktop();
     }
     if ('opacity' in patch) win.setOpacity(Math.max(0.3, Math.min(1, s.opacity)));
-    if ('dock' in patch || 'width' in patch || 'dockDisplay' in patch) applyBounds();
+    if ('dock' in patch || 'width' in patch || 'dockDisplay' in patch) { applyBounds(); applyInputModel(); }
     win.webContents.send('settings:changed', publicSettings());
   }
   if (patch.telemetry && ('interval' in patch.telemetry || 'metrics' in patch.telemetry)) startTelemetry();
@@ -1217,7 +1283,11 @@ ipcMain.handle('scratchpad:save-as', async (_e, text) => {
   }
 });
 
-ipcMain.on('window:ignore-mouse', (_e, ignore) => setIgnoreMouse(ignore));
+ipcMain.on('window:ignore-mouse', (_e, ignore) => {
+  // With a shaped input region the shape already decides who gets clicks.
+  if (linuxShapeInput()) return;
+  setIgnoreMouse(ignore);
+});
 ipcMain.on('window:hide', () => { if (win) { win.hide(); rebuildTrayMenu(); } });
 ipcMain.on('app:quit', () => { isQuitting = true; app.quit(); });
 ipcMain.on('search:open', (_e, q) => { if (spotlight) spotlight.show(typeof q === 'string' ? q : ''); });
@@ -1296,6 +1366,7 @@ function migrateFromAeroWidgets() {
 }
 
 app.whenReady().then(() => {
+  if (DOCTOR) return; // the diagnostics handler owns this run
   migrateFromAeroWidgets();
   store = new Store();
 

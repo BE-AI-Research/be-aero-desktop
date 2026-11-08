@@ -124,6 +124,16 @@ sudo ./install-linux.sh be-aero-desktop.tar.gz     # installs /opt + menu entry 
 sudo ./install-linux.sh --uninstall                   # removes it again
 ```
 
+On Linux the app runs on X11/XWayland (Wayland offers no window positioning), takes input
+through an X11 shape region (docked: the whole strip; free-form: the widget rects), indexes
+`.desktop` applications (including Flatpak and Snap exports) in Aero Search, and launches
+them via `gio launch`. Launch-at-startup writes an XDG autostart entry. Stock GNOME has no
+system tray - use the toolbar's menu button, or install the AppIndicator extension if you
+want the tray too.
+
+Something off on your desktop? Run `be-aero-desktop --doctor` - it prints the session type,
+display map and capability report to paste into a bug report.
+
 Windows-only features degrade cleanly on Linux: the app dock and app-identity binding are
 Windows subsystems (Win32 window enumeration, Authenticode), so the dock shows only parked
 web widgets and the local API runs with token + pairing consent but without binary binding.

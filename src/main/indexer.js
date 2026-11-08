@@ -83,6 +83,51 @@ async function walk(root, { maxDepth, maxEntries, onEntry, filesToo }) {
   return count;
 }
 
+// Linux applications are .desktop entries; user dirs take XDG precedence.
+const LINUX_APP_ROOTS = [
+  path.join(HOME, '.local', 'share', 'applications'),
+  path.join(HOME, '.local', 'share', 'flatpak', 'exports', 'share', 'applications'),
+  '/usr/local/share/applications',
+  '/usr/share/applications',
+  '/var/lib/flatpak/exports/share/applications',
+  '/var/lib/snapd/desktop/applications'
+];
+
+async function indexLinuxApps() {
+  const apps = [];
+  const seen = new Set();
+  for (const root of LINUX_APP_ROOTS) {
+    let names;
+    try { names = await fs.readdir(root); } catch { continue; }
+    for (const f of names) {
+      if (!f.endsWith('.desktop')) continue;
+      try {
+        const full = path.join(root, f);
+        const text = await fs.readFile(full, 'utf8');
+        const section = text.split(/\n\[/)[0]; // the [Desktop Entry] group
+        const get = (k) => {
+          const m = new RegExp('^' + k + '=(.*)$', 'm').exec(section);
+          return m ? m[1].trim() : '';
+        };
+        if (/^true$/i.test(get('NoDisplay')) || /^true$/i.test(get('Hidden'))) continue;
+        const type = get('Type');
+        if (type && type !== 'Application') continue;
+        const name = get('Name');
+        if (!name || !get('Exec')) continue;
+        const key = name.toLowerCase();
+        if (seen.has(key)) continue; // user entry already shadowed this one
+        seen.add(key);
+        const icon = get('Icon');
+        apps.push({
+          name, path: full, kind: 'app',
+          ...(icon && icon.startsWith('/') ? { iconPath: icon } : {})
+        });
+      } catch { /* unreadable entry */ }
+    }
+  }
+  return apps;
+}
+
 const APP_EXTS = new Set(['.lnk', '.url', '.appref-ms', '.exe']);
 const APP_NOISE = /^(uninstall|readme|help|license|release notes|documentation|website|support)\b/i;
 
@@ -137,13 +182,15 @@ function dedupeApps(shortcutApps, uwpApps) {
 
 async function buildIndex({ extraRoots = [] } = {}) {
   const started = Date.now();
+  const linux = process.platform === 'linux';
   const [apps, files, uwp] = await Promise.all([
-    indexApps(),
+    linux ? indexLinuxApps() : indexApps(),
     indexFiles([...DEFAULT_FILE_ROOTS, ...extraRoots]),
-    indexUwpApps()
+    linux ? Promise.resolve({ entries: [], roots: {} }) : indexUwpApps()
   ]);
   const uwpApps = dedupeApps(apps, uwp.entries);
-  const entries = [...apps, ...uwpApps, ...SETTINGS, ...PLACES, ...files];
+  // ms-settings: deep links are a Windows namespace.
+  const entries = [...apps, ...uwpApps, ...(linux ? [] : SETTINGS), ...PLACES, ...files];
   return {
     entries,
     uwpRoots: uwp.roots,

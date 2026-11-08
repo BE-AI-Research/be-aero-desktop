@@ -30,6 +30,23 @@ function webSearchUrl(engine, q) {
 const WIDTH = 760;
 const HEIGHT = 520;
 
+function launchDesktopEntry(file) {
+  const child = spawn('gio', ['launch', file], { detached: true, stdio: 'ignore' });
+  child.once('error', () => execFromDesktopEntry(file));
+  child.once('exit', (code) => { if (code !== 0) execFromDesktopEntry(file); });
+  child.unref();
+}
+
+function execFromDesktopEntry(file) {
+  try {
+    const text = require('fs').readFileSync(file, 'utf8').split(/\n\[/)[0];
+    const m = /^Exec=(.*)$/m.exec(text);
+    if (!m) return;
+    const cmd = m[1].replace(/%[fFuUdDnNickvm]/g, '').trim();
+    if (cmd) spawn('/bin/sh', ['-c', cmd], { detached: true, stdio: 'ignore' }).unref();
+  } catch { /* unreadable entry */ }
+}
+
 class Spotlight {
   constructor({ store, root, onSettingsChanged }) {
     this.store = store;
@@ -189,15 +206,21 @@ class Spotlight {
       await shell.openExternal(p);
     } else if (/^shell:/i.test(p)) {
       spawn('explorer.exe', [p], { detached: true, stdio: 'ignore' }).unref();
+    } else if (process.platform === 'linux' && /\.desktop$/i.test(p)) {
+      launchDesktopEntry(p);
     } else {
       const err = await shell.openPath(p);
-      if (err) {
+      if (err && process.platform === 'win32') {
         // No associated program: show "Open with" like HorusSearch does.
         spawn('rundll32.exe', ['shell32.dll,OpenAs_RunDLL', p], { detached: true, stdio: 'ignore' }).unref();
       }
     }
   }
 
+  // Launching a .desktop file through xdg-open tends to open it as TEXT.
+  // gio launch is the sanctioned way (present wherever GLib is, i.e. GNOME
+  // and most desktops); the fallback runs the entry's own Exec line with
+  // the field codes (%u, %F, ...) stripped.
   reveal(item) {
     if (!item || !item.path || /^(ms-settings|shell):/i.test(item.path)) return;
     this.hide();

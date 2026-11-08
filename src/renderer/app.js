@@ -23,13 +23,33 @@
     setCapture(!!(el && el.closest('.widget-hit')));
   });
   document.addEventListener('mouseleave', () => { if (!dragging) setCapture(false); });
-  // Linux: no mouse-event forwarding while click-through, so main polls the
-  // cursor and sends window-relative probe points instead.
+  // Linux fallback (no X11 SHAPE support): main polls the cursor while
+  // click-through and sends window-relative probe points instead.
   if (aero.onMouseProbe) aero.onMouseProbe(({ x, y }) => {
     if (dragging || capturing) return;
     const el = document.elementFromPoint(x, y);
     if (el && el.closest('.widget-hit')) setCapture(true);
   });
+  // Linux input shape: in free-form mode the window takes input only inside
+  // the widget rects it reports here (padded so grips and glows stay live).
+  // While a gesture runs the whole window is the hit region.
+  if (aero.platform === 'linux' && aero.setInputShape) {
+    let lastShape = '';
+    setInterval(() => {
+      if (!document.body.classList.contains('free')) { lastShape = ''; return; }
+      const rects = dragging
+        ? [{ x: 0, y: 0, width: window.innerWidth, height: window.innerHeight }]
+        : [...document.querySelectorAll('.widget-hit')].map((el) => {
+            const r = el.getBoundingClientRect();
+            return {
+              x: Math.max(0, Math.floor(r.left - 24)), y: Math.max(0, Math.floor(r.top - 24)),
+              width: Math.ceil(r.width + 48), height: Math.ceil(r.height + 48)
+            };
+          }).filter((r) => r.width > 48 && r.height > 48);
+      const key = JSON.stringify(rects);
+      if (key !== lastShape) { lastShape = key; aero.setInputShape(rects); }
+    }, 300);
+  }
 
   // Layout: resize grips everywhere, drag-to-move in free-form mode.
   // While a gesture runs, keep capturing mouse input even off the widget.
