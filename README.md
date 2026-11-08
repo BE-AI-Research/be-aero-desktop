@@ -23,14 +23,14 @@ Prefer no install? Grab the portable build instead and just run it:
 curl.exe -fL --progress-bar -o BE-Aero-Desktop-Portable.exe https://github.com/BE-AI-Research/be-aero-desktop/releases/latest/download/BE-Aero-Desktop-Portable.exe
 ```
 
-**Linux** - downloads the latest release (~120 MB) and installs it to `/opt` with a menu
-entry and CLI shim:
+**Linux** - one command: the installer downloads the latest release (~120 MB) itself and
+installs to `/opt` with a menu entry and CLI shim:
 
 ```bash
-curl -fLO --progress-bar https://github.com/BE-AI-Research/be-aero-desktop/releases/latest/download/be-aero-desktop.tar.gz
-curl -fLO https://github.com/BE-AI-Research/be-aero-desktop/releases/latest/download/install-linux.sh
-sudo bash install-linux.sh be-aero-desktop.tar.gz
+curl -fsSL https://github.com/BE-AI-Research/be-aero-desktop/releases/latest/download/install-linux.sh | sudo bash
 ```
+
+(Already have the tar.gz? `sudo bash install-linux.sh be-aero-desktop.tar.gz` installs that instead.)
 
 Uninstall later with `sudo bash install-linux.sh --uninstall`. Windows SmartScreen may warn on
 first run because the builds are not code-signed yet - choose "More info -> Run anyway" if you

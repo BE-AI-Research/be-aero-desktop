@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
-# BE-Aero Desktop - one-shot Linux installer for the tar.gz build.
+# BE-Aero Desktop - one-shot Linux installer.
 #
-#   sudo ./install-linux.sh be-aero-desktop-1.0.0.tar.gz
+#   curl -fsSL https://github.com/BE-AI-Research/be-aero-desktop/releases/latest/download/install-linux.sh | sudo bash
 #
-# Installs to /opt/be-aero-desktop, adds a launcher entry and a CLI shim.
+# With no argument it downloads the latest release itself; pass a local
+# tar.gz to install that instead. Installs to /opt/be-aero-desktop, adds a
+# launcher entry and a CLI shim.
 # Uninstall later with:  sudo ./install-linux.sh --uninstall
 set -euo pipefail
 
@@ -11,6 +13,12 @@ APP_DIR=/opt/be-aero-desktop
 BIN_LINK=/usr/local/bin/be-aero-desktop
 DESKTOP=/usr/share/applications/be-aero-desktop.desktop
 ICON=/usr/share/icons/hicolor/256x256/apps/be-aero-desktop.png
+TARBALL_URL="https://github.com/BE-AI-Research/be-aero-desktop/releases/latest/download/be-aero-desktop.tar.gz"
+
+if [[ $EUID -ne 0 ]]; then
+  echo "run with sudo: it works in /opt and /usr/share" >&2
+  exit 1
+fi
 
 if [[ "${1:-}" == "--uninstall" ]]; then
   rm -rf "$APP_DIR"
@@ -21,14 +29,25 @@ if [[ "${1:-}" == "--uninstall" ]]; then
 fi
 
 TARBALL="${1:-}"
-if [[ -z "$TARBALL" || ! -f "$TARBALL" ]]; then
-  echo "usage: sudo $0 <be-aero-desktop-*.tar.gz>   (or --uninstall)" >&2
+CLEANUP=""
+if [[ -z "$TARBALL" ]]; then
+  # No tarball given: fetch the latest release ourselves.
+  CLEANUP="$(mktemp -d)"
+  TARBALL="$CLEANUP/be-aero-desktop.tar.gz"
+  echo "Downloading the latest release (~120 MB) ..."
+  if command -v curl >/dev/null; then
+    curl -fL --progress-bar -o "$TARBALL" "$TARBALL_URL"
+  elif command -v wget >/dev/null; then
+    wget -q --show-progress -O "$TARBALL" "$TARBALL_URL"
+  else
+    echo "need curl or wget to download $TARBALL_URL" >&2
+    exit 1
+  fi
+elif [[ ! -f "$TARBALL" ]]; then
+  echo "usage: sudo $0 [be-aero-desktop-*.tar.gz]   (no argument = download latest; or --uninstall)" >&2
   exit 1
 fi
-if [[ $EUID -ne 0 ]]; then
-  echo "run with sudo: it installs into /opt and /usr/share" >&2
-  exit 1
-fi
+trap '[[ -n "$CLEANUP" ]] && rm -rf "$CLEANUP"' EXIT
 
 echo "Installing to $APP_DIR ..."
 rm -rf "$APP_DIR"
