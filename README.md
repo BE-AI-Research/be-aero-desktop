@@ -6,6 +6,33 @@ A modern take on an old concept. Fully modular, widget and applet based desktop 
 
 A Windows 11 "Aero-Mica" desktop platform - widget sidebar, application dock, Spotlight-style search, web widgets, a sandboxed plugin SDK and a local app API. Built with Electron from the original `aero-widgets.html` prototype; runs on Linux too.
 
+## Install
+
+**Windows** (PowerShell) - downloads the installer from the latest release and runs it:
+
+```powershell
+curl.exe -fsSLO https://github.com/BE-AI-Research/be-aero-desktop/releases/latest/download/BE-Aero.Desktop.Setup.1.0.0.exe
+.\BE-Aero.Desktop.Setup.1.0.0.exe
+```
+
+Prefer no install? Grab the portable build instead and just run it:
+
+```powershell
+curl.exe -fsSLO https://github.com/BE-AI-Research/be-aero-desktop/releases/latest/download/BE-Aero.Desktop.1.0.0.exe
+```
+
+**Linux** - downloads the latest release and installs it to `/opt` with a menu entry and CLI shim:
+
+```bash
+curl -fsSLO https://github.com/BE-AI-Research/be-aero-desktop/releases/latest/download/be-aero-desktop-1.0.0.tar.gz
+curl -fsSLO https://github.com/BE-AI-Research/be-aero-desktop/releases/latest/download/install-linux.sh
+sudo bash install-linux.sh be-aero-desktop-1.0.0.tar.gz
+```
+
+Uninstall later with `sudo bash install-linux.sh --uninstall`. Windows SmartScreen may warn on
+first run because the builds are not code-signed yet - choose "More info -> Run anyway" if you
+trust this source. All downloads are also on the [releases page](https://github.com/BE-AI-Research/be-aero-desktop/releases).
+
 ## Widgets
 - **Search** - a Spotlight-style launcher (see below). The search bar at the top of the sidebar opens it.
 - **Chronometer** - seven faces: analog, classic (all numerals), minimal ticks, hybrid, digital, flip clock and rings. Optional digital readout, seconds, date, sweeping second hand and its own accent colour.
