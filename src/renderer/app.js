@@ -275,6 +275,7 @@
     $('set-locked').checked = !!s.locked;
     setVal($('set-dock-align'), (s.dock && s.dock.align) || 'center');
     $('set-startup').checked = s.launchAtStartup;
+    $('set-update-auto').checked = (s.updates || {}).auto !== false;
     $('set-update-notify').checked = (s.updates || {}).notify !== false;
     if (!recordingHotkey) $('set-hotkey').value = AeroHotkey.pretty(s.search.hotkey) || s.search.hotkey;
     setVal($('set-web-engine'), s.search.webEngine || 'bing');
@@ -412,6 +413,7 @@
   $('set-24h').addEventListener('change', (e) => aero.setSettings({ use24h: e.target.checked }));
   $('set-top').addEventListener('change', (e) => aero.setSettings({ alwaysOnTop: e.target.checked }));
   $('set-startup').addEventListener('change', (e) => aero.setSettings({ launchAtStartup: e.target.checked }));
+  $('set-update-auto').addEventListener('change', (e) => aero.setSettings({ updates: { auto: e.target.checked } }));
   $('set-update-notify').addEventListener('change', (e) => aero.setSettings({ updates: { notify: e.target.checked } }));
 
   function renderUpdateStatus(st) {
@@ -424,6 +426,12 @@
       a.textContent = `${st.release.version} is available - open the release page`;
       a.addEventListener('click', (e) => { e.preventDefault(); aero.openUpdate(); });
       el2.appendChild(a);
+    } else if (st.state === 'checking') {
+      el2.textContent = 'Checking...';
+    } else if (st.state === 'downloading') {
+      el2.textContent = `Downloading ${st.release ? st.release.version : 'update'}... ${st.percent || 0}%`;
+    } else if (st.state === 'restarting') {
+      el2.textContent = `Installing ${st.release ? st.release.version : 'update'} - restarting...`;
     } else if (st.state === 'current') {
       el2.textContent = `Up to date (latest release: ${st.release ? st.release.version : 'n/a'}).`;
     } else if (st.state === 'none') {

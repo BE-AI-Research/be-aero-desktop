@@ -128,10 +128,13 @@ deb/AppImage targets need a Linux build host; the tar.gz builds anywhere.
 
 ## Updates
 The app checks the project's GitHub releases a few times a day (and on demand from
-Settings or the tray's "Check for updates..."). When a newer published build exists it
-shows a desktop notification; clicking it opens the release page. Notify-only by design —
-nothing downloads or installs itself. Turn the notification off in Settings if you prefer.
-The repository it watches comes from the `repository` field in `package.json`.
+Settings or the tray's "Check for updates..."). On the installed Windows build it
+updates itself: the new installer downloads in the background, its hash is verified
+against the release manifest, and the app restarts into the new version with a brief
+notification. Turn "Install updates automatically" off in Settings to go back to
+notify-only. The portable exe and the Linux build can't replace themselves in place,
+so they show a notification that opens the release page instead. The repository it
+watches comes from the `repository` field in `package.json`.
 
 ## Development
 ```powershell

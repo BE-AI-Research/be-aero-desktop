@@ -1018,7 +1018,70 @@ function listCertTrust() {
 // ---------------------------------------------------------------- Updates
 const UPDATE_REPO = updater.repoSlug(require('../../package.json').repository);
 
+// The installed Windows build can replace itself: electron-updater downloads
+// the new installer in the background, verifies its hash against latest.yml
+// on the release, and reruns it silently. Portable exes and the Linux tarball
+// have nothing to overwrite in place, so they fall back to a notification.
+function canAutoUpdate() {
+  return process.platform === 'win32' && app.isPackaged && !process.env.PORTABLE_EXECUTABLE_DIR;
+}
+
+let autoUpdaterReady = null;
+function getAutoUpdater() {
+  if (autoUpdaterReady) return autoUpdaterReady;
+  const { autoUpdater } = require('electron-updater');
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true;
+  autoUpdater.allowPrerelease = false;
+
+  const push = (status) => {
+    lastUpdateStatus = { ...status, checkedAt: Date.now(), repo: UPDATE_REPO };
+    if (win) win.webContents.send('updates:status', lastUpdateStatus);
+  };
+  autoUpdater.on('checking-for-update', () => push({ state: 'checking' }));
+  autoUpdater.on('update-not-available', (info) => push({
+    state: 'current', release: info && { version: `v${info.version}` }
+  }));
+  autoUpdater.on('update-available', (info) => push({
+    state: 'downloading', release: { version: `v${info.version}` }, percent: 0
+  }));
+  let lastPct = -1;
+  autoUpdater.on('download-progress', (pr) => {
+    const pct = Math.floor(pr.percent);
+    if (pct !== lastPct) { lastPct = pct; push({ ...lastUpdateStatus, state: 'downloading', percent: pct }); }
+  });
+  autoUpdater.on('update-downloaded', (info) => {
+    push({ state: 'restarting', release: { version: `v${info.version}` } });
+    if (SysNotification.isSupported()) {
+      new SysNotification({
+        title: `Updating BE-Aero Desktop to v${info.version}`,
+        body: 'Installing and restarting...',
+        icon: loadIcon()
+      }).show();
+    }
+    // The close handler hides instead of quitting unless isQuitting is set,
+    // which would strand the installer waiting on a window that never closes.
+    setTimeout(() => { isQuitting = true; autoUpdater.quitAndInstall(true, true); }, 1500);
+  });
+  autoUpdater.on('error', (err) => push({ state: 'error', message: String(err && err.message || err) }));
+  autoUpdaterReady = autoUpdater;
+  return autoUpdater;
+}
+
 async function runUpdateCheck({ manual = false } = {}) {
+  const u0 = store.get('updates') || {};
+  if (u0.auto !== false && canAutoUpdate()) {
+    try {
+      await getAutoUpdater().checkForUpdates();
+      return lastUpdateStatus;
+    } catch (err) {
+      // Feed trouble (offline, no latest.yml on the release): fall through to
+      // the plain API check so the user still gets an answer.
+      lastUpdateStatus = { state: 'error', message: String(err && err.message || err), checkedAt: Date.now(), repo: UPDATE_REPO };
+      if (win) win.webContents.send('updates:status', lastUpdateStatus);
+    }
+  }
+
   const result = await updater.checkLatest(UPDATE_REPO, app.getVersion());
   lastUpdateStatus = { ...result, checkedAt: Date.now(), repo: UPDATE_REPO };
   if (win) win.webContents.send('updates:status', lastUpdateStatus);

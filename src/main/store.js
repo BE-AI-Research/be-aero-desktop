@@ -76,7 +76,8 @@ const DEFAULTS = {
   webWidgets: [],
   // Release notifications: check GitHub for newer published builds.
   updates: {
-    notify: true,
+    auto: true,     // Windows installed build: download + install by itself
+    notify: true,   // fallback builds (portable / Linux): notification only
     notifiedVersion: null   // last version the user was told about (no nagging)
   },
   // Application dock: apps pinned to it. [{ exe, name }]

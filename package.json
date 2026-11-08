@@ -56,6 +56,13 @@
         "from": "build/icon.png",
         "to": "icon.png"
       }
+    ],
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "BE-AI-Research",
+        "repo": "be-aero-desktop"
+      }
     ]
   },
   "devDependencies": {
@@ -66,5 +73,8 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/BE-AI-Research/be-aero-desktop.git"
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.11"
   }
 }
