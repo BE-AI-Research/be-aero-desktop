@@ -3,7 +3,7 @@
 #
 #   sudo ./install-linux.sh be-aero-desktop-1.0.0.tar.gz
 #
-# Installs to /opt/aero-widgets, adds a launcher entry and a CLI shim.
+# Installs to /opt/be-aero-desktop, adds a launcher entry and a CLI shim.
 # Uninstall later with:  sudo ./install-linux.sh --uninstall
 set -euo pipefail
 
