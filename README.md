@@ -1,6 +1,10 @@
 # BE-Aero Desktop
 
-BE-Aero Desktop: a Windows 11 "Aero-Mica" desktop platform - widget sidebar, application dock, Spotlight-style search, web widgets, a sandboxed plugin SDK and a local app API. Built with Electron from the original `aero-widgets.html` prototype; runs on Linux too.
+A modern take on an old concept. Fully modular, widget and applet based desktop environment that is universal, and cross-platform.
+
+<img width="2752" height="1536" alt="be-aero-desktop-logo" src="https://github.com/user-attachments/assets/83489174-cc12-498e-ae13-f62903981443" />
+
+A Windows 11 "Aero-Mica" desktop platform - widget sidebar, application dock, Spotlight-style search, web widgets, a sandboxed plugin SDK and a local app API. Built with Electron from the original `aero-widgets.html` prototype; runs on Linux too.
 
 ## Widgets
 - **Search** - a Spotlight-style launcher (see below). The search bar at the top of the sidebar opens it.

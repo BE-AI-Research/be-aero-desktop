@@ -62,9 +62,9 @@
     "electron": "^45.2.3",
     "electron-builder": "^26.18.0"
   },
-  "homepage": "https://github.com/be-aero/be-aero-desktop",
+  "homepage": "https://github.com/BE-AI-Research/be-aero-desktop",
   "repository": {
     "type": "git",
-    "url": "https://github.com/be-aero/be-aero-desktop.git"
+    "url": "https://github.com/BE-AI-Research/be-aero-desktop.git"
   }
 }
