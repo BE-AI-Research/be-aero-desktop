@@ -167,7 +167,15 @@ function computeBounds() {
   if (s.dock === 'free') {
     return freeSpanBounds();
   }
-  const wa = dockDisplay().workArea;
+  const wa = { ...dockDisplay().workArea };
+  // GNOME on Wayland draws its top bar as shell chrome that XWayland's work
+  // area knows nothing about (workArea === bounds); inset the strip so the
+  // toolbar is not buried underneath it.
+  if (process.platform === 'linux'
+      && /gnome/i.test(process.env.XDG_CURRENT_DESKTOP || '')
+      && wa.y === dockDisplay().bounds.y && wa.height === dockDisplay().bounds.height) {
+    wa.y += 36; wa.height -= 36;
+  }
   const width = Math.max(300, Math.min(480, s.width || 340));
   const x = s.dock === 'left' ? wa.x : wa.x + wa.width - width;
   return { x, y: wa.y, width, height: wa.height };
@@ -259,7 +267,11 @@ function applyInputModel() {
   if (!linuxShapeInput()) { setIgnoreMouse(true); return; }
   win.setIgnoreMouseEvents(false);
   if (store.get('dock') !== 'free') {
-    win.setShape([]); // rectangular again: the whole docked strip is ours
+    // Docked: the whole strip is interactive. The docs say an empty list
+    // reverts to rectangular, but an implementation that reads it as an
+    // empty REGION would make the window deaf - pass the full rect instead.
+    const b = win.getBounds();
+    win.setShape([{ x: 0, y: 0, width: b.width, height: b.height }]);
   }
   // free: the renderer's rect reports (window:input-shape) take over
 }
@@ -299,8 +311,16 @@ function setIgnoreMouse(ignore) {
 
 function createWindow() {
   const s = store.get();
+  // Linux, docked: declare what this window IS - an X11 dock
+  // (_NET_WM_WINDOW_TYPE_DOCK). Window managers place normal windows by
+  // policy (GNOME centers them and may refuse later moves), but a dock is
+  // positioned by its client and takes input normally. Free-form spans the
+  // whole work area, so placement policy cannot move it anywhere wrong and
+  // it stays a normal window.
+  const linuxDock = process.platform === 'linux' && s.dock !== 'free';
   win = new BrowserWindow({
     ...computeBounds(),
+    ...(linuxDock ? { type: 'dock' } : {}),
     frame: false,
     transparent: true,
     resizable: false,
@@ -434,7 +454,21 @@ function updateSettings(patch) {
       if (!s.alwaysOnTop) sinkToDesktop();
     }
     if ('opacity' in patch) win.setOpacity(Math.max(0.3, Math.min(1, s.opacity)));
-    if ('dock' in patch || 'width' in patch || 'dockDisplay' in patch) { applyBounds(); applyInputModel(); }
+    if ('dock' in patch || 'width' in patch || 'dockDisplay' in patch) {
+      // On Linux the docked sidebar is a different WINDOW TYPE (dock) than
+      // free-form (normal), and X11 window types are fixed at creation -
+      // crossing that line rebuilds the window.
+      if (process.platform === 'linux' && 'dock' in patch
+          && (patch.dock === 'free') !== (before.dock === 'free')) {
+        const old = win;
+        win = null;
+        try { old.destroy(); } catch { /* already gone */ }
+        createWindow();
+      } else {
+        applyBounds();
+        applyInputModel();
+      }
+    }
     win.webContents.send('settings:changed', publicSettings());
   }
   if (patch.telemetry && ('interval' in patch.telemetry || 'metrics' in patch.telemetry)) startTelemetry();
