@@ -45,6 +45,13 @@ let PLUGINS_DIR = null;
 
 app.setAppUserModelId('com.beaero.desktop');
 
+if (process.platform === 'linux') {
+  // Wayland gives apps no say over window position and no global cursor,
+  // which this desktop layer depends on; run on X11/XWayland instead.
+  app.commandLine.appendSwitch('ozone-platform', 'x11');
+  app.commandLine.appendSwitch('enable-transparent-visuals');
+}
+
 // Plugin pages are served over their own scheme rather than file://. A
 // sandboxed file:// frame gets an opaque origin and is then not allowed to
 // load its own scripts; a standard scheme behaves like a normal web origin, so
@@ -209,6 +216,34 @@ function applyBounds() {
   }
 }
 
+// Click-through with a way back. Windows/macOS forward mouse moves to the
+// renderer even while ignoring, so it can reclaim the mouse over a widget.
+// Linux has no forwarding: while ignoring, poll the cursor and hand the
+// renderer window-relative probe points to make the same decision with.
+let mousePollTimer = null;
+function setIgnoreMouse(ignore) {
+  if (!win) return;
+  if (process.platform !== 'linux') {
+    win.setIgnoreMouseEvents(!!ignore, { forward: true });
+    return;
+  }
+  win.setIgnoreMouseEvents(!!ignore);
+  clearInterval(mousePollTimer);
+  mousePollTimer = null;
+  if (ignore) {
+    mousePollTimer = setInterval(() => {
+      if (!win || win.isDestroyed() || !win.isVisible()) return;
+      try {
+        const pt = screen.getCursorScreenPoint();
+        const b = win.getBounds();
+        if (pt.x >= b.x && pt.x < b.x + b.width && pt.y >= b.y && pt.y < b.y + b.height) {
+          win.webContents.send('mouse:probe', { x: pt.x - b.x, y: pt.y - b.y });
+        }
+      } catch { /* display going away */ }
+    }, 120);
+  }
+}
+
 function createWindow() {
   const s = store.get();
   win = new BrowserWindow({
@@ -242,7 +277,7 @@ function createWindow() {
   win.setOpacity(s.opacity);
   // Transparent areas let clicks fall through to the desktop; the renderer
   // turns mouse capture back on whenever the pointer is over a widget.
-  win.setIgnoreMouseEvents(true, { forward: true });
+  setIgnoreMouse(true);
 
   if (!app.isPackaged) {
     // Surface renderer warnings/errors in the terminal during development.
@@ -276,7 +311,12 @@ function createWindow() {
   }
 
   win.loadFile(path.join(ROOT, 'src', 'renderer', 'index.html'));
-  win.once('ready-to-show', () => win.showInactive());
+  win.once('ready-to-show', () => {
+    win.showInactive();
+    // Linux WMs often override the pre-map position of a frameless window
+    // (GNOME centers it); re-assert the computed bounds once it is mapped.
+    if (process.platform === 'linux') setTimeout(() => applyBounds(), 300);
+  });
 
   win.on('close', (e) => {
     if (!isQuitting) {
@@ -344,8 +384,7 @@ function updateSettings(patch) {
   return s;
 }
 
-function rebuildTrayMenu() {
-  if (!tray) return;
+function buildMenuTemplate() {
   const s = store.get();
   const dockItem = (label, value) => ({
     label, type: 'radio', checked: s.dock === value, click: () => updateSettings({ dock: value })
@@ -355,7 +394,7 @@ function rebuildTrayMenu() {
     click: (item) => updateSettings({ widgets: { [key]: item.checked } })
   });
 
-  tray.setContextMenu(Menu.buildFromTemplate([
+  return [
     { label: win && win.isVisible() ? 'Hide BE-Aero Desktop' : 'Show BE-Aero Desktop', click: toggleWindow },
     { label: `Search...${spotlight && spotlight.hotkey ? '\t' + spotlight.hotkey.replace('Control', 'Ctrl') : ''}`,
       click: () => spotlight && spotlight.show() },
@@ -439,8 +478,17 @@ function rebuildTrayMenu() {
     { label: 'Rebuild search index', click: () => spotlight && spotlight.reindex() },
     { label: 'Reload widgets', click: () => win && win.webContents.reload() },
     { label: 'Quit BE-Aero Desktop', click: () => { isQuitting = true; app.quit(); } }
-  ]));
+  ];
 }
+
+function rebuildTrayMenu() {
+  if (!tray) return;
+  tray.setContextMenu(Menu.buildFromTemplate(buildMenuTemplate()));
+}
+
+ipcMain.on('menu:popup', () => {
+  if (win) Menu.buildFromTemplate(buildMenuTemplate()).popup({ window: win });
+});
 
 function createTray() {
   tray = new Tray(loadIcon() || nativeImage.createEmpty());
@@ -457,7 +505,6 @@ function telemetryOpts() {
 // (Re)start sampling at the configured interval.
 function startTelemetry() {
   clearInterval(telemetryTimer);
-  clearInterval(updateTimer);
   telemetry.sample(telemetryOpts()); // prime the CPU / network deltas
   const ms = Math.max(500, Math.min(10000, Number(store.get('telemetry').interval) || 1500));
   telemetryTimer = setInterval(() => {
@@ -1170,9 +1217,7 @@ ipcMain.handle('scratchpad:save-as', async (_e, text) => {
   }
 });
 
-ipcMain.on('window:ignore-mouse', (_e, ignore) => {
-  if (win) win.setIgnoreMouseEvents(!!ignore, { forward: true });
-});
+ipcMain.on('window:ignore-mouse', (_e, ignore) => setIgnoreMouse(ignore));
 ipcMain.on('window:hide', () => { if (win) { win.hide(); rebuildTrayMenu(); } });
 ipcMain.on('app:quit', () => { isQuitting = true; app.quit(); });
 ipcMain.on('search:open', (_e, q) => { if (spotlight) spotlight.show(typeof q === 'string' ? q : ''); });
@@ -1354,6 +1399,8 @@ app.whenReady().then(() => {
 });
 
 app.on('before-quit', () => {
+  clearInterval(updateTimer);
+  clearInterval(mousePollTimer);
   isQuitting = true;
   clearInterval(telemetryTimer);
   clearInterval(updateTimer);

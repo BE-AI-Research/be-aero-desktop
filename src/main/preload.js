@@ -28,6 +28,8 @@ contextBridge.exposeInMainWorld('aero', {
   onTelemetry: (cb) => subscribe('telemetry:update', cb),
 
   setIgnoreMouse: (ignore) => ipcRenderer.send('window:ignore-mouse', ignore),
+  onMouseProbe: (cb) => subscribe('mouse:probe', cb),
+  openMenu: () => ipcRenderer.send('menu:popup'),
   hide: () => ipcRenderer.send('window:hide'),
   quit: () => ipcRenderer.send('app:quit'),
   openExternal: (url) => ipcRenderer.send('shell:open', url),

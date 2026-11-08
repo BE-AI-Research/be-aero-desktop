@@ -23,6 +23,13 @@
     setCapture(!!(el && el.closest('.widget-hit')));
   });
   document.addEventListener('mouseleave', () => { if (!dragging) setCapture(false); });
+  // Linux: no mouse-event forwarding while click-through, so main polls the
+  // cursor and sends window-relative probe points instead.
+  if (aero.onMouseProbe) aero.onMouseProbe(({ x, y }) => {
+    if (dragging || capturing) return;
+    const el = document.elementFromPoint(x, y);
+    if (el && el.closest('.widget-hit')) setCapture(true);
+  });
 
   // Layout: resize grips everywhere, drag-to-move in free-form mode.
   // While a gesture runs, keep capturing mouse input even off the widget.
@@ -339,6 +346,9 @@
   }
   aero.onOpenSettings(openSettings);
   $('btn-settings').addEventListener('click', () => panel.classList.contains('hidden') ? openSettings() : closeSettings());
+  // The full app menu, in-window: desktops without a tray (stock GNOME)
+  // would otherwise lose every tray-only control.
+  $('btn-menu').addEventListener('click', () => aero.openMenu());
   $('btn-close-settings').addEventListener('click', closeSettings);
   $('btn-hide').addEventListener('click', () => { closeSettings(); setCapture(false); aero.hide(); });
   $('btn-quit').addEventListener('click', () => aero.quit());
