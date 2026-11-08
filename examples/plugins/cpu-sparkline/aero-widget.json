@@ -1,0 +1,14 @@
+{
+  "id": "cpu-sparkline",
+  "name": "CPU Sparkline",
+  "version": "1.0.0",
+  "description": "A live CPU sparkline - the smallest useful example of the plugin SDK.",
+  "author": "Aero Widgets",
+  "entry": "index.html",
+  "height": 150,
+  "minHeight": 90,
+  "permissions": ["telemetry", "theme", "storage"],
+  "settings": [
+    { "key": "samples", "label": "History length", "type": "number", "default": 60 }
+  ]
+}

@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Windows 11 Aero-Mica Widgets</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Windows 11 Bloom Inspired Background */
+        body {
+            margin: 0;
+            height: 100vh;
+            background: radial-gradient(circle at 15% 50%, rgba(20, 30, 80, 1), transparent 50%),
+                        radial-gradient(circle at 85% 30%, rgba(40, 10, 60, 1), transparent 50%),
+                        radial-gradient(circle at 50% 80%, rgba(10, 50, 90, 1), transparent 50%);
+            background-color: #0b0f19;
+            overflow: hidden;
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            color: #FAFAFA;
+        }
+
+        /* Aero-Mica Fusion Glass Effect */
+        .widget {
+            background-color: rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(25px) saturate(180%);
+            -webkit-backdrop-filter: blur(25px) saturate(180%);
+            border-radius: 16px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            box-shadow: 
+                0 8px 32px 0 rgba(0, 0, 0, 0.3), /* Deep shadow */
+                inset 0 1px 1px rgba(255, 255, 255, 0.5), /* Top highlight */
+                inset 0 -1px 2px rgba(0, 0, 0, 0.1); /* Bottom shade */
+            background-image: linear-gradient(
+                135deg, 
+                rgba(255, 255, 255, 0.15) 0%, 
+                rgba(255, 255, 255, 0.0) 40%, 
+                rgba(255, 255, 255, 0.02) 100%
+            );
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+
+        .widget:hover {
+            transform: translateY(-2px);
+            box-shadow: 
+                0 12px 40px 0 rgba(0, 0, 0, 0.4),
+                inset 0 1px 1px rgba(255, 255, 255, 0.6),
+                inset 0 -1px 2px rgba(0, 0, 0, 0.1);
+        }
+
+        /* Clock Hands Styling */
+        .clock-hand {
+            transform-origin: bottom center;
+            position: absolute;
+            bottom: 50%;
+            left: 50%;
+            border-radius: 4px;
+        }
+        
+        .hour-hand { width: 4px; height: 35px; background: #fff; margin-left: -2px; }
+        .minute-hand { width: 3px; height: 45px; background: #cbd5e1; margin-left: -1.5px; }
+        .second-hand { width: 2px; height: 50px; background: #38bdf8; margin-left: -1px; }
+        .clock-center {
+            position: absolute;
+            top: 50%; left: 50%;
+            width: 10px; height: 10px;
+            background: #fff;
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            border: 2px solid #38bdf8;
+        }
+
+        /* Gauge Animations */
+        .gauge-track { stroke: rgba(255,255,255,0.1); }
+        .gauge-fill { 
+            stroke: #38bdf8; 
+            transition: stroke-dashoffset 0.5s ease-out;
+        }
+        .gauge-fill-ram { stroke: #c084fc; }
+
+        /* Weather Animations */
+        @keyframes float {
+            0%, 100% { transform: translateY(0px); }
+            50% { transform: translateY(-5px); }
+        }
+        .weather-sun {
+            width: 40px; height: 40px;
+            background: radial-gradient(circle, #fde047, #eab308);
+            border-radius: 50%;
+            box-shadow: 0 0 20px #eab308;
+            animation: float 4s ease-in-out infinite;
+        }
+        .weather-cloud {
+            width: 60px; height: 20px;
+            background: rgba(255,255,255,0.9);
+            border-radius: 20px;
+            position: relative;
+            animation: float 5s ease-in-out infinite reverse;
+        }
+        .weather-cloud::before {
+            content: '';
+            position: absolute;
+            top: -15px; left: 10px;
+            width: 30px; height: 30px;
+            background: rgba(255,255,255,0.9);
+            border-radius: 50%;
+        }
+        
+        /* Custom Scrollbar for Scratchpad */
+        textarea::-webkit-scrollbar { width: 6px; }
+        textarea::-webkit-scrollbar-track { background: transparent; }
+        textarea::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); border-radius: 3px; }
+    </style>
+</head>
+<body class="flex items-start justify-end p-8 gap-6 h-screen w-screen relative">
+
+    <!-- Ambient background decorations -->
+    <div class="absolute top-0 left-0 w-full h-full pointer-events-none opacity-30">
+        <svg viewBox="0 0 100 100" class="w-full h-full">
+            <path d="M0 100 C 20 80, 50 120, 100 80 L 100 100 Z" fill="rgba(56, 189, 248, 0.1)"></path>
+            <path d="M0 100 C 30 60, 60 90, 100 50 L 100 100 Z" fill="rgba(192, 132, 252, 0.05)"></path>
+        </svg>
+    </div>
+
+    <!-- Sidebar Container (Mimicking Vista Sidebar layout on the right) -->
+    <div class="flex flex-col gap-6 w-72 z-10 h-full overflow-y-auto pb-8 pr-2" style="scrollbar-width: none;">
+
+        <!-- Widget 1: Mica Chronometer -->
+        <div class="widget w-full aspect-square flex flex-col items-center justify-center relative">
+            <h3 class="absolute top-3 left-4 text-xs font-semibold text-white/60 tracking-wider">CHRONOMETER</h3>
+            <div class="relative w-40 h-40 rounded-full border border-white/20 shadow-inner bg-white/5 backdrop-blur-md">
+                <!-- Clock markers -->
+                <div class="absolute inset-0 flex items-center justify-center">
+                    <span class="absolute top-2 text-white/40 text-xs">12</span>
+                    <span class="absolute bottom-2 text-white/40 text-xs">6</span>
+                    <span class="absolute left-2 text-white/40 text-xs">9</span>
+                    <span class="absolute right-2 text-white/40 text-xs">3</span>
+                </div>
+                <!-- Hands -->
+                <div id="hour-hand" class="clock-hand hour-hand"></div>
+                <div id="minute-hand" class="clock-hand minute-hand"></div>
+                <div id="second-hand" class="clock-hand second-hand"></div>
+                <div class="clock-center"></div>
+            </div>
+            <div id="digital-clock" class="absolute bottom-4 text-sm font-medium tracking-widest text-white/80"></div>
+        </div>
+
+        <!-- Widget 2: Atmospheric Window (Weather) -->
+        <div class="widget w-full h-36 flex items-center justify-between overflow-hidden relative">
+            <!-- Background atmosphere -->
+            <div class="absolute inset-0 bg-gradient-to-br from-blue-500/20 to-purple-500/20 z-0"></div>
+            
+            <div class="z-10 pl-5">
+                <h3 class="text-xs font-semibold text-white/60 tracking-wider mb-2">SEATTLE, WA</h3>
+                <div class="text-4xl font-light mb-1">68°</div>
+                <div class="text-xs text-blue-200">Partly Cloudy</div>
+                <div class="text-xs text-white/50 mt-1">H: 72° L: 55°</div>
+            </div>
+            
+            <div class="z-10 pr-6 relative h-full flex items-center justify-center w-24">
+                <div class="weather-sun absolute top-6 right-8"></div>
+                <div class="weather-cloud absolute bottom-10 right-4 backdrop-blur-md shadow-lg"></div>
+            </div>
+        </div>
+
+        <!-- Widget 3: Hardware Telemetry Dials -->
+        <div class="widget w-full h-48 flex flex-col p-4">
+            <h3 class="text-xs font-semibold text-white/60 tracking-wider mb-3">SYSTEM TELEMETRY</h3>
+            <div class="flex justify-between w-full h-full">
+                <!-- CPU Dial -->
+                <div class="flex flex-col items-center justify-center w-1/2">
+                    <div class="relative w-24 h-24">
+                        <svg class="w-full h-full transform -rotate-90" viewBox="0 0 100 100">
+                            <circle class="gauge-track" cx="50" cy="50" r="40" stroke-width="8" fill="none" />
+                            <circle id="cpu-gauge" class="gauge-fill" cx="50" cy="50" r="40" stroke-width="8" fill="none" stroke-dasharray="251.2" stroke-dashoffset="251.2" stroke-linecap="round" />
+                        </svg>
+                        <div class="absolute inset-0 flex flex-col items-center justify-center">
+                            <span id="cpu-text" class="text-lg font-bold">0%</span>
+                            <span class="text-[10px] text-white/50">CPU</span>
+                        </div>
+                    </div>
+                </div>
+                <!-- RAM Dial -->
+                <div class="flex flex-col items-center justify-center w-1/2">
+                    <div class="relative w-24 h-24">
+                        <svg class="w-full h-full transform -rotate-90" viewBox="0 0 100 100">
+                            <circle class="gauge-track" cx="50" cy="50" r="40" stroke-width="8" fill="none" />
+                            <circle id="ram-gauge" class="gauge-fill gauge-fill-ram" cx="50" cy="50" r="40" stroke-width="8" fill="none" stroke-dasharray="251.2" stroke-dashoffset="251.2" stroke-linecap="round" />
+                        </svg>
+                        <div class="absolute inset-0 flex flex-col items-center justify-center">
+                            <span id="ram-text" class="text-lg font-bold">0%</span>
+                            <span class="text-[10px] text-white/50">RAM</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Widget 4: Markdown Scratchpad -->
+        <div class="widget w-full h-56 flex flex-col p-0 overflow-hidden">
+            <div class="bg-white/5 border-b border-white/10 p-3 flex justify-between items-center">
+                <h3 class="text-xs font-semibold text-white/60 tracking-wider">SCRATCHPAD</h3>
+                <span class="text-[10px] bg-white/10 px-2 py-0.5 rounded text-white/50">.MD</span>
+            </div>
+            <textarea class="w-full h-full bg-transparent text-sm text-white/90 p-4 outline-none resize-none placeholder-white/30" placeholder="Jot down quick thoughts...&#10;- Supports raw text&#10;- Local session storage"></textarea>
+        </div>
+
+    </div>
+
+    <script>
+        // ---------------------------------------------------------
+        // Clock Logic
+        // ---------------------------------------------------------
+        function updateClock() {
+            const now = new Date();
+            const hours = now.getHours();
+            const minutes = now.getMinutes();
+            const seconds = now.getSeconds();
+
+            // Calculate degrees (adding fractions for smooth sweeping)
+            const secondDeg = (seconds / 60) * 360;
+            const minuteDeg = ((minutes + seconds / 60) / 60) * 360;
+            const hourDeg = ((hours % 12 + minutes / 60) / 12) * 360;
+
+            document.getElementById('second-hand').style.transform = `rotate(${secondDeg}deg)`;
+            document.getElementById('minute-hand').style.transform = `rotate(${minuteDeg}deg)`;
+            document.getElementById('hour-hand').style.transform = `rotate(${hourDeg}deg)`;
+
+            // Update digital text
+            const ampm = hours >= 12 ? 'PM' : 'AM';
+            const h = hours % 12 || 12;
+            const m = minutes.toString().padStart(2, '0');
+            document.getElementById('digital-clock').textContent = `${h}:${m} ${ampm}`;
+        }
+
+        setInterval(updateClock, 1000);
+        updateClock(); // Initial call
+
+        // ---------------------------------------------------------
+        // Telemetry Dials Simulation (Mocking hardware data)
+        // ---------------------------------------------------------
+        const CIRCUMFERENCE = 2 * Math.PI * 40; // r=40 from SVG
+        let currentCpu = 15;
+        let currentRam = 45;
+
+        function updateGauge(id, textId, value) {
+            const gauge = document.getElementById(id);
+            const text = document.getElementById(textId);
+            
+            // Calculate offset (251.2 is the max circumference)
+            const offset = CIRCUMFERENCE - (value / 100) * CIRCUMFERENCE;
+            gauge.style.strokeDashoffset = offset;
+            text.textContent = Math.round(value) + '%';
+        }
+
+        function simulateHardware() {
+            // Add some jitter to CPU to look active
+            const cpuJitter = (Math.random() - 0.5) * 20; 
+            currentCpu = Math.max(2, Math.min(98, currentCpu + cpuJitter));
+            
+            // RAM changes much slower
+            const ramJitter = (Math.random() - 0.5) * 5;
+            currentRam = Math.max(20, Math.min(90, currentRam + ramJitter));
+
+            updateGauge('cpu-gauge', 'cpu-text', currentCpu);
+            updateGauge('ram-gauge', 'ram-text', currentRam);
+        }
+
+        // Initialize and poll
+        updateGauge('cpu-gauge', 'cpu-text', currentCpu);
+        updateGauge('ram-gauge', 'ram-text', currentRam);
+        setInterval(simulateHardware, 1500);
+
+        // ---------------------------------------------------------
+        // Scratchpad Auto-Save (Session specific)
+        // ---------------------------------------------------------
+        const textarea = document.querySelector('textarea');
+        
+        // Load saved content
+        const savedText = sessionStorage.getItem('widget_scratchpad');
+        if (savedText) {
+            textarea.value = savedText;
+        }
+
+        // Save on input
+        textarea.addEventListener('input', (e) => {
+            sessionStorage.setItem('widget_scratchpad', e.target.value);
+        });
+
+    </script>
+</body>
+</html>

@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>CPU Sparkline</title>
+<style>
+  /* --accent and friends are copied in from the host by aero.useHostTheme() */
+  :root { --accent: #38bdf8; --text: #fafafa; --text-rgb: 250, 250, 250; }
+  /* The SDK makes the frame transparent and dark-schemed, so the host's glass
+     shows through. Paint a background here only if you want one. */
+  html, body { margin: 0; height: 100%; overflow: hidden;
+               font-family: 'Segoe UI', system-ui, sans-serif; color: var(--text); }
+  .wrap { height: 100%; display: flex; flex-direction: column; padding: 8px 10px; box-sizing: border-box; }
+  .top { display: flex; align-items: baseline; justify-content: space-between; }
+  .val { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .lbl { font-size: 10px; letter-spacing: 0.08em; color: rgba(var(--text-rgb), 0.5); }
+  svg { flex: 1; min-height: 0; width: 100%; margin-top: 6px; }
+  .err { font-size: 11px; color: #f87171; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="top"><span class="val" id="val">--</span><span class="lbl" id="lbl">CPU</span></div>
+    <svg id="chart" viewBox="0 0 100 40" preserveAspectRatio="none">
+      <path id="area" fill="var(--accent)" fill-opacity="0.22"></path>
+      <path id="line" fill="none" stroke="var(--accent)" stroke-width="1.5" vector-effect="non-scaling-stroke"></path>
+    </svg>
+    <div class="err" id="err"></div>
+  </div>
+
+<script src="aero-sdk.js"></script>
+<script>
+(async () => {
+  try {
+    const info = await aero.ready();
+    document.getElementById('lbl').textContent = `CPU · ${info.name}`;
+    await aero.useHostTheme();
+
+    // "samples" is declared in aero-widget.json, so the user can edit it in
+    // Settings > Extensions; follow their edits without a reload.
+    const conf = await aero.settings.get();
+    let limit = Math.max(10, Math.min(200, Number(conf.samples) || 60));
+    aero.settings.onChange((next) => {
+      limit = Math.max(10, Math.min(200, Number(next.samples) || 60));
+      while (history.length > limit) history.shift();
+    });
+
+    const history = [];
+    const line = document.getElementById('line');
+    const area = document.getElementById('area');
+    const val = document.getElementById('val');
+    const err = document.getElementById('err');
+
+    function draw(t) {
+      history.push(t.cpu);
+      while (history.length > limit) history.shift();
+      val.textContent = `${Math.round(t.cpu)}%`;
+      if (history.length < 2) return;
+      const pts = history.map((v, i) => [(i / (history.length - 1)) * 100, 40 - (v / 100) * 39]);
+      const d = pts.map((p, i) => `${i ? 'L' : 'M'}${p[0].toFixed(2)},${p[1].toFixed(2)}`).join('');
+      line.setAttribute('d', d);
+      area.setAttribute('d', `${d}L100,40L0,40Z`);
+    }
+
+    let stop = null;
+    async function connect() {
+      if (stop) return;
+      try {
+        stop = aero.telemetry.subscribe(draw);
+        err.textContent = '';
+      } catch (e) {
+        err.textContent = 'Telemetry permission needed';
+      }
+    }
+
+    // Permissions belong to the user: follow their decision rather than
+    // assuming the grant we had at startup still holds.
+    aero.permissions.onChange((state) => {
+      if (state.telemetry === 'granted') { connect(); }
+      else { stop = null; history.length = 0; val.textContent = '--';
+             err.textContent = 'Telemetry permission needed'; }
+    });
+
+    if (await aero.permissions.has('telemetry')) connect();
+    else err.textContent = 'Telemetry permission needed';
+  } catch (err) {
+    document.getElementById('err').textContent = err.message;
+  }
+})();
+</script>
+</body>
+</html>

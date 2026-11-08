@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https: http:; connect-src https://api.open-meteo.com https://geocoding-api.open-meteo.com; frame-src aero-plugin: https: http:">
+  <title>BE-Aero Desktop</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="sidebar" class="sidebar">
+
+    <!-- Toolbar: drag handle, settings, hide -->
+    <div class="toolbar widget-hit" id="toolbar" data-key="toolbar">
+      <div class="drag-handle" id="drag-handle" title="Free-form mode: drag widgets anywhere">
+        <span class="grip"></span><span class="app-name">BE-AERO DESKTOP</span>
+      </div>
+      <button class="icon-btn" id="btn-settings" title="Settings">&#9881;</button>
+      <button class="icon-btn" id="btn-hide" title="Hide (Ctrl+Alt+W)">&#8212;</button>
+    </div>
+
+    <!-- Widget 0: Aero Search (opens the Spotlight-style launcher) -->
+    <section class="widget widget-hit search-widget" data-widget="search">
+      <svg class="search-glass" viewBox="0 0 24 24" aria-hidden="true">
+        <circle cx="10.5" cy="10.5" r="6.5" fill="none" stroke="currentColor" stroke-width="2"/>
+        <line x1="15.5" y1="15.5" x2="21" y2="21" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+      </svg>
+      <input id="search-input" type="text" autocomplete="off" spellcheck="false" placeholder="Search apps, files, settings and more!">
+      <kbd id="search-kbd">Alt+Space</kbd>
+    </section>
+
+    <!-- Widget 1: Chronometer (style is rendered by clock.js) -->
+    <section class="widget widget-hit clock-widget" data-widget="clock">
+      <h3 class="widget-title abs-title">CHRONOMETER</h3>
+      <div id="clock-face" class="clock-face"></div>
+    </section>
+
+    <!-- Widget 2: Atmospheric Window (Weather) -->
+    <section class="widget widget-hit weather-widget" data-widget="weather">
+      <div class="weather-atmosphere" id="weather-atmosphere"></div>
+      <div class="weather-main">
+        <div class="weather-info">
+          <h3 class="widget-title" id="weather-location">SEATTLE, WA</h3>
+          <div class="weather-temp" id="weather-temp">--°</div>
+          <div class="weather-desc" id="weather-desc">Loading...</div>
+          <div class="weather-hilo" id="weather-hilo">H: --° L: --°</div>
+        </div>
+        <div class="weather-art" id="weather-art">
+          <div class="weather-sun"></div>
+          <div class="weather-cloud"></div>
+        </div>
+      </div>
+      <!-- 7-day strip: only revealed once the widget is tall enough (CSS). -->
+      <div class="weather-forecast" id="weather-forecast"></div>
+    </section>
+
+    <!-- Widget 3: System telemetry (rendered by telemetry-view.js) -->
+    <section class="widget widget-hit telemetry-widget" data-widget="telemetry">
+      <h3 class="widget-title">SYSTEM TELEMETRY</h3>
+      <div id="telemetry-body" class="telemetry-body"></div>
+      <div id="telemetry-cores" class="telemetry-cores"></div>
+      <div class="telemetry-foot" id="telemetry-foot"></div>
+    </section>
+
+    <!-- Widget: Application dock (rendered by tasks-view.js) -->
+    <section class="widget widget-hit tasks-widget" data-widget="tasks">
+      <div id="task-list" class="dock-bar"></div>
+    </section>
+
+    <!-- Widget 4: Markdown Scratchpad -->
+    <section class="widget widget-hit scratch-widget" data-widget="scratchpad">
+      <div class="scratch-head">
+        <h3 class="widget-title">SCRATCHPAD</h3>
+        <button class="icon-btn scratch-save" id="btn-scratch-save" title="Save this note to a file">
+          <svg viewBox="0 0 16 16" aria-hidden="true" width="12" height="12">
+            <path fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"
+                  d="M2.5 2.5h8.5l2.5 2.5v8.5h-11zM5 2.5v3.5h5V2.5M4.5 13.5V9h7v4.5"/>
+          </svg>SAVE</button>
+        <span class="badge" id="scratch-status">.MD</span>
+      </div>
+      <textarea id="scratchpad" spellcheck="false"
+                placeholder="Jot down quick thoughts...&#10;- Supports raw text&#10;- Saved automatically"></textarea>
+    </section>
+
+  </div>
+
+  <!-- Settings panel -->
+  <div id="settings" class="settings widget widget-hit hidden">
+    <div class="settings-head">
+      <h3 class="widget-title">SETTINGS</h3>
+      <button class="icon-btn" id="btn-close-settings" title="Close">&#10005;</button>
+    </div>
+    <div class="settings-body">
+
+      <details open data-section="layout">
+        <summary>Layout</summary>
+        <label class="field-label">Position</label>
+        <select id="set-dock">
+          <option value="right">Dock right</option>
+          <option value="left">Dock left</option>
+          <option value="free">Free-form (drag widgets anywhere)</option>
+        </select>
+        <div id="dock-display-row" class="hidden">
+          <label class="field-label">Dock on display</label>
+          <select id="set-dock-display"></select>
+        </div>
+        <p class="hint">Drag the corner grip of any widget to resize it. In free-form mode drag a widget by its body to move it - onto any monitor.</p>
+        <label class="check"><input id="set-snap" type="checkbox"> Snap to grid while moving</label>
+        <label class="check"><input id="set-locked" type="checkbox"> Lock widgets in place (no drag or resize)</label>
+        <label class="check"><input id="set-top" type="checkbox"> Float above all windows (otherwise widgets sit on the desktop, behind apps)</label>
+        <label class="field-label">Opacity <span id="opacity-val"></span></label>
+        <input id="set-opacity" type="range" min="30" max="100" step="5">
+        <button class="btn" id="btn-reset-layout">Reset widget sizes &amp; positions</button>
+        <label class="field-label">Layout &amp; settings file</label>
+        <div class="hint-text">Everything - layout, pins, themes, trusted certificates - lives in settings.json
+          in your profile, untouched by app updates. A backup copy is kept automatically at every start.</div>
+        <div class="row">
+          <button class="btn" id="btn-settings-export">Export...</button>
+          <button class="btn" id="btn-settings-import">Import...</button>
+        </div>
+      </details>
+
+      <details data-section="theme">
+        <summary>Theme</summary>
+        <div id="theme-swatches" class="theme-swatches"></div>
+        <label class="field-label">Glass tint</label>
+        <div class="row"><input type="color" data-theme="tint"><input type="range" data-theme="tintAlpha" min="0" max="0.95" step="0.01" title="Tint strength"></div>
+        <label class="field-label">Accent colour</label>
+        <input type="color" data-theme="accent">
+        <label class="field-label">Text colour</label>
+        <input type="color" data-theme="text">
+        <label class="field-label">Border brightness</label>
+        <input type="range" data-theme="border" min="0" max="0.8" step="0.01">
+        <label class="field-label">Highlight sheen</label>
+        <input type="range" data-theme="glow" min="0" max="0.6" step="0.01">
+        <label class="field-label">Corner radius</label>
+        <input type="range" data-theme="radius" min="0" max="32" step="1">
+        <button class="btn" id="btn-theme-reset">Reset to preset colours</button>
+      </details>
+
+      <details data-section="clock">
+        <summary>Clock</summary>
+        <label class="field-label">Style</label>
+        <select id="set-clock-style">
+          <option value="analog">Analog</option>
+          <option value="classic">Classic (all numerals)</option>
+          <option value="minimal">Minimal ticks</option>
+          <option value="hybrid">Hybrid (dial + digital)</option>
+          <option value="digital">Digital</option>
+          <option value="flip">Flip clock</option>
+          <option value="rings">Rings</option>
+        </select>
+        <label class="check"><input id="set-clock-digital" type="checkbox"> Digital readout on analog dials</label>
+        <label class="check"><input id="set-clock-seconds" type="checkbox"> Show seconds</label>
+        <label class="check"><input id="set-clock-date" type="checkbox"> Show date</label>
+        <label class="check"><input id="set-clock-smooth" type="checkbox"> Smooth sweeping second hand</label>
+        <label class="check"><input id="set-24h" type="checkbox"> 24-hour clock</label>
+        <label class="field-label">Clock accent <button class="link-btn" id="btn-clock-accent-reset">use theme</button></label>
+        <input type="color" id="set-clock-accent">
+      </details>
+
+      <details data-section="telemetry">
+        <summary>System telemetry</summary>
+        <label class="field-label">Style</label>
+        <select id="set-tel-style">
+          <option value="rings">Rings</option>
+          <option value="arcs">Speedometer arcs</option>
+          <option value="bars">Bars</option>
+          <option value="graph">Live graphs</option>
+          <option value="compact">Compact chips</option>
+        </select>
+        <label class="field-label">Metrics &amp; colours</label>
+        <div class="metric-grid">
+          <label class="check"><input type="checkbox" data-metric="cpu"> CPU</label><input type="color" data-metric-color="cpu">
+          <label class="check"><input type="checkbox" data-metric="ram"> Memory</label><input type="color" data-metric-color="ram">
+          <label class="check"><input type="checkbox" data-metric="disk"> Disk</label><input type="color" data-metric-color="disk">
+          <label class="check"><input type="checkbox" data-metric="net"> Network</label><input type="color" data-metric-color="net">
+          <label class="check"><input type="checkbox" data-metric="battery"> Battery</label><input type="color" data-metric-color="battery">
+        </div>
+        <label class="field-label">Disk drive</label>
+        <input id="set-tel-drive" type="text" maxlength="2" placeholder="C:">
+        <label class="check"><input id="set-tel-cores" type="checkbox"> Per-core CPU heatmap</label>
+        <label class="check"><input id="set-tel-values" type="checkbox"> Show values</label>
+        <label class="check"><input id="set-tel-footer" type="checkbox"> Show details footer</label>
+        <label class="field-label">Update every</label>
+        <select id="set-tel-interval">
+          <option value="500">0.5 s</option>
+          <option value="1000">1 s</option>
+          <option value="1500">1.5 s</option>
+          <option value="3000">3 s</option>
+          <option value="5000">5 s</option>
+        </select>
+        <label class="field-label">Graph history <span id="tel-history-val"></span></label>
+        <input id="set-tel-history" type="range" min="20" max="180" step="10">
+        <label class="field-label">Warning threshold <span id="tel-warn-val"></span></label>
+        <input id="set-tel-warn" type="range" min="50" max="100" step="5">
+        <label class="field-label">Line thickness <span id="tel-thick-val"></span></label>
+        <input id="set-tel-thickness" type="range" min="2" max="16" step="1">
+      </details>
+
+      <details data-section="weather">
+        <summary>Weather</summary>
+        <label class="check"><input id="set-forecast" type="checkbox"> 7-day forecast</label>
+        <div class="hint-text">Shown when the weather widget is tall enough - drag its corner grip down.</div>
+        <label class="field-label">Location</label>
+        <div class="row">
+          <input id="set-city" type="text" placeholder="City name, e.g. London">
+          <button class="btn" id="btn-find-city">Find</button>
+        </div>
+        <div id="city-results" class="city-results"></div>
+        <label class="field-label">Temperature unit</label>
+        <select id="set-unit">
+          <option value="fahrenheit">Fahrenheit (°F)</option>
+          <option value="celsius">Celsius (°C)</option>
+        </select>
+      </details>
+
+      <details data-section="general">
+        <summary>Search &amp; general</summary>
+        <label class="field-label">Search hotkey</label>
+        <div class="row">
+          <input id="set-hotkey" class="hotkey-input" readonly spellcheck="false"
+                 placeholder="Click, then press a combination">
+          <button class="btn" id="btn-hotkey-reset" title="Back to Alt + Space">Reset</button>
+        </div>
+        <div class="hint-text" id="hotkey-status">Click the box and press any combination, e.g. Ctrl + Alt + K.</div>
+        <label class="field-label">Web search engine</label>
+        <select id="set-web-engine">
+          <option value="bing">Bing</option>
+          <option value="google">Google</option>
+          <option value="duckduckgo">DuckDuckGo</option>
+          <option value="brave">Brave Search</option>
+        </select>
+        <div class="hint-text">Opens in whichever browser Windows has set as default.</div>
+        <label class="check"><input id="set-startup" type="checkbox"> Launch at Windows startup</label>
+        <label class="check"><input id="set-update-notify" type="checkbox"> Notify me when a new release is available</label>
+        <div class="row">
+          <button class="btn" id="btn-check-updates">Check for updates</button>
+        </div>
+        <div class="hint-text" id="update-status"></div>
+        <label class="field-label">Visible widgets</label>
+        <label class="check"><input type="checkbox" data-toggle="search"> Search bar</label>
+        <label class="check"><input type="checkbox" data-toggle="clock"> Chronometer</label>
+        <label class="check"><input type="checkbox" data-toggle="weather"> Weather</label>
+        <label class="check"><input type="checkbox" data-toggle="telemetry"> System telemetry</label>
+        <label class="check"><input type="checkbox" data-toggle="tasks"> Application dock</label>
+        <label class="field-label">Dock icon alignment</label>
+        <select id="set-dock-align">
+          <option value="left">Left</option>
+          <option value="center">Center</option>
+          <option value="right">Right</option>
+        </select>
+        <label class="check"><input type="checkbox" data-toggle="scratchpad"> Scratchpad</label>
+      </details>
+
+      <details data-section="extensions">
+        <summary>Extensions</summary>
+        <label class="field-label">Plugin widgets</label>
+        <div id="plugin-list" class="plugin-list"></div>
+        <div class="row">
+          <button class="btn" id="btn-plugins-folder">Open plugins folder</button>
+          <button class="btn" id="btn-plugins-reload">Reload</button>
+        </div>
+        <div class="hint-text">Drop a plugin folder in there, then Reload. See docs/SDK.md to write one.</div>
+
+        <label class="field-label">App API</label>
+        <label class="check"><input id="set-api" type="checkbox"> Let local apps push widget panes</label>
+        <div class="hint-text" id="api-status">Off.</div>
+        <div class="api-token hidden" id="api-token"></div>
+        <button class="btn hidden" id="btn-api-token">New pairing code</button>
+        <label class="field-label">Connected programs</label>
+        <div id="app-list" class="plugin-list"></div>
+
+        <label class="field-label">Web widgets</label>
+        <div class="hint-text">Turn any web page into a widget - a dashboard, a status page, a LAN device.
+          Some sites refuse to be embedded and will stay blank.</div>
+        <input id="webw-name" type="text" spellcheck="false" placeholder="Name (optional)">
+        <div class="row">
+          <input id="webw-url" type="text" spellcheck="false" placeholder="https://example.com or http://192.168.1.10">
+          <button class="btn" id="btn-webw-add">Add</button>
+        </div>
+        <div class="hint-text" id="webw-status"></div>
+        <div id="webw-list" class="plugin-list"></div>
+      </details>
+
+      <div class="settings-foot">
+        <span id="app-version"></span>
+        <button class="btn btn-danger" id="btn-quit">Quit</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="../shared/hotkey.js"></script>
+  <script src="../shared/weburl.js"></script>
+  <script src="../shared/displays.js"></script>
+  <script src="../shared/dock.js"></script>
+  <script src="clock.js"></script>
+  <script src="telemetry-view.js"></script>
+  <script src="extensions.js"></script>
+  <script src="tasks-view.js"></script>
+  <script src="layout.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

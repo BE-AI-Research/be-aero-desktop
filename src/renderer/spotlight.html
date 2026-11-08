@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:">
+  <title>Aero Search</title>
+  <link rel="stylesheet" href="spotlight.css">
+</head>
+<body>
+  <div class="panel" id="panel">
+    <div class="bar">
+      <svg class="glass" viewBox="0 0 24 24" aria-hidden="true">
+        <circle cx="10.5" cy="10.5" r="6.5" fill="none" stroke="currentColor" stroke-width="2"/>
+        <line x1="15.5" y1="15.5" x2="21" y2="21" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+      </svg>
+      <div class="input-wrap">
+        <div class="ghost" id="ghost"></div>
+        <input id="q" type="text" autocomplete="off" spellcheck="false" placeholder="Aero Search">
+      </div>
+      <span class="hint" id="hint"></span>
+    </div>
+    <div class="body hidden" id="body">
+      <div class="results" id="results"></div>
+      <div class="preview" id="preview"></div>
+    </div>
+    <div class="foot hidden" id="foot">
+      <span><kbd>↑</kbd><kbd>↓</kbd> navigate</span>
+      <span><kbd>Enter</kbd> open</span>
+      <span><kbd>Ctrl</kbd>+<kbd>Enter</kbd> show in folder</span>
+      <span><kbd>Tab</kbd> complete</span>
+      <span><kbd>Esc</kbd> close</span>
+      <span class="stats" id="stats"></span>
+    </div>
+  </div>
+  <script src="spotlight.js"></script>
+</body>
+</html>
