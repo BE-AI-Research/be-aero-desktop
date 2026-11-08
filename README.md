@@ -11,14 +11,14 @@ A Windows 11 "Aero-Mica" desktop platform - widget sidebar, application dock, Sp
 **Windows** (PowerShell) - downloads the installer from the latest release and runs it:
 
 ```powershell
-curl.exe -fsSLO https://github.com/BE-AI-Research/be-aero-desktop/releases/latest/download/BE-Aero.Desktop.Setup.1.0.0.exe
-.\BE-Aero.Desktop.Setup.1.0.0.exe
+curl.exe -fsSLO https://github.com/BE-AI-Research/be-aero-desktop/releases/latest/download/BE-Aero-Desktop-Setup-1.0.0.exe
+.\BE-Aero-Desktop-Setup-1.0.0.exe
 ```
 
 Prefer no install? Grab the portable build instead and just run it:
 
 ```powershell
-curl.exe -fsSLO https://github.com/BE-AI-Research/be-aero-desktop/releases/latest/download/BE-Aero.Desktop.1.0.0.exe
+curl.exe -fsSLO https://github.com/BE-AI-Research/be-aero-desktop/releases/latest/download/BE-Aero-Desktop-1.0.0.exe
 ```
 
 **Linux** - downloads the latest release and installs it to `/opt` with a menu entry and CLI shim:

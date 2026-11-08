@@ -34,15 +34,16 @@ Authenticode signature (or SHA-256 hash) — a swapped binary loses its access.
 the desktop layer behind your apps (or float on top if you prefer), tray menu with
 per-widget toggles, launch at startup.
 
-**Updates** — the app checks GitHub releases and notifies you when a newer build is
-published here. Notify-only: you choose when to download.
+**Updates** — the installed Windows build keeps itself up to date: new releases
+download in the background, are hash-verified, and apply automatically (toggleable
+in Settings). Portable and Linux builds notify and link here instead.
 
 ## Downloads
 
 | File | What it is |
 | --- | --- |
-| `BE-Aero Desktop Setup 1.0.0.exe` | Windows installer (Start Menu entry, uninstaller) |
-| `BE-Aero Desktop 1.0.0.exe` | Windows portable — run it from anywhere, no install |
+| `BE-Aero-Desktop-Setup-1.0.0.exe` | Windows installer (Start Menu entry, uninstaller) |
+| `BE-Aero-Desktop-1.0.0.exe` | Windows portable — run it from anywhere, no install |
 | `be-aero-desktop-1.0.0.tar.gz` | Linux build |
 | `install-linux.sh` | One-shot Linux installer (`sudo ./install-linux.sh be-aero-desktop-1.0.0.tar.gz`) |
 
