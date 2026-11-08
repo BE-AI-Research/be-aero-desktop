@@ -58,7 +58,9 @@ function linuxDesktopEntry(execPath) {
     'Type=Application',
     'Name=BE-Aero Desktop',
     'Comment=Desktop widget sidebar: clock, weather, telemetry, dock, web widgets',
-    `Exec="${execPath}"`,
+    // The Ozone platform must be chosen on the command line: under a
+    // Wayland session the app is unusable as a native Wayland client.
+    `Exec="${execPath}" --ozone-platform=x11`,
     'Icon=be-aero-desktop',
     'Terminal=false',
     'X-GNOME-Autostart-enabled=true',

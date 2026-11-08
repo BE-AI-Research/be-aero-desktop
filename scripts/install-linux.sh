@@ -60,7 +60,14 @@ chmod 755 "$APP_DIR/be-aero-desktop" "$APP_DIR/chrome_crashpad_handler"
 chown root:root "$APP_DIR/chrome-sandbox"
 chmod 4755 "$APP_DIR/chrome-sandbox"   # Chromium's setuid sandbox helper
 
-ln -sf "$APP_DIR/be-aero-desktop" "$BIN_LINK"
+# A wrapper, not a symlink: the Ozone platform flag has to be on the real
+# command line (Electron picks X11 vs Wayland before app code runs, and as
+# a native Wayland client the app cannot position itself or shape input).
+cat > "$BIN_LINK" <<'SHIM'
+#!/bin/sh
+exec /opt/be-aero-desktop/be-aero-desktop --ozone-platform=x11 "$@"
+SHIM
+chmod 755 "$BIN_LINK"
 
 install -Dm644 "$APP_DIR/resources/app.asar.unpacked/build/icon.png" "$ICON" 2>/dev/null \
   || install -Dm644 "$APP_DIR/resources/icon.png" "$ICON" 2>/dev/null \
@@ -70,7 +77,7 @@ cat > "$DESKTOP" <<DESK
 [Desktop Entry]
 Name=BE-Aero Desktop
 Comment=Desktop widget sidebar: clock, weather, telemetry, dock, web widgets
-Exec=$APP_DIR/be-aero-desktop %U
+Exec=$APP_DIR/be-aero-desktop --ozone-platform=x11 %U
 Icon=be-aero-desktop
 Terminal=false
 Type=Application

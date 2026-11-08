@@ -45,11 +45,21 @@ let PLUGINS_DIR = null;
 
 app.setAppUserModelId('com.beaero.desktop');
 
+const OZONE_X11 = process.argv.some((a) => a.startsWith('--ozone-platform'));
 if (process.platform === 'linux') {
-  // Wayland gives apps no say over window position and no global cursor,
-  // which this desktop layer depends on; run on X11/XWayland instead.
-  app.commandLine.appendSwitch('ozone-platform', 'x11');
   app.commandLine.appendSwitch('enable-transparent-visuals');
+  // Wayland gives apps no say over window position, and every X11 facility
+  // this desktop layer uses (dock window type, input shapes) is a silent
+  // no-op there. Chromium picks its Ozone platform BEFORE this script runs,
+  // so appendSwitch cannot force X11 - the flag must be on the real command
+  // line. The installer puts it in the launcher and CLI wrapper; for every
+  // other way of starting the binary, relaunch ourselves once with it.
+  if (!OZONE_X11
+      && !process.argv.includes('--doctor')
+      && (process.env.XDG_SESSION_TYPE === 'wayland' || process.env.WAYLAND_DISPLAY)) {
+    app.relaunch({ args: process.argv.slice(1).concat(['--ozone-platform=x11']) });
+    app.exit(0);
+  }
 }
 
 // Plugin pages are served over their own scheme rather than file://. A
@@ -76,7 +86,10 @@ if (DOCTOR) {
       sessionType: process.env.XDG_SESSION_TYPE || null,
       waylandDisplay: process.env.WAYLAND_DISPLAY || null,
       desktop: process.env.XDG_CURRENT_DESKTOP || null,
-      ozoneForcedX11: process.platform === 'linux',
+      ozonePlatform: OZONE_X11 ? 'x11 (forced via command line)'
+        : (process.env.XDG_SESSION_TYPE === 'wayland' || process.env.WAYLAND_DISPLAY)
+          ? 'WAYLAND (native - positioning/input shaping unavailable; launch with --ozone-platform=x11)'
+          : 'x11 (native session)',
       setShapeAvailable: typeof probe.setShape === 'function',
       displays: screen.getAllDisplays().map((d) => ({
         id: d.id, bounds: d.bounds, workArea: d.workArea, scaleFactor: d.scaleFactor
@@ -1416,7 +1429,7 @@ app.whenReady().then(() => {
   if (DOCTOR) return; // the diagnostics handler owns this run
   if (process.platform === 'linux') {
     // One greppable line saying what the app decided about this session.
-    console.log(`[linux] session=${process.env.XDG_SESSION_TYPE || '?'} desktop=${process.env.XDG_CURRENT_DESKTOP || '?'} ozone=x11-forced (run --doctor for the full report)`);
+    console.log(`[linux] session=${process.env.XDG_SESSION_TYPE || '?'} desktop=${process.env.XDG_CURRENT_DESKTOP || '?'} ozone=${OZONE_X11 ? 'x11(argv)' : 'default'} (run --doctor for the full report)`);
   }
   migrateFromAeroWidgets();
   store = new Store();
