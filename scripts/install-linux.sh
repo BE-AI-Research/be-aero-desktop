@@ -35,6 +35,12 @@ rm -rf "$APP_DIR"
 mkdir -p "$APP_DIR"
 tar -xzf "$TARBALL" -C "$APP_DIR" --strip-components=1
 
+# The tarball is produced on Windows, which has no Unix permission bits, so
+# every file arrives mode 644 - the app would be unlaunchable without this.
+chmod 755 "$APP_DIR/be-aero-desktop" "$APP_DIR/chrome_crashpad_handler"
+chown root:root "$APP_DIR/chrome-sandbox"
+chmod 4755 "$APP_DIR/chrome-sandbox"   # Chromium's setuid sandbox helper
+
 ln -sf "$APP_DIR/be-aero-desktop" "$BIN_LINK"
 
 install -Dm644 "$APP_DIR/resources/app.asar.unpacked/build/icon.png" "$ICON" 2>/dev/null \
@@ -54,5 +60,6 @@ StartupWMClass=BE-Aero Desktop
 DESK
 
 command -v update-desktop-database >/dev/null && update-desktop-database || true
+command -v gtk-update-icon-cache >/dev/null && gtk-update-icon-cache -f /usr/share/icons/hicolor 2>/dev/null || true
 echo "Done. Launch 'BE-Aero Desktop' from your app menu, or run: be-aero-desktop"
 echo "Uninstall any time with: sudo $0 --uninstall"

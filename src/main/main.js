@@ -306,11 +306,11 @@ function toggleWindow() {
   rebuildTrayMenu();
 }
 
-function setLaunchAtStartup(enabled) {
+function setLaunchAtStartup() {
+  // Reconcile rather than set: re-assert the correct Run entry when enabled
+  // and sweep stale ones (old identities, old install paths) every time.
   // Only meaningful in the packaged build; in dev it would register electron.exe.
-  if (app.isPackaged) {
-    app.setLoginItemSettings({ openAtLogin: enabled, path: process.execPath });
-  }
+  require('./startup').reconcileStartupRegistration({ app, store });
 }
 
 // Apply a settings patch and push the result to the renderer.
@@ -338,7 +338,7 @@ function updateSettings(patch) {
     if ('extraRoots' in patch.search) spotlight.reindex();
   }
   if ('launchAtStartup' in patch && patch.launchAtStartup !== before.launchAtStartup) {
-    setLaunchAtStartup(s.launchAtStartup);
+    setLaunchAtStartup();
   }
   rebuildTrayMenu();
   return s;
@@ -432,7 +432,7 @@ function rebuildTrayMenu() {
     ] },
     { label: 'Always on top', type: 'checkbox', checked: s.alwaysOnTop,
       click: (item) => updateSettings({ alwaysOnTop: item.checked }) },
-    { label: 'Launch at Windows startup', type: 'checkbox', checked: s.launchAtStartup,
+    { label: 'Launch at startup', type: 'checkbox', checked: s.launchAtStartup,
       enabled: app.isPackaged,
       click: (item) => updateSettings({ launchAtStartup: item.checked }) },
     { type: 'separator' },
@@ -1265,6 +1265,10 @@ app.whenReady().then(() => {
   createWindow();
   createTray();
   startTelemetry();
+  // Heal launch-at-startup on every boot: the registered path rots whenever
+  // the exe moves (reinstall, rename, dev->installed), so re-assert it and
+  // drop any stale entries instead of trusting a one-time registration.
+  setLaunchAtStartup();
   globalShortcut.register(TOGGLE_SHORTCUT, toggleWindow);
   spotlight = new Spotlight({ store, root: ROOT });
   spotlight.init();
