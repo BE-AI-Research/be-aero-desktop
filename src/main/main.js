@@ -557,10 +557,23 @@ ipcMain.on('menu:popup', () => {
 });
 
 function createTray() {
-  tray = new Tray(loadIcon() || nativeImage.createEmpty());
-  tray.setToolTip(`BE-Aero Desktop  (${TOGGLE_SHORTCUT.replace('Control', 'Ctrl')} to toggle)`);
-  tray.on('click', toggleWindow);
-  rebuildTrayMenu();
+  // The tray is optional: stock GNOME has no tray host at all, and GTK's
+  // status-icon path is historically assert-happy. The toolbar's menu
+  // button carries the same menu, so a tray failure must never hurt boot.
+  try {
+    const icon = loadIcon();
+    if (!icon && process.platform === 'linux') {
+      console.warn('[tray] no icon found; skipping tray (menu lives in the toolbar)');
+      return;
+    }
+    tray = new Tray(icon || nativeImage.createEmpty());
+    tray.setToolTip(`BE-Aero Desktop  (${TOGGLE_SHORTCUT.replace('Control', 'Ctrl')} to toggle)`);
+    tray.on('click', toggleWindow);
+    rebuildTrayMenu();
+  } catch (err) {
+    console.warn('[tray] unavailable:', err.message);
+    tray = null;
+  }
 }
 
 function telemetryOpts() {
@@ -1367,6 +1380,10 @@ function migrateFromAeroWidgets() {
 
 app.whenReady().then(() => {
   if (DOCTOR) return; // the diagnostics handler owns this run
+  if (process.platform === 'linux') {
+    // One greppable line saying what the app decided about this session.
+    console.log(`[linux] session=${process.env.XDG_SESSION_TYPE || '?'} desktop=${process.env.XDG_CURRENT_DESKTOP || '?'} ozone=x11-forced (run --doctor for the full report)`);
+  }
   migrateFromAeroWidgets();
   store = new Store();
 
