@@ -9,6 +9,7 @@
 # Uninstall later with:  sudo ./install-linux.sh --uninstall
 set -euo pipefail
 
+main() {
 APP_DIR=/opt/be-aero-desktop
 BIN_LINK=/usr/local/bin/be-aero-desktop
 DESKTOP=/usr/share/applications/be-aero-desktop.desktop
@@ -51,10 +52,12 @@ trap '[[ -n "$CLEANUP" ]] && rm -rf "$CLEANUP"' EXIT
 
 echo "Installing to $APP_DIR ..."
 # A running copy would keep its single-instance lock while its files vanish
-# underneath it - every later launch would then quit silently. Stop it first.
+# underneath it - every later launch would then quit silently. Stop it first,
+# escalating to SIGKILL for a copy too wedged to honour SIGTERM.
 if pkill -f "$APP_DIR/be-aero-desktop" 2>/dev/null; then
   echo "(stopped the running BE-Aero Desktop)"
   sleep 1
+  pkill -9 -f "$APP_DIR/be-aero-desktop" 2>/dev/null && sleep 1 || true
 fi
 rm -rf "$APP_DIR"
 mkdir -p "$APP_DIR"
@@ -94,4 +97,7 @@ DESK
 command -v update-desktop-database >/dev/null && update-desktop-database || true
 command -v gtk-update-icon-cache >/dev/null && gtk-update-icon-cache -f /usr/share/icons/hicolor 2>/dev/null || true
 echo "Done. Launch 'BE-Aero Desktop' from your app menu, or run: be-aero-desktop"
-echo "Uninstall any time with: sudo $0 --uninstall"
+echo "Uninstall any time with: sudo bash install-linux.sh --uninstall"
+}
+
+main "$@"

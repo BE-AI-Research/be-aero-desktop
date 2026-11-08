@@ -124,8 +124,19 @@ function clearStaleLinuxInstances() {
   } catch { /* no /proc */ }
   if (killed) {
     console.log(`[linux] stopped ${killed} stale instance(s) left over from a reinstall`);
-    // Give the lock a moment to be released before we ask for it.
+    // Give the lock a moment to be released; a copy too wedged to honour
+    // SIGTERM gets SIGKILL, then the same grace again.
     Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 800);
+    let forced = 0;
+    for (const n of fs.readdirSync('/proc')) {
+      if (!/^\d+$/.test(n) || Number(n) === process.pid) continue;
+      let exe;
+      try { exe = fs.readlinkSync(`/proc/${n}/exe`); } catch { continue; }
+      if (/be-aero-desktop[^/]*\s\(deleted\)$/.test(exe)) {
+        try { process.kill(Number(n), 'SIGKILL'); forced++; } catch { /* gone */ }
+      }
+    }
+    if (forced) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 800);
   }
 }
 
