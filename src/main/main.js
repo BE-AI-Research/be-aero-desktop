@@ -47,6 +47,7 @@ let PLUGINS_DIR = null;
 app.setAppUserModelId('com.beaero.desktop');
 
 const OZONE_X11 = process.argv.some((a) => a.startsWith('--ozone-platform'));
+let RELAUNCHING = false;
 if (process.platform === 'linux') {
   app.commandLine.appendSwitch('enable-transparent-visuals');
   // Wayland gives apps no say over window position, and every X11 facility
@@ -58,6 +59,7 @@ if (process.platform === 'linux') {
   if (!OZONE_X11
       && !process.argv.includes('--doctor')
       && (process.env.XDG_SESSION_TYPE === 'wayland' || process.env.WAYLAND_DISPLAY)) {
+    RELAUNCHING = true;
     app.relaunch({ args: process.argv.slice(1).concat(['--ozone-platform=x11']) });
     app.exit(0);
   }
@@ -102,7 +104,40 @@ if (DOCTOR) {
   });
 }
 
-if (!DOCTOR && !app.requestSingleInstanceLock()) {
+// A copy whose files were replaced underneath it (reinstall over a running
+// app) keeps running headless and keeps the single-instance lock, so every
+// later launch would quit silently. Linux marks such a process plainly:
+// /proc/<pid>/exe ends in "(deleted)". Clear those before taking the lock.
+function clearStaleLinuxInstances() {
+  if (process.platform !== 'linux') return;
+  const fs = require('fs');
+  let killed = 0;
+  try {
+    for (const n of fs.readdirSync('/proc')) {
+      if (!/^\d+$/.test(n) || Number(n) === process.pid) continue;
+      let exe;
+      try { exe = fs.readlinkSync(`/proc/${n}/exe`); } catch { continue; }
+      if (/be-aero-desktop[^/]*\s\(deleted\)$/.test(exe)) {
+        try { process.kill(Number(n), 'SIGTERM'); killed++; } catch { /* not ours */ }
+      }
+    }
+  } catch { /* no /proc */ }
+  if (killed) {
+    console.log(`[linux] stopped ${killed} stale instance(s) left over from a reinstall`);
+    // Give the lock a moment to be released before we ask for it.
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 800);
+  }
+}
+
+// The relaunching parent must never take the lock its child is about to need.
+if (RELAUNCHING) {
+  // exiting
+} else if (!DOCTOR && (clearStaleLinuxInstances(), !app.requestSingleInstanceLock())) {
+  // Say so: a silent exit here reads as "the app does not launch". If the
+  // other copy is a stale headless one (files replaced underneath it), this
+  // tells the user what to stop.
+  process.stdout.write('BE-Aero Desktop is already running; showing the existing instance. '
+    + 'If nothing appears, stop the stale copy: pkill -f be-aero-desktop\n');
   app.quit();
 } else {
   app.on('second-instance', () => showWindow());

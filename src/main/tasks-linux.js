@@ -150,8 +150,12 @@ class LinuxTasks {
   }
 
   async list() {
+    // The dock polls every couple of seconds; a /proc walk is cheap but there
+    // is no reason to repeat it faster than applications come and go.
+    if (this.listAt && Date.now() - this.listAt < 1500) return this.lastList;
     this.refreshEntries();
     this.lastList = matchProcesses(this.readProcesses(), this.entries);
+    this.listAt = Date.now();
     return this.lastList;
   }
 

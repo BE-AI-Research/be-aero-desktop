@@ -50,6 +50,12 @@ fi
 trap '[[ -n "$CLEANUP" ]] && rm -rf "$CLEANUP"' EXIT
 
 echo "Installing to $APP_DIR ..."
+# A running copy would keep its single-instance lock while its files vanish
+# underneath it - every later launch would then quit silently. Stop it first.
+if pkill -f "$APP_DIR/be-aero-desktop" 2>/dev/null; then
+  echo "(stopped the running BE-Aero Desktop)"
+  sleep 1
+fi
 rm -rf "$APP_DIR"
 mkdir -p "$APP_DIR"
 tar -xzf "$TARBALL" -C "$APP_DIR" --strip-components=1
