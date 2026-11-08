@@ -124,7 +124,12 @@
     }
 
     if (!tiles.length && !minimizedWidgets.length) {
-      el('div', 'tempty', barEl, 'No open applications');
+      // Wayland offers no way to list other applications' windows (that is a
+      // compositor policy, not a bug here), so on Linux the dock is a parking
+      // strip for pins and minimized web widgets rather than a taskbar.
+      el('div', 'tempty', barEl, (aero && aero.platform === 'linux')
+        ? 'Minimized web widgets park here'
+        : 'No open applications');
     }
   }
 

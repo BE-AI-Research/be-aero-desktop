@@ -234,6 +234,15 @@
   searchInput.addEventListener('input', () => { if (searchInput.value) openSearch(); });
   // Once focus actually leaves this window (Spotlight owns it now), reset.
   window.addEventListener('blur', () => { searchInput.value = ''; searchInput.blur(); });
+  // A Linux dock-type window may never blur, so that reset cannot be the
+  // only one: once the handoff gap has safely passed, clear regardless.
+  if (aero.platform === 'linux') {
+    let resetTimer = null;
+    searchInput.addEventListener('input', () => {
+      clearTimeout(resetTimer);
+      resetTimer = setTimeout(() => { searchInput.value = ''; searchInput.blur(); }, 900);
+    });
+  }
   searchInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') openSearch(); });
   document.querySelector('.search-widget').addEventListener('click', (e) => {
     if (e.target !== searchInput) openSearch();

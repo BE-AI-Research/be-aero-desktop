@@ -123,9 +123,16 @@ class Spotlight {
 
   show(query = '') {
     if (!this.win) return;
-    this.position();
-    this.win.show();
-    this.win.focus();
+    // The sidebar resends the query on every keystroke while the handoff
+    // settles. Re-showing and re-focusing an already-visible window each
+    // keystroke is a focus steal per key - on X11/XWayland two windows
+    // fighting for focus at typing speed can wedge the compositor's input.
+    // Only take focus when actually appearing; afterwards, update the query.
+    if (!this.win.isVisible()) {
+      this.position();
+      this.win.show();
+      this.win.focus();
+    }
     this.win.webContents.send('spotlight:show', { query, stats: this.index.stats });
   }
 

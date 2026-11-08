@@ -37,6 +37,7 @@ let pluginErrors = [];
 let panes = null;
 let apiServer = null;
 let peerResolver = null;
+let linuxTasks = null;
 let lastUpdateStatus = { state: 'idle' };
 let updateTimer = null;
 let taskWindows = null;
@@ -1062,16 +1063,24 @@ ipcMain.handle('displays:list', () => screen.getAllDisplays().map((d, i) => ({
 })));
 
 // ---------------------------------------------------------------- App dock
-ipcMain.handle('tasks:action', (_e, name, hwnd) => (taskWindows ? taskWindows.action(name, hwnd) : false));
+ipcMain.handle('tasks:action', (_e, name, hwnd) => {
+  if (taskWindows) return taskWindows.action(name, hwnd);
+  if (linuxTasks) return linuxTasks.action(name, hwnd);
+  return false;
+});
 ipcMain.handle('tasks:icon', async (_e, exe) => {
   if (typeof exe !== 'string' || !exe) return null;
   const key = exe.toLowerCase();
   if (taskIconCache.has(key)) return taskIconCache.get(key);
   let url = null;
-  try {
-    const img = await app.getFileIcon(exe, { size: 'normal' });
-    url = img.isEmpty() ? null : img.toDataURL();
-  } catch { /* missing or protected binary */ }
+  if (linuxTasks && exe.endsWith('.desktop')) {
+    url = linuxTasks.icon(exe);
+  } else {
+    try {
+      const img = await app.getFileIcon(exe, { size: 'normal' });
+      url = img.isEmpty() ? null : img.toDataURL();
+    } catch { /* missing or protected binary */ }
+  }
   if (taskIconCache.size > 200) taskIconCache.clear();
   taskIconCache.set(key, url);
   return url;
@@ -1079,20 +1088,23 @@ ipcMain.handle('tasks:icon', async (_e, exe) => {
 // Launch a pinned app that is not running. Only executables the dock knows
 // about (a stored pin, or a window the worker reported) are launchable.
 function dockKnowsExe(exe) {
-  if (typeof exe !== 'string' || !/\.exe$/i.test(exe)) return false;
+  if (typeof exe !== 'string') return false;
+  if (process.platform === 'linux' ? !/\.desktop$/i.test(exe) : !/\.exe$/i.test(exe)) return false;
   const pinned = (store.get('dock') || {}).pinned || [];
   return isPinned(pinned, exe) || lastDockExes.has(exe.toLowerCase());
 }
 let lastDockExes = new Set();
 
 ipcMain.handle('tasks:list', async () => {
-  const list = taskWindows ? await taskWindows.list() : [];
+  const list = taskWindows ? await taskWindows.list()
+    : linuxTasks ? await linuxTasks.list() : [];
   lastDockExes = new Set(list.map((w) => (w.exe || '').toLowerCase()).filter(Boolean));
   return list;
 });
 
 ipcMain.handle('dock:launch', (_e, exe) => {
   if (!dockKnowsExe(exe)) return false;
+  if (linuxTasks) return linuxTasks.launch(exe);
   try { return spawnDetached(exe); } catch { return false; }
 });
 
@@ -1474,6 +1486,9 @@ app.whenReady().then(() => {
   startApi();
 
   if (process.platform === 'win32') taskWindows = new TaskWindows({ ownExePath: process.execPath });
+  // Linux cannot list other apps' windows (Wayland policy), but /proc shows
+  // which applications RUN - the dock mirrors that instead.
+  if (process.platform === 'linux') linuxTasks = new (require('./tasks-linux').LinuxTasks)();
 
   // Release checks: shortly after startup (never blocking it), then a few
   // times a day. Notify-only by design.
