@@ -178,3 +178,9 @@ scripts/cdp-widgets.js  dev smoke test for clock/telemetry/layout/themes
 scripts/cdp-layout.js   dev check that each mode's layout persists
 scripts/cdp-shot.js     screenshot a running window over CDP
 ```
+
+
+<img width="1919" height="1079" alt="BE-Aero-Desktop-promo" src="https://github.com/user-attachments/assets/77813651-e513-4ee7-82c2-dc379ffc4104" />
+
+<img width="1919" height="1079" alt="BE-Aero-Desktop" src="https://github.com/user-attachments/assets/4e12c61a-76ea-46b8-82b2-3a27cbd3880b" />
+
