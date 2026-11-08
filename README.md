@@ -8,24 +8,27 @@ A Windows 11 "Aero-Mica" desktop platform - widget sidebar, application dock, Sp
 
 ## Install
 
-**Windows** (PowerShell) - downloads the installer from the latest release and runs it:
+**Windows** (PowerShell) - downloads the installer (~120 MB, with a progress bar) from the
+latest release and runs it. The installer asks for administrator permission - if nothing
+seems to happen, look for the Windows permission prompt behind your other windows:
 
 ```powershell
-curl.exe -fsSLO https://github.com/BE-AI-Research/be-aero-desktop/releases/latest/download/BE-Aero-Desktop-Setup.exe
+curl.exe -fL --progress-bar -o BE-Aero-Desktop-Setup.exe https://github.com/BE-AI-Research/be-aero-desktop/releases/latest/download/BE-Aero-Desktop-Setup.exe
 .\BE-Aero-Desktop-Setup.exe
 ```
 
 Prefer no install? Grab the portable build instead and just run it:
 
 ```powershell
-curl.exe -fsSLO https://github.com/BE-AI-Research/be-aero-desktop/releases/latest/download/BE-Aero-Desktop-Portable.exe
+curl.exe -fL --progress-bar -o BE-Aero-Desktop-Portable.exe https://github.com/BE-AI-Research/be-aero-desktop/releases/latest/download/BE-Aero-Desktop-Portable.exe
 ```
 
-**Linux** - downloads the latest release and installs it to `/opt` with a menu entry and CLI shim:
+**Linux** - downloads the latest release (~120 MB) and installs it to `/opt` with a menu
+entry and CLI shim:
 
 ```bash
-curl -fsSLO https://github.com/BE-AI-Research/be-aero-desktop/releases/latest/download/be-aero-desktop.tar.gz
-curl -fsSLO https://github.com/BE-AI-Research/be-aero-desktop/releases/latest/download/install-linux.sh
+curl -fLO --progress-bar https://github.com/BE-AI-Research/be-aero-desktop/releases/latest/download/be-aero-desktop.tar.gz
+curl -fLO https://github.com/BE-AI-Research/be-aero-desktop/releases/latest/download/install-linux.sh
 sudo bash install-linux.sh be-aero-desktop.tar.gz
 ```
 
