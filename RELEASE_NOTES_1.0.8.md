@@ -25,6 +25,9 @@
   the focused app, minimize/maximize/restore windows, clipboard read/write, run commands
   and capture their output; web widgets gain element listing with selectors, find by
   text, select, hover, submit, back/forward, reload and wait. 43 tools in total.
+- **Attachments.** A 📎 button attaches images, PDFs and text files to a message; images and
+  PDFs reach the model as content, text files inline, and `read_file` / `list_directory`
+  tools (permission-gated) handle files referred to by path.
 - **Notification center.** A bell in the dock with an unread badge and a popover
   collecting web widgets' page notifications (via a `window.Notification` shim in each
   frame), the assistant's notifications, downloads and update notices.

@@ -9,6 +9,8 @@ const { Conversations } = require('./conversations');
 const { createProvider, PRESETS } = require('./providers');
 const { runTurn } = require('./agent');
 const { webSearch, fetchPage } = require('./websearch');
+const attachments = require('./attachments');
+const fs = require('fs');
 
 const WEB_OP_TIMEOUT_MS = 25000;
 
@@ -101,6 +103,27 @@ class AiService {
       sendKeys: (args) => d.sendKeys(args),
       runCommand: (cmd) => d.runCommand(cmd),
       execCapture: (cmd, timeoutSec) => d.execCapture(cmd, timeoutSec),
+      files: {
+        read: (p, maxChars) => {
+          try {
+            const att = attachments.describe(p);
+            if (att.kind !== 'text') return { error: `${att.name} is ${att.kind}; attach it to a message to view it` };
+            const text = fs.readFileSync(p, 'utf8');
+            const cap = Math.max(1000, Math.min(200000, maxChars || 60000));
+            return { name: att.name, size: att.size, text: text.length > cap ? text.slice(0, cap) + `\n... (${text.length - cap} more characters)` : text };
+          } catch (err) { return { error: err.message }; }
+        },
+        list: (p) => {
+          try {
+            const entries = fs.readdirSync(p, { withFileTypes: true }).slice(0, 500).map((e) => {
+              let st = null;
+              try { st = fs.statSync(require('path').join(p, e.name)); } catch { /* unreadable */ }
+              return { name: e.name, type: e.isDirectory() ? 'dir' : 'file', size: st && !e.isDirectory() ? st.size : undefined, modified: st ? st.mtime.toISOString() : undefined };
+            });
+            return { path: p, entries };
+          } catch (err) { return { error: err.message }; }
+        }
+      },
       append: (msg) => this.conversations.append(conversationId, msg)
     };
   }
@@ -145,10 +168,12 @@ class AiService {
     if (win && !win.isDestroyed()) win.webContents.send('ai:event', { conversationId, ...event });
   }
 
-  async send(conversationId, text) {
+  async send(conversationId, text, atts) {
     if (!this.enabled()) return { error: 'The AI assistant is disabled.' };
     const content = String(text || '').trim();
-    if (!content) return { error: 'empty message' };
+    const files = (Array.isArray(atts) ? atts : []).filter((a) => a && typeof a.path === 'string').slice(0, 10)
+      .map((a) => { try { return attachments.describe(a.path); } catch { return null; } }).filter(Boolean);
+    if (!content && !files.length) return { error: 'empty message' };
     let conv = null;
     if (conversationId) {
       try { conv = this.conversations.get(conversationId); } catch { conv = null; }
@@ -156,9 +181,9 @@ class AiService {
     if (!conv) conv = this.conversations.create();
     if (this.runs.has(conv.id)) {
       const q = this.queues.get(conv.id) || [];
-      q.push(content);
+      q.push({ text: content, attachments: files });
       this.queues.set(conv.id, q);
-      this.emit(conv.id, { type: 'queue', items: q.slice() });
+      this.emit(conv.id, { type: 'queue', items: q.map((x) => x.text || `(${(x.attachments || []).length} file${(x.attachments || []).length === 1 ? '' : 's'})`) });
       return { queued: true, position: q.length, conversationId: conv.id };
     }
 
@@ -170,8 +195,8 @@ class AiService {
     const model = c.model || preset.model;
     if (!model) return { error: 'Choose a model in Settings > AI assistant.', conversationId: conv.id };
 
-    this.conversations.append(conv.id, { role: 'user', content });
-    this.emit(conv.id, { type: 'user', content, title: conv.title });
+    this.conversations.append(conv.id, { role: 'user', content, ...(files.length ? { attachments: files } : {}) });
+    this.emit(conv.id, { type: 'user', content, attachments: files, title: conv.title });
 
     const controller = new AbortController();
     this.runs.set(conv.id, controller);
@@ -195,8 +220,8 @@ class AiService {
       const q = this.queues.get(conv.id);
       if (q && q.length) {
         const next = q.shift();
-        this.emit(conv.id, { type: 'queue', items: q.slice() });
-        setImmediate(() => this.send(conv.id, next));
+        this.emit(conv.id, { type: 'queue', items: q.map((x) => x.text || '(files)') });
+        setImmediate(() => this.send(conv.id, next.text, next.attachments));
       }
     }
   }
@@ -262,7 +287,20 @@ class AiService {
     ipcMain.handle('ai:new', () => this.conversations.create());
     ipcMain.handle('ai:rename', (_e, id, title) => this.conversations.rename(id, title));
     ipcMain.handle('ai:delete', (_e, id) => { this.stop(id); this.conversations.remove(id); return true; });
-    ipcMain.handle('ai:send', (_e, id, text) => this.send(id, text));
+    ipcMain.handle('ai:send', (_e, id, text, atts) => this.send(id, text, atts));
+    ipcMain.handle('ai:pick-files', async () => {
+      const win = this.d.getWindow();
+      const { canceled, filePaths } = await dialog.showOpenDialog(win && !win.isDestroyed() ? win : undefined, {
+        title: 'Attach files to your message',
+        properties: ['openFile', 'multiSelections'],
+        filters: [
+          { name: 'Images, documents and text', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'pdf', 'txt', 'md', 'json', 'csv', 'log', 'js', 'ts', 'py', 'html', 'css', 'xml', 'yaml', 'yml'] },
+          { name: 'All files', extensions: ['*'] }
+        ]
+      });
+      if (canceled) return [];
+      return filePaths.map((p) => { try { return attachments.describe(p); } catch { return null; } }).filter(Boolean);
+    });
     ipcMain.handle('ai:stop', (_e, id) => this.stop(id));
     ipcMain.handle('ai:queue', (_e, id) => this.queue(id));
     ipcMain.handle('ai:unqueue', (_e, id, index) => this.unqueue(id, Number(index)));

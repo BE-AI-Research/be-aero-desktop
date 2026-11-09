@@ -340,6 +340,18 @@ const TOOLS = [
     run: async (input, ctx) => ctx.webOp(input.id, 'wait', { selector: input.selector, ms: input.ms })
   },
   {
+    name: 'read_file', category: 'control',
+    description: 'Read a text file from disk (code, notes, CSV, JSON, logs...). For images or PDFs ask the user to attach them to a message instead.',
+    input_schema: obj({ path: str('Absolute file path'), maxChars: num('Maximum characters to return (default 60000)') }, ['path']),
+    run: async (input, ctx) => ctx.files.read(input.path, input.maxChars || 60000)
+  },
+  {
+    name: 'list_directory', category: 'control',
+    description: 'List the files and folders in a directory with sizes and modification times.',
+    input_schema: obj({ path: str('Absolute directory path') }, ['path']),
+    run: async (input, ctx) => ctx.files.list(input.path)
+  },
+  {
     name: 'notify', category: 'control',
     description: 'Show a desktop notification.',
     input_schema: obj({ title: str('Title'), body: str('Body text') }, ['title']),

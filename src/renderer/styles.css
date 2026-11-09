@@ -980,3 +980,12 @@ webview.plugin-frame { background: #fff; }
 .ai-queued .q-tag { font-size: 10px; letter-spacing: .08em; text-transform: uppercase; opacity: .7; margin-right: 6px; }
 .ai-queued .q-x { background: none; border: none; color: inherit; opacity: .6; cursor: pointer; margin-left: 6px; }
 .ai-title.editing { outline: 1px solid var(--accent); border-radius: 4px; padding: 0 4px; opacity: 1; background: rgba(0,0,0,.2); }
+
+.ai-attachments { display: flex; flex-wrap: wrap; gap: 4px; padding: 0 2px; }
+.ai-attachments.hidden { display: none; }
+.ai-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 4px; }
+.ai-chip { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; padding: 2px 7px; border-radius: 999px; background: rgba(255,255,255,.1); border: 1px solid rgba(255,255,255,.14); max-width: 100%; }
+.ai-chip small { opacity: .6; }
+.ai-chip .chip-x { background: none; border: none; color: inherit; opacity: .6; cursor: pointer; font-size: 10px; padding: 0 0 0 2px; }
+.ai-chip .chip-x:hover { opacity: 1; }
+.ai-attach { min-width: 32px; padding: 6px 7px; }

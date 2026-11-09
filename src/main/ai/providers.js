@@ -8,6 +8,8 @@
 // LM Studio, llama.cpp, vLLM, OpenRouter and most others speak - which is
 // what makes "local providers" a configuration rather than a feature.
 
+const attachments = require('./attachments');
+
 const PRESETS = {
   anthropic: { label: 'Anthropic (Claude)', kind: 'anthropic', baseUrl: '', model: 'claude-opus-5-5', needsKey: true },
   openai: { label: 'OpenAI', kind: 'openai', baseUrl: 'https://api.openai.com/v1', model: '', needsKey: true },
@@ -22,7 +24,12 @@ function toAnthropicMessages(messages) {
   const out = [];
   for (const m of messages) {
     if (m.role === 'user') {
-      out.push({ role: 'user', content: [{ type: 'text', text: String(m.content || '') }] });
+      out.push({
+        role: 'user',
+        content: m.attachments && m.attachments.length
+          ? attachments.toAnthropicContent(m.content, m.attachments)
+          : [{ type: 'text', text: String(m.content || '') }]
+      });
     } else if (m.role === 'assistant') {
       const content = [];
       if (m.content) content.push({ type: 'text', text: String(m.content) });
@@ -51,7 +58,12 @@ function toOpenAiMessages(system, messages) {
   if (system) out.push({ role: 'system', content: system });
   for (const m of messages) {
     if (m.role === 'user') {
-      out.push({ role: 'user', content: String(m.content || '') });
+      out.push({
+        role: 'user',
+        content: m.attachments && m.attachments.length
+          ? attachments.toOpenAiContent(m.content, m.attachments)
+          : String(m.content || '')
+      });
     } else if (m.role === 'assistant') {
       const msg = { role: 'assistant', content: m.content ? String(m.content) : null };
       if (m.toolCalls && m.toolCalls.length) {

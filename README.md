@@ -58,6 +58,10 @@ Pin the widget (📌) to keep the sidebar above other windows while an agentic t
   (`run_command`, or `exec_capture` to get the output); in web widgets: list interactive
   elements with selectors, find by text, click, type, select, hover, submit, back/forward,
   reload, and wait for navigation.
+- **Attachments:** the 📎 button attaches images, PDFs and text/code files to a message - images
+  and PDFs go to the model as content (PDFs with Anthropic; OpenAI-compatible providers get
+  images only), text files inline. Gated `read_file` / `list_directory` tools cover files you
+  refer to by path.
 - **Message queue:** keep typing while it works - messages queue (shown dashed) and run in
   order when the current turn finishes; Stop clears the queue too.
 - **Labels:** double-click the conversation title (or the ✎ button) to name a conversation.

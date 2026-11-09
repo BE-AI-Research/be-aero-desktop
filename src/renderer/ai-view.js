@@ -18,6 +18,8 @@
   let streamText = '';
   let pinned = false;
   let queued = [];          // messages waiting behind the current turn
+  let pending = [];         // attachments chosen for the next message
+  let attachEl = null;
 
   const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
@@ -70,6 +72,18 @@
     scrollToEnd();
   }
 
+  const human = (b) => (b < 1024 ? `${b} B` : b < 1048576 ? `${(b / 1024).toFixed(1)} KB` : `${(b / 1048576).toFixed(1)} MB`);
+  const KIND_GLYPH = { image: '\uD83D\uDDBC', pdf: '\uD83D\uDCC4', text: '\uD83D\uDCDD', other: '\uD83D\uDCCE' };
+
+  function chipHtml(a, removable) {
+    return `<span class="ai-chip" title="${esc(a.path || a.name)}">${KIND_GLYPH[a.kind] || KIND_GLYPH.other} ${esc(a.name)} <small>${human(a.size || 0)}</small>${removable ? ' <button class="chip-x" title="Remove">\u2715</button>' : ''}</span>`;
+  }
+
+  function renderPending() {
+    attachEl.innerHTML = pending.map((a, i) => chipHtml(a, true).replace('class="chip-x"', `class="chip-x" data-i="${i}"`)).join('');
+    attachEl.classList.toggle('hidden', !pending.length);
+  }
+
   function renderQueue() {
     for (const el of msgsEl.querySelectorAll('.ai-queued')) el.remove();
     queued.forEach((text, i) => {
@@ -119,7 +133,7 @@
     if (!conv) { titleEl.textContent = 'New conversation'; hint(); return; }
     titleEl.textContent = conv.title || 'Conversation';
     for (const m of conv.messages || []) {
-      if (m.role === 'user') bubble('user', esc(m.content));
+      if (m.role === 'user') bubble('user', (m.attachments && m.attachments.length ? `<div class="ai-chips">${m.attachments.map((a) => chipHtml(a, false)).join('')}</div>` : '') + esc(m.content));
       else if (m.role === 'assistant') {
         if (m.content) bubble('assistant', md(m.content));
       } else if (m.role === 'tool') {
@@ -151,14 +165,17 @@
 
   async function send(text) {
     const t = String(text || inputEl.value || '').trim();
-    if (!t) return;
+    const files = pending.slice();
+    if (!t && !files.length) return;
     inputEl.value = '';
     inputEl.style.height = '';
+    pending = [];
+    renderPending();
     if (!busy) setBusy(true);
     // Optimistic user bubble; the service echoes the final conversation id.
     if (msgsEl.querySelector('.ai-hint')) msgsEl.innerHTML = '';
-    bubble('user', esc(t));
-    const res = await aero.aiSend(current, t);
+    bubble('user', (files.length ? `<div class="ai-chips">${files.map((a) => chipHtml(a, false)).join('')}</div>` : '') + esc(t));
+    const res = await aero.aiSend(current, t, files);
     if (res && res.queued) {
       // Shown as queued (the 'queue' event carries the authoritative list);
       // drop the optimistic bubble so it is not shown twice.
@@ -251,6 +268,19 @@
     listEl.addEventListener('change', () => openConversation(listEl.value));
     root.querySelector('.ai-new').addEventListener('click', () => openConversation(null));
     root.querySelector('.ai-label').addEventListener('click', editLabel);
+    attachEl = root.querySelector('.ai-attachments');
+    root.querySelector('.ai-attach').addEventListener('click', async () => {
+      const picked = await aero.aiPickFiles();
+      for (const a of picked || []) if (!pending.some((p) => p.path === a.path)) pending.push(a);
+      renderPending();
+      inputEl.focus();
+    });
+    attachEl.addEventListener('click', (e) => {
+      const x = e.target.closest('.chip-x');
+      if (!x) return;
+      pending.splice(Number(x.dataset.i), 1);
+      renderPending();
+    });
     titleEl.addEventListener('dblclick', editLabel);
     root.querySelector('.ai-delete').addEventListener('click', async () => {
       if (!current) return;

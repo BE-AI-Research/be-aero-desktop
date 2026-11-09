@@ -228,3 +228,47 @@ test('round-2 tools validate and route through the context', async () => {
   const none = await tools.execute('send_keys', {}, ctx);
   assert.strictEqual(none.ok, false);
 });
+
+const attachments = require('../src/main/ai/attachments');
+
+test('attachments: kinds, rendering per provider, size limits and missing files', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aero-att-'));
+  fs.writeFileSync(path.join(dir, 'notes.md'), '# Title\nbody text');
+  fs.writeFileSync(path.join(dir, 'pic.png'), Buffer.from([137, 80, 78, 71, 13, 10]));
+  fs.writeFileSync(path.join(dir, 'doc.pdf'), Buffer.from('%PDF-1.4 fake'));
+  fs.writeFileSync(path.join(dir, 'blob.bin'), Buffer.alloc(16));
+  const [md, png, pdf, bin] = ['notes.md', 'pic.png', 'doc.pdf', 'blob.bin'].map((n) => attachments.describe(path.join(dir, n)));
+  assert.deepStrictEqual([md.kind, png.kind, pdf.kind, bin.kind], ['text', 'image', 'pdf', 'other']);
+  assert.strictEqual(png.mime, 'image/png');
+
+  const a = attachments.toAnthropicContent('summarize', [md, png, pdf, bin]);
+  assert.deepStrictEqual(a.map((b) => b.type), ['text', 'image', 'document', 'text', 'text']);
+  assert.strictEqual(a[1].source.media_type, 'image/png');
+  assert.strictEqual(a[2].source.media_type, 'application/pdf');
+  assert.match(a[0].text, /# Title/);
+  assert.strictEqual(a[4].text, 'summarize');
+
+  const o = attachments.toOpenAiContent('', [png, pdf]);
+  assert.strictEqual(o[0].type, 'image_url');
+  assert.ok(o[0].image_url.url.startsWith('data:image/png;base64,'));
+  assert.match(o[1].text, /cannot read PDFs/);
+  assert.strictEqual(o[2].text, '(see attachments)', 'empty text still yields a user turn');
+
+  const gone = attachments.render({ name: 'x.txt', path: path.join(dir, 'missing.txt'), kind: 'text', size: 1, mime: 'text/plain' });
+  assert.match(gone[0].text, /no longer available/);
+  const big = attachments.render({ name: 'huge.png', path: path.join(dir, 'pic.png'), kind: 'image', size: attachments.MAX_IMAGE_BYTES + 1, mime: 'image/png' });
+  assert.match(big[0].text, /over the .* limit/);
+});
+
+test('provider translation carries attachments on user turns only', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aero-att2-'));
+  fs.writeFileSync(path.join(dir, 'a.txt'), 'alpha');
+  const att = attachments.describe(path.join(dir, 'a.txt'));
+  const msgs = [{ role: 'user', content: 'read this', attachments: [att] }, { role: 'assistant', content: 'ok' }];
+  const an = toAnthropicMessages(msgs);
+  assert.strictEqual(an[0].content.length, 2);
+  assert.match(an[0].content[0].text, /alpha/);
+  const oa = toOpenAiMessages('', msgs);
+  assert.ok(Array.isArray(oa[0].content) && oa[0].content[1].text === 'read this');
+  assert.strictEqual(typeof oa[1].content, 'string');
+});
