@@ -83,7 +83,8 @@ const DEFAULTS = {
   // Application dock: apps pinned to it. [{ exe, name }]
   dock: {
     pinned: [],
-    align: 'center'   // 'left' | 'center' | 'right'
+    align: 'center',  // 'left' | 'center' | 'right'
+    hotkey: 'Control+Alt+D'   // summons the dock above everything; falls back if taken
   },
   // Certificates the user explicitly accepted on a web widget's warning page:
   // "host:port" -> "sha256/..." fingerprint. Exact-match only.

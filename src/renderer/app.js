@@ -256,6 +256,7 @@
   // ---------------------------------------------------------------
   const panel = $('settings');
   let recordingHotkey = false;
+  let recordingDockHotkey = false;   // declared early: applySettings reads it
   const weatherKey = (w) => JSON.stringify([w.latitude, w.longitude, w.unit]);
 
   function applySettings(s) {
@@ -311,6 +312,9 @@
     $('set-locked').checked = !!s.locked;
     setVal($('set-dock-align'), (s.dock && s.dock.align) || 'center');
     $('set-startup').checked = s.launchAtStartup;
+    if (!recordingDockHotkey && s.dock && s.dock.hotkey) {
+      aero.dockHotkey().then((hk) => { $('set-dock-hotkey').value = AeroHotkey.pretty(hk || s.dock.hotkey); });
+    }
     $('set-update-auto').checked = (s.updates || {}).auto !== false;
     $('set-update-notify').checked = (s.updates || {}).notify !== false;
     if (!recordingHotkey) $('set-hotkey').value = AeroHotkey.pretty(s.search.hotkey) || s.search.hotkey;
@@ -447,6 +451,69 @@
     await saveHotkey(accel);
   });
   $('btn-hotkey-reset').addEventListener('click', () => saveHotkey('Alt+Space'));
+
+  // Dock hotkey: same recorder behaviour as the search one.
+  const dockHotkeyInput = $('set-dock-hotkey');
+  const dockHotkeyStatus = $('dock-hotkey-status');
+  const DOCK_HOTKEY_IDLE = 'Brings the dock up over anything on screen - even a game. Press again or pick an app to dismiss.';
+  async function saveDockHotkey(accel) {
+    const s = await aero.setSettings({ dock: { hotkey: accel } });
+    const actual = await aero.dockHotkey();
+    dockHotkeyInput.value = AeroHotkey.pretty(actual || s.dock.hotkey);
+    if (actual && AeroHotkey.normalize(actual) !== AeroHotkey.normalize(accel)) {
+      dockHotkeyStatus.textContent =
+        `${AeroHotkey.pretty(accel)} is already taken by another app - using ${AeroHotkey.pretty(actual)} instead.`;
+    } else if (!actual) {
+      dockHotkeyStatus.textContent = `Could not register ${AeroHotkey.pretty(accel)} - try another combination.`;
+    } else {
+      dockHotkeyStatus.textContent = `The dock comes up with ${AeroHotkey.pretty(actual)}.`;
+    }
+  }
+  function startDockRecording() {
+    if (recordingDockHotkey) return;
+    recordingDockHotkey = true;
+    dockHotkeyInput.classList.add('recording');
+    dockHotkeyStatus.textContent = 'Listening - press a combination, or Esc to cancel.';
+  }
+  dockHotkeyInput.addEventListener('focus', startDockRecording);
+  dockHotkeyInput.addEventListener('click', () => { dockHotkeyInput.focus(); startDockRecording(); });
+  dockHotkeyInput.addEventListener('blur', () => {
+    if (!recordingDockHotkey) return;
+    recordingDockHotkey = false;
+    dockHotkeyInput.classList.remove('recording');
+    dockHotkeyInput.value = AeroHotkey.pretty((settings.dock || {}).hotkey) || '';
+    if (dockHotkeyStatus.textContent.startsWith('Listening')) dockHotkeyStatus.textContent = DOCK_HOTKEY_IDLE;
+  });
+  dockHotkeyInput.addEventListener('keydown', async (e) => {
+    if (!recordingDockHotkey) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.key === 'Escape') { dockHotkeyInput.blur(); return; }
+    if (AeroHotkey.isModifierCode(e.code)) {
+      const held = [e.ctrlKey && 'Ctrl', e.altKey && 'Alt', e.shiftKey && 'Shift', e.metaKey && 'Win']
+        .filter(Boolean).join(' + ');
+      dockHotkeyInput.value = held ? `${held} + ...` : '';
+      return;
+    }
+    const accel = AeroHotkey.fromEvent(e);
+    if (!accel) {
+      dockHotkeyStatus.textContent = 'That needs at least one modifier (Ctrl, Alt, Shift or Win).';
+      return;
+    }
+    recordingDockHotkey = false;
+    dockHotkeyInput.blur();
+    await saveDockHotkey(accel);
+  });
+  $('btn-dock-hotkey-reset').addEventListener('click', () => saveDockHotkey('Control+Alt+D'));
+  aero.dockHotkey().then((hk) => { if (hk) dockHotkeyInput.value = AeroHotkey.pretty(hk); });
+
+  // Summoned by the hotkey: make the dock the obvious thing on screen.
+  aero.onDockSummon((on) => {
+    const dockEl = document.querySelector('.tasks-widget');
+    if (!dockEl) return;
+    dockEl.classList.toggle('summoned', !!on);
+    if (on) dockEl.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  });
   $('set-forecast').addEventListener('change', (e) => aero.setSettings({ weather: { forecast: e.target.checked } }));
   $('set-web-engine').addEventListener('change', (e) => aero.setSettings({ search: { webEngine: e.target.value } }));
   $('set-24h').addEventListener('change', (e) => aero.setSettings({ use24h: e.target.checked }));

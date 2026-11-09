@@ -913,3 +913,9 @@ webview.plugin-frame { background: #fff; }
 .webw-cert-meta span:first-child { color: rgba(var(--text-rgb), 0.45); flex-shrink: 0; }
 .webw-cert-meta span:last-child { text-align: right; word-break: break-all; }
 .webw-error .pane-actions { margin-top: 4px; }
+
+/* Dock summoned by its hotkey: unmistakable, then quiet again. */
+.tasks-widget.summoned {
+  box-shadow: 0 0 0 2px var(--accent), 0 0 28px color-mix(in srgb, var(--accent) 60%, transparent);
+  transition: box-shadow 160ms ease-out;
+}

@@ -37,6 +37,8 @@ contextBridge.exposeInMainWorld('aero', {
   openExternal: (url) => ipcRenderer.send('shell:open', url),
   openSearch: (query) => ipcRenderer.send('search:open', query),
   searchHotkey: () => ipcRenderer.invoke('search:hotkey'),
+  dockHotkey: () => ipcRenderer.invoke('dock:hotkey'),
+  onDockSummon: (cb) => subscribe('dock:summon', cb),
 
   // --- Extensions: plugin widgets and app panes ---
   listPlugins: () => ipcRenderer.invoke('plugins:list'),

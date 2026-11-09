@@ -38,6 +38,8 @@ let panes = null;
 let apiServer = null;
 let peerResolver = null;
 let linuxTasks = null;
+let dockHotkey = null;       // the accelerator actually registered for the dock
+let dockSummoned = false;    // sidebar lifted above everything by the dock hotkey
 let lastUpdateStatus = { state: 'idle' };
 let updateTimer = null;
 let taskWindows = null;
@@ -486,6 +488,61 @@ function showWindow() {
   rebuildTrayMenu();
 }
 
+// ---------------------------------------------------------------- Dock hotkey
+// Like the search hotkey, but for the dock: lift the sidebar above whatever
+// is on screen (a full-screen game included), light the dock up, and sink
+// back to the desktop layer as soon as the user picks an app or presses the
+// key again. Widgets otherwise live BEHIND every app window, so without this
+// the dock is unreachable while anything is maximised.
+function summonDock() {
+  if (!win) return;
+  if (dockSummoned) { unsummonDock(); return; }
+  dockSummoned = true;
+  console.log('[dock] summoned');
+  if (!store.get('alwaysOnTop')) win.setAlwaysOnTop(true, 'screen-saver');
+  win.show();
+  win.focus();
+  win.webContents.send('dock:summon', true);
+}
+
+function unsummonDock() {
+  if (!dockSummoned) return;
+  dockSummoned = false;
+  console.log('[dock] dismissed');
+  if (win && !win.isDestroyed()) {
+    if (!store.get('alwaysOnTop')) {
+      win.setAlwaysOnTop(false);
+      sinkToDesktop();
+    }
+    win.webContents.send('dock:summon', false);
+  }
+}
+
+// Register the dock hotkey; fall back through free combinations if the
+// user's choice is already owned by another program (or by Search).
+function applyDockHotkey(accel) {
+  const { isValid, normalize } = require('../shared/hotkey');
+  if (dockHotkey) { try { globalShortcut.unregister(dockHotkey); } catch { /* gone */ } }
+  dockHotkey = null;
+  const wanted = isValid(accel) ? normalize(accel) : null;
+  const candidates = [...new Set([wanted, 'Control+Alt+D', 'Control+Shift+D', 'Control+Alt+Shift+D',
+    'Alt+Shift+D'].filter(Boolean))];
+  for (const c of candidates) {
+    try {
+      if (globalShortcut.register(c, summonDock)) { dockHotkey = c; break; }
+    } catch (err) {
+      console.warn('Invalid dock hotkey', c, err.message);
+    }
+  }
+  if (!dockHotkey) console.warn('Could not register any dock hotkey');
+  else if (dockHotkey !== wanted) console.warn(`Dock hotkey ${accel} is taken; using ${dockHotkey}`);
+  else console.log(`Dock hotkey: ${dockHotkey}`);
+  rebuildTrayMenu();
+  return dockHotkey;
+}
+
+ipcMain.handle('dock:hotkey', () => dockHotkey);
+
 function toggleWindow() {
   if (!win) return;
   if (win.isVisible()) win.hide(); else win.showInactive();
@@ -533,6 +590,9 @@ function updateSettings(patch) {
   }
   if (patch.telemetry && ('interval' in patch.telemetry || 'metrics' in patch.telemetry)) startTelemetry();
   if (spotlight && patch.theme) spotlight.applyTheme && spotlight.applyTheme(s.theme);
+  if (patch.dock && typeof patch.dock === 'object' && 'hotkey' in patch.dock) {
+    applyDockHotkey(s.dock.hotkey);
+  }
   if (spotlight && patch.search) {
     if ('hotkey' in patch.search) spotlight.applyHotkey(s.search.hotkey);
     if ('extraRoots' in patch.search) spotlight.reindex();
@@ -568,7 +628,7 @@ function buildMenuTemplate() {
       widgetItem('Chronometer', 'clock'),
       widgetItem('Weather', 'weather'),
       widgetItem('System telemetry', 'telemetry'),
-      widgetItem('Application dock', 'tasks'),
+      widgetItem(`Application dock${dockHotkey ? '\t' + dockHotkey.replace('Control', 'Ctrl') : ''}`, 'tasks'),
       { label: 'Dock alignment', submenu: ['left', 'center', 'right'].map((a) => ({
         label: a[0].toUpperCase() + a.slice(1), type: 'radio',
         checked: ((store.get('dock') || {}).align || 'center') === a,
@@ -1510,6 +1570,7 @@ app.whenReady().then(() => {
   globalShortcut.register(TOGGLE_SHORTCUT, toggleWindow);
   spotlight = new Spotlight({ store, root: ROOT });
   spotlight.init();
+  applyDockHotkey((store.get('dock') || {}).hotkey);
 
   PLUGINS_DIR = path.join(app.getPath('userData'), 'plugins');
   require('fs').mkdirSync(PLUGINS_DIR, { recursive: true });
@@ -1547,7 +1608,7 @@ app.whenReady().then(() => {
   // show would otherwise undo a one-time sink.
   sinkToDesktop();
   if (win) {
-    win.on('blur', () => sinkToDesktop());
+    win.on('blur', () => { if (dockSummoned) unsummonDock(); else sinkToDesktop(); });
     win.on('show', () => setTimeout(sinkToDesktop, 50));
     setTimeout(sinkToDesktop, 1500);   // after the first paint settles
   }
