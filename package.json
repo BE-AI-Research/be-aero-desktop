@@ -75,6 +75,7 @@
     "url": "https://github.com/BE-AI-Research/be-aero-desktop.git"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^1.6.0",
     "electron-updater": "^6.8.11"
   }
 }

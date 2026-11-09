@@ -95,9 +95,25 @@ const DEFAULTS = {
     weather: true,
     telemetry: true,
     tasks: true,
-    scratchpad: true
+    scratchpad: true,
+    ai: true
   },
-  scratchpad: ''
+  scratchpad: '',
+  // AI assistant: provider + model, key encrypted at rest (safeStorage),
+  // what the model may do without asking, and the user's persona text.
+  ai: {
+    enabled: true,
+    provider: 'anthropic',   // anthropic | openai | ollama | lmstudio | custom
+    baseUrl: '',
+    apiKey: '',
+    model: '',
+    permission: 'ask',       // ask | allow | deny  (reads are always allowed)
+    systemPrompt: '',
+    maxSteps: 12
+  },
+  notifications: {
+    toast: true              // also show OS toasts for web-widget / AI notifications
+  }
 };
 
 function merge(base, extra) {

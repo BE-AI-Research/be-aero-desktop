@@ -123,7 +123,8 @@
       }
     }
 
-    if (!tiles.length && !minimizedWidgets.length) {
+    if (window.AeroNotify) AeroNotify.renderTile(barEl);
+    if (!tiles.length && !minimizedWidgets.length && !window.AeroNotify) {
       // Wayland offers no way to list other applications' windows (that is a
       // compositor policy, not a bug here), so on Linux the dock is a parking
       // strip for pins and minimized web widgets rather than a taskbar.

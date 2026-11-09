@@ -90,6 +90,10 @@
     const q = res.query;
     flat = [];
     let html = '';
+    CAT_EMOJI.RUN = CAT_EMOJI.RUN || '⚡';
+    CAT_TITLE.RUN = CAT_TITLE.RUN || 'Run';
+    CAT_EMOJI.AI = CAT_EMOJI.AI || '✨';
+    CAT_TITLE.AI = CAT_TITLE.AI || 'AI';
     const addGroup = (cat, items) => {
       html += `<div class="group-label">${esc(CAT_TITLE[cat] || cat)}</div>`;
       for (const it of items) {
@@ -102,10 +106,38 @@
       }
     };
 
+    // Power-user prefixes: "run> notepad" (Win+R semantics) and
+    // "cmd> ipconfig" (a terminal that runs it and stays open). The row is
+    // the only result - nothing else should compete with Enter here.
+    const pm = /^(run|cmd)>\s*(.*)$/i.exec(q);
+    if (pm) {
+      const isRun = pm[1].toLowerCase() === 'run';
+      const command = pm[2].trim();
+      addGroup('RUN', [{
+        special: isRun ? 'run' : 'terminal', command, category: 'RUN',
+        name: isRun ? (command ? `Run: ${command}` : 'Run: type a command') : (command ? `Terminal: ${command}` : 'Open a terminal'),
+        sub: isRun ? 'Enter to run it like the Run dialog (Win+R)' : 'Enter to run it in a terminal window that stays open'
+      }]);
+      resultsEl.innerHTML = html;
+      selected = 0;
+      updateSelection();
+      setGhost('');
+      $('hint').textContent = isRun ? 'run> launches programs and files' : 'cmd> runs in a terminal';
+      return;
+    }
+
+    // Ask AI: a '?' prefix puts the assistant first; otherwise it trails
+    // the results so launching apps stays one keystroke away.
+    const askFirst = /^\?/.test(q);
+    const question = q.replace(/^\?\s*/, '');
+    const aiRow = res.ai && question ? [{ special: 'ai', name: `Ask AI: “${question}”`,
+      sub: 'Enter to ask the assistant in the chat widget', question, category: 'AI' }] : null;
+    if (aiRow && askFirst) addGroup('AI', aiRow);
     if (res.calc !== null && res.calc !== undefined) {
       addGroup('CALC', [{ special: 'calc', name: `= ${res.calc.toLocaleString(undefined, { maximumFractionDigits: 10 })}`, sub: 'Enter to copy result', value: res.calc, category: 'CALC' }]);
     }
     for (const g of res.groups) addGroup(g.category, g.items);
+    if (aiRow && !askFirst) addGroup('AI', aiRow);
     const engineName = { bing: 'Bing', google: 'Google', duckduckgo: 'DuckDuckGo', brave: 'Brave Search' }[res.webEngine] || 'the web';
     addGroup('WEB', [{ special: 'web', name: `Search the web for “${q}”`,
       sub: `${engineName} · opens in your default browser`, engineName, category: 'WEB' }]);
@@ -206,6 +238,9 @@
     if (!item) return;
     if (item.special === 'calc') { sp.copy(String(item.value)); flash('Copied'); return; }
     if (item.special === 'web') { sp.web(lastQuery); return; }
+    if (item.special === 'ai') { sp.askAi(item.question); return; }
+    if (item.special === 'run') { if (item.command) sp.run(item.command); return; }
+    if (item.special === 'terminal') { sp.terminal(item.command); return; }
     if (reveal) sp.reveal(item); else sp.open(item);
   }
   function flash(msg) {

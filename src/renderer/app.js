@@ -68,6 +68,20 @@
 
   // Plugin widgets and app panes are real widgets: as each one appears, hand it
   // to the layout system so it gets a resize grip and remembered geometry.
+  if (window.AeroAi) AeroAi.init({ aero });
+  if (window.AeroNotify) AeroNotify.init({
+    aero,
+    focusWebWidget: (id) => {
+      // A minimized web widget lives in the dock; restore it first.
+      aero.getSettings().then((s) => {
+        const w = (s.webWidgets || []).find((x) => x.id === id);
+        if (w && w.minimized) {
+          aero.setSettings({ webWidgets: s.webWidgets.map((x) => (x.id === id ? { ...x, minimized: false } : x)) })
+            .then(() => setTimeout(() => AeroExtensions.focusWebWidget(id), 300));
+        } else AeroExtensions.focusWebWidget(id);
+      });
+    }
+  });
   await AeroExtensions.init({
     aero,
     onWidgetAdded(section) { AeroLayout.adopt(section); }
@@ -312,6 +326,14 @@
     $('set-locked').checked = !!s.locked;
     setVal($('set-dock-align'), (s.dock && s.dock.align) || 'center');
     $('set-startup').checked = s.launchAtStartup;
+    const aiCfg = s.ai || {};
+    const aiEl = document.querySelector('.ai-widget');
+    if (aiEl) aiEl.classList.toggle('hidden', s.widgets.ai === false || aiCfg.enabled === false);
+    $('set-ai-enabled').checked = aiCfg.enabled !== false;
+    if (document.activeElement !== $('set-ai-persona')) $('set-ai-persona').value = aiCfg.systemPrompt || '';
+    $('set-ai-permission').value = aiCfg.permission || 'ask';
+    $('set-notify-toast').checked = (s.notifications || {}).toast !== false;
+    refreshAiStatus();
     if (!recordingDockHotkey && s.dock && s.dock.hotkey) {
       aero.dockHotkey().then((hk) => { $('set-dock-hotkey').value = AeroHotkey.pretty(hk || s.dock.hotkey); });
     }
@@ -451,6 +473,64 @@
     await saveHotkey(accel);
   });
   $('btn-hotkey-reset').addEventListener('click', () => saveHotkey('Alt+Space'));
+
+  // ---- AI assistant settings ----
+  let aiPresets = [];
+  async function refreshAiStatus() {
+    const st = await aero.aiStatus();
+    if (!st) return;
+    aiPresets = st.presets || [];
+    const sel = $('set-ai-provider');
+    if (!sel.options.length) {
+      for (const p of aiPresets) { const o = document.createElement('option'); o.value = p.id; o.textContent = p.label; sel.appendChild(o); }
+    }
+    sel.value = st.provider;
+    const preset = aiPresets.find((p) => p.id === st.provider) || {};
+    if (document.activeElement !== $('set-ai-url')) $('set-ai-url').value = st.baseUrl || '';
+    $('set-ai-url').disabled = st.provider === 'anthropic';
+    $('set-ai-url').placeholder = st.provider === 'anthropic' ? 'Default Anthropic endpoint' : 'Server URL (e.g. http://localhost:11434/v1)';
+    if (document.activeElement !== $('set-ai-model')) $('set-ai-model').value = st.model || '';
+    $('set-ai-key').placeholder = st.hasKey ? 'API key saved (enter a new one to replace)' : (preset.needsKey ? 'API key (required)' : 'API key (optional)');
+    const line = !st.enabled ? 'AI assistant is disabled.'
+      : (preset.needsKey && !st.hasKey) ? `${st.presetLabel}: add an API key to start.`
+      : !st.model ? `${st.presetLabel}: choose a model (Fetch models lists what is available).`
+      : `Ready: ${st.presetLabel} · ${st.model}${st.permission === 'allow' ? ' · acts without asking' : st.permission === 'deny' ? ' · read-only' : ''}`;
+    $('ai-status').textContent = line;
+  }
+  $('set-ai-enabled').addEventListener('change', (e) => aero.setSettings({ ai: { enabled: e.target.checked } }));
+  let personaTimer = null;
+  $('set-ai-persona').addEventListener('input', (e) => {
+    clearTimeout(personaTimer);
+    personaTimer = setTimeout(() => aero.setSettings({ ai: { systemPrompt: e.target.value } }), 500);
+  });
+  $('set-ai-provider').addEventListener('change', async (e) => {
+    const preset = aiPresets.find((p) => p.id === e.target.value) || {};
+    await aero.setSettings({ ai: { provider: e.target.value, baseUrl: preset.baseUrl || '', model: preset.model || '' } });
+    refreshAiStatus();
+  });
+  $('set-ai-url').addEventListener('change', (e) => aero.setSettings({ ai: { baseUrl: e.target.value.trim() } }).then(refreshAiStatus));
+  $('set-ai-model').addEventListener('change', (e) => aero.setSettings({ ai: { model: e.target.value.trim() } }).then(refreshAiStatus));
+  $('btn-ai-key').addEventListener('click', async () => {
+    const v = $('set-ai-key').value;
+    await aero.aiSetKey(v);
+    $('set-ai-key').value = '';
+    refreshAiStatus();
+  });
+  $('btn-ai-models').addEventListener('click', async () => {
+    $('ai-status').textContent = 'Fetching models…';
+    const r = await aero.aiModels();
+    const dl = $('ai-models');
+    dl.innerHTML = '';
+    if (r && r.models) {
+      for (const m of r.models) { const o = document.createElement('option'); o.value = m; dl.appendChild(o); }
+      $('ai-status').textContent = `${r.models.length} models available - pick one in the Model box.`;
+      if (!$('set-ai-model').value && r.models.length === 1) { $('set-ai-model').value = r.models[0]; aero.setSettings({ ai: { model: r.models[0] } }); }
+    } else {
+      $('ai-status').textContent = `Could not list models: ${r && r.error || 'unknown error'}`;
+    }
+  });
+  $('set-ai-permission').addEventListener('change', (e) => aero.setSettings({ ai: { permission: e.target.value } }).then(refreshAiStatus));
+  $('set-notify-toast').addEventListener('change', (e) => aero.setSettings({ notifications: { toast: e.target.checked } }));
 
   // Dock hotkey: same recorder behaviour as the search one.
   const dockHotkeyInput = $('set-dock-hotkey');

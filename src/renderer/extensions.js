@@ -256,6 +256,12 @@
       view.addEventListener('dom-ready', () => {
         entry.ready = true;
         applyZoom(entry, entry.zoom);
+        // Page notifications -> the notification center (see webops.js).
+        if (window.AeroWebOps) view.executeJavaScript(AeroWebOps.NOTIFICATION_SHIM, true).catch(() => {});
+      });
+      view.addEventListener('console-message', (e) => {
+        const n = window.AeroWebOps && AeroWebOps.parseNotifyMessage(e.message);
+        if (n) aero.notifyFromWeb({ id: w.id, name: w.name || w.url, title: n.title, body: n.body, icon: n.icon });
       });
       // The guest reports its own failures; -3 is Chromium's routine abort
       // noise on redirects and is not an error a user should see.
@@ -478,11 +484,26 @@
     aero.onPluginsChanged(renderPlugins);
     aero.onPanesChanged(renderPanes);
     aero.onWebWidgetCert(onWebWidgetCert);
+    // The AI assistant operates web widgets through the host.
+    aero.onAiWebOp(async (req) => {
+      const result = window.AeroWebOps
+        ? await AeroWebOps.handle(webFrames.get(req.id), req)
+        : { ok: false, error: 'web operations unavailable' };
+      aero.aiWebOpResult(req.opId, result);
+    });
     renderPlugins(await aero.listPlugins());
     renderPanes(await aero.listPanes());
   }
 
+  // Bring a web widget into view (and back from the dock if minimized).
+  function focusWebWidget(id) {
+    const entry = webFrames.get(id);
+    if (entry && entry.section) { entry.section.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); return true; }
+    return false;
+  }
+
   window.AeroExtensions = {
+    focusWebWidget,
     init, renderPlugins, renderPanes, renderWebWidgets, onTelemetry, onTheme,
     plugins: () => plugins,
     panes: () => panes

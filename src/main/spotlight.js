@@ -47,6 +47,49 @@ function execFromDesktopEntry(file) {
   } catch { /* unreadable entry */ }
 }
 
+// Power-user prefixes from the search bar.
+//   run> <command>   Win+R semantics: the shell launches it (GUI apps open,
+//                    console programs get their own window).
+//   cmd> <command>   a terminal window that runs the command and stays open.
+function runCommand(cmd) {
+  const c = String(cmd || '').trim();
+  if (!c) return false;
+  if (process.platform === 'win32') {
+    spawn(`start "" ${c}`, { shell: true, detached: true, stdio: 'ignore' }).unref();
+  } else {
+    spawn('/bin/sh', ['-c', c], { detached: true, stdio: 'ignore' }).unref();
+  }
+  return true;
+}
+
+function openTerminal(cmd) {
+  const c = String(cmd || '').trim();
+  if (process.platform === 'win32') {
+    // /k keeps the window open after the command so the output stays readable.
+    spawn(c ? `start "" cmd.exe /k ${c}` : 'start "" cmd.exe', { shell: true, detached: true, stdio: 'ignore' }).unref();
+    return true;
+  }
+  const inner = c ? `${c}; exec "$SHELL"` : 'exec "$SHELL"';
+  const candidates = [
+    ['x-terminal-emulator', ['-e', 'sh', '-c', inner]],
+    ['gnome-terminal', ['--', 'sh', '-c', inner]],
+    ['konsole', ['-e', 'sh', '-c', inner]],
+    ['xfce4-terminal', ['-e', `sh -c '${inner.replace(/'/g, "'\''")}'`]],
+    ['kitty', ['sh', '-c', inner]],
+    ['alacritty', ['-e', 'sh', '-c', inner]],
+    ['xterm', ['-e', 'sh', '-c', inner]]
+  ];
+  for (const [bin, args] of candidates) {
+    try {
+      const child = spawn(bin, args, { detached: true, stdio: 'ignore' });
+      child.once('error', () => {});
+      child.unref();
+      return true;
+    } catch { /* try the next terminal */ }
+  }
+  return false;
+}
+
 class Spotlight {
   constructor({ store, root, onSettingsChanged }) {
     this.store = store;
@@ -196,7 +239,8 @@ class Spotlight {
     });
     const calc = calculate(text);
     return { ...result, calc, query: text, webEngine: this.store.get('search').webEngine || 'bing',
-      indexing: !!this.indexing && !this.index.stats };
+      indexing: !!this.indexing && !this.index.stats,
+      ai: !!(this.aiEnabled && this.aiEnabled()) };
   }
 
   async open(item) {
@@ -367,6 +411,7 @@ class Spotlight {
     ipcMain.handle('spotlight:preview', (_e, item) => this.preview(item));
     ipcMain.handle('spotlight:reindex', () => this.reindex());
     ipcMain.handle('spotlight:info', () => ({ hotkey: this.hotkey, stats: this.index.stats }));
+    ipcMain.on('spotlight:ask-ai', (_e, q) => { this.hide(); if (this.askAi) this.askAi(String(q || '')); });
     ipcMain.on('spotlight:open', (_e, item) => this.open(item));
     ipcMain.on('spotlight:reveal', (_e, item) => this.reveal(item));
     ipcMain.on('spotlight:hide', () => this.hide());
@@ -374,6 +419,8 @@ class Spotlight {
     ipcMain.on('spotlight:copy', (_e, text) => { clipboard.writeText(String(text)); });
     // Web search. openExternal goes through ShellExecute, so the query lands
     // in whichever browser Windows has set as default.
+    ipcMain.on('spotlight:run', (_e, cmd) => { this.hide(); runCommand(cmd); });
+    ipcMain.on('spotlight:terminal', (_e, cmd) => { this.hide(); openTerminal(cmd); });
     ipcMain.on('spotlight:web', (_e, q) => {
       this.hide();
       shell.openExternal(webSearchUrl(this.store.get('search').webEngine, q));
@@ -391,4 +438,4 @@ class Spotlight {
   }
 }
 
-module.exports = { Spotlight, webSearchUrl, ENGINES };
+module.exports = { runCommand, openTerminal, Spotlight, webSearchUrl, ENGINES };

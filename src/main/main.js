@@ -38,6 +38,8 @@ let panes = null;
 let apiServer = null;
 let peerResolver = null;
 let linuxTasks = null;
+let aiService = null;
+let notifyCenter = null;
 let dockHotkey = null;       // the accelerator actually registered for the dock
 let dockSummoned = false;    // sidebar lifted above everything by the dock hotkey
 let lastUpdateStatus = { state: 'idle' };
@@ -283,7 +285,7 @@ function displayGeometry() {
 // (bounds changes, startup, losing focus) - unless Always on top is chosen.
 function sinkToDesktop() {
   if (process.platform !== 'win32' || !win || !taskWindows) return;
-  if (store.get('alwaysOnTop')) return;
+  if (store.get('alwaysOnTop') || (aiService && aiService.isPinned())) return;
   try {
     const handle = win.getNativeWindowHandle();
     const hwnd = handle.length >= 8 ? Number(handle.readBigUInt64LE(0)) : handle.readUInt32LE(0);
@@ -510,7 +512,7 @@ function unsummonDock() {
   dockSummoned = false;
   console.log('[dock] dismissed');
   if (win && !win.isDestroyed()) {
-    if (!store.get('alwaysOnTop')) {
+    if (!store.get('alwaysOnTop') && !(aiService && aiService.isPinned())) {
       win.setAlwaysOnTop(false);
       sinkToDesktop();
     }
@@ -635,6 +637,7 @@ function buildMenuTemplate() {
         click: () => updateSettings({ dock: { align: a } })
       })) },
       widgetItem('Scratchpad', 'scratchpad'),
+      widgetItem('AI chat', 'ai'),
       // Plugins and web widgets are widgets too - individually toggleable
       // from the same place.
       ...(pluginList.length ? [{ type: 'separator' },
@@ -680,6 +683,12 @@ function buildMenuTemplate() {
       click: (item) => updateSettings({ alwaysOnTop: item.checked }) },
     { label: 'Lock widget layout', type: 'checkbox', checked: !!s.locked,
       click: (item) => updateSettings({ locked: item.checked }) },
+    { label: 'AI assistant', submenu: [
+      { label: 'Enable AI assistant', type: 'checkbox', checked: (s.ai || {}).enabled !== false,
+        click: (item) => updateSettings({ ai: { enabled: item.checked } }) },
+      { label: 'Edit persona & instructions...', click: () => { showWindow(); win.webContents.send('settings:open', 'ai'); } },
+      { label: 'Provider & model...', click: () => { showWindow(); win.webContents.send('settings:open', 'ai'); } }
+    ] },
     { label: 'Theme', submenu: [
       ...Object.entries(PRESETS).map(([id, p]) => ({
         label: p.name, type: 'radio', checked: s.theme.preset === id && !s.theme.custom,
@@ -1343,6 +1352,7 @@ function getAutoUpdater() {
   });
   autoUpdater.on('update-downloaded', (info) => {
     push({ state: 'restarting', release: { version: `v${info.version}` } });
+    if (notifyCenter) notifyCenter.add({ source: 'system', title: `Updating to v${info.version}`, body: 'Installing and restarting...', toast: false });
     if (SysNotification.isSupported()) {
       new SysNotification({
         title: `Updating BE-Aero Desktop to v${info.version}`,
@@ -1383,6 +1393,7 @@ async function runUpdateCheck({ manual = false } = {}) {
     if ((manual || (u.notify && !alreadyTold)) && SysNotification.isSupported()) {
       const n = new SysNotification({
         title: `BE-Aero Desktop ${result.release.version} is available`,
+        ...(notifyCenter && notifyCenter.add({ source: 'system', title: `${result.release.version} is available`, body: 'Open the release page to download it.', url: result.release.url, toast: false }) ? {} : {}),
         body: 'Click to open the release page and download it.',
         icon: loadIcon()
       });
@@ -1597,6 +1608,49 @@ app.whenReady().then(() => {
   // which applications RUN - the dock mirrors that instead.
   if (process.platform === 'linux') linuxTasks = new (require('./tasks-linux').LinuxTasks)();
 
+  // Notification center + AI assistant. Both lean on the window, store,
+  // spotlight and task source, so they come last.
+  notifyCenter = new (require('./notifications').NotificationCenter)({
+    file: path.join(app.getPath('userData'), 'notifications.json'),
+    getWindow: () => win,
+    toast: (title, body, onClick) => {
+      if (!(store.get('notifications') || {}).toast || !SysNotification.isSupported()) return;
+      const n = new SysNotification({ title, body, icon: loadIcon() });
+      n.on('click', onClick);
+      n.show();
+    }
+  });
+  ipcMain.handle('notifications:list', () => notifyCenter.list());
+  ipcMain.handle('notifications:read', (_e, id) => notifyCenter.markRead(id || null));
+  ipcMain.handle('notifications:remove', (_e, id) => notifyCenter.remove(id));
+  ipcMain.handle('notifications:clear', () => notifyCenter.clear());
+  ipcMain.handle('notifications:open', (_e, id) => notifyCenter.open(id));
+  ipcMain.on('notifications:from-web', (_e, { id, name, title, body, icon }) => {
+    notifyCenter.add({ source: 'web', sourceId: String(id || ''), sourceName: String(name || ''), title, body, icon });
+  });
+
+  aiService = new (require('./ai').AiService)({
+    userDataDir: app.getPath('userData'),
+    store,
+    updateSettings,
+    getWindow: () => win,
+    spotlight,
+    plugins: () => pluginList,
+    telemetry: () => telemetry.sample(telemetryOpts()),
+    tasks: {
+      list: () => (taskWindows ? taskWindows.list() : linuxTasks ? linuxTasks.list() : Promise.resolve([])),
+      action: (name, id) => (taskWindows ? taskWindows.action(name, id) : linuxTasks ? linuxTasks.action(name, id) : false)
+    },
+    notify: (title, body) => notifyCenter.add({ source: 'ai', sourceName: 'AI assistant', title, body }),
+    setPinned: (on) => {
+      if (!win) return;
+      if (on) { win.setAlwaysOnTop(true, 'screen-saver'); win.show(); }
+      else if (!store.get('alwaysOnTop')) { win.setAlwaysOnTop(false); sinkToDesktop(); }
+    }
+  });
+  spotlight.aiEnabled = () => aiService.enabled();
+  spotlight.askAi = (q) => aiService.askFromSearch(q);
+
   // Release checks: shortly after startup (never blocking it), then a few
   // times a day. Notify-only by design.
   setTimeout(() => runUpdateCheck(), 30 * 1000);
@@ -1620,6 +1674,9 @@ app.whenReady().then(() => {
   // under a non-clobbering name, with a notification when they finish. Without
   // this handler they would silently stall in a frameless app.
   const widgetSession = session.fromPartition('persist:webwidgets');
+  // Guest pages notify through the host's shim (notification center), so the
+  // OS-level permission is refused - otherwise every site would toast twice.
+  widgetSession.setPermissionRequestHandler((_wc, permission, callback) => callback(permission !== 'notifications'));
   widgetSession.on('will-download', (_e, item) => {
     const dir = app.getPath('downloads');
     const base = (item.getFilename() || 'download').replace(/[\\/:*?"<>|]/g, '_');
@@ -1632,6 +1689,7 @@ app.whenReady().then(() => {
     }
     item.setSavePath(target);
     item.once('done', (_ev, state) => {
+      if (notifyCenter) notifyCenter.add({ source: 'system', title: state === 'completed' ? 'Download complete' : 'Download failed', body: state === 'completed' ? target : `${base}: ${state}`, toast: false });
       if (!SysNotification.isSupported()) return;
       new SysNotification({
         title: state === 'completed' ? 'Download complete' : 'Download failed',

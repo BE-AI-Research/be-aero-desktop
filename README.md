@@ -44,6 +44,37 @@ trust this source. All downloads are also on the [releases page](https://github.
 - **Application dock** - a macOS-style dock on glass: pin apps to it (click launches them), every open application shows with its real icon, a running dot and a window-count badge; click focuses (repeated clicks cycle an app's windows), right-click manages (that app's windows, new window, pin/unpin, minimize all, close all). Icon alignment (left / center / right) is configurable, minimized web widgets park here with their site favicons, and the dock - like every widget, plugin and web widget - can be toggled individually from the tray. A reconfigurable **dock hotkey** (Ctrl+Alt+D by default) summons the dock above whatever is on screen - a full-screen game included - and it sinks back to the desktop layer as soon as you pick an app or press the key again.
 - **Scratchpad** - notes saved to disk automatically (they survive restarts), with a Save button to write the note out as a .md or .txt file.
 
+## AI assistant
+A chat widget that can **operate the desktop**: switch themes, change settings, read and
+write the scratchpad, search the index and launch apps, list/focus/close running
+applications, create web widgets, and drive web frames (read the page, navigate, click,
+type, run JavaScript). Conversations are saved and can be revisited, renamed and deleted.
+Pin the widget (📌) to keep the sidebar above other windows while an agentic task runs.
+
+- **Providers:** Anthropic (Claude) through the official SDK, or anything OpenAI-compatible -
+  OpenAI, **Ollama** and **LM Studio** locally, or a custom server. Pick one in
+  Settings > AI assistant, add a key if the provider needs one (stored encrypted with the OS
+  keychain), and *Fetch models* to choose a model.
+- **Persona & instructions:** a master prompt sent ahead of every conversation - who the
+  assistant is and how it should behave.
+- **Permissions:** reading never asks; anything that changes state (settings, launching,
+  operating web widgets, closing windows) is gated: ask each time, always allow, or never.
+- **Power-user prefixes in search:** `run> notepad` launches like the Run dialog (Win+R
+  semantics - GUI apps open, console programs get their own window); `cmd> ipconfig` opens a
+  terminal that runs the command and stays open (`cmd>` alone just opens a terminal). On Linux
+  the first terminal found is used (x-terminal-emulator, gnome-terminal, konsole, ...).
+- **Ask AI from search:** every Spotlight query gets an *Ask AI* row (start with `?` to put it
+  first); Enter sends it to the chat widget.
+- **Disable AI** with one toggle in the tray or Settings - the widget, the search row and
+  every AI call go away.
+
+## Notification center
+A bell in the dock collects everything that wants attention: notifications raised by web
+widgets' pages (the host shims `window.Notification` inside each frame), the AI assistant's
+`notify` tool, downloads and update notices. Unread count on the bell, popover with the
+list, click an item to jump to the web widget or open its link; right-click the bell to
+clear. System toasts for web/AI notifications can be switched off in Settings.
+
 ## Themes
 Nine presets (Aero, Midnight, Frost, Emerald, Sunset, Rose, Amber, Mono, Clear) from the tray menu or Settings. Any preset can be customised - glass tint and strength, accent, text colour, border brightness, highlight sheen and corner radius - and reset again in one click. The Aero Search launcher and plugin widgets follow the theme too.
 
