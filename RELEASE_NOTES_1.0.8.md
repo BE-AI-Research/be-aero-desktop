@@ -19,6 +19,12 @@
   permission mode for state-changing actions (ask / allow / read-only), a pin button to
   keep the sidebar on top during agentic tasks, an *Ask AI* row in Spotlight search
   (`?` puts it first), and a single *Disable AI* switch.
+- **AI assistant, round two.** Keep sending messages while it works - they queue and run
+  in order. Label conversations. Real web access: `web_search` (results without a
+  browser) and `fetch_url` (read a page as text). Stronger driving: send keystrokes to
+  the focused app, minimize/maximize/restore windows, clipboard read/write, run commands
+  and capture their output; web widgets gain element listing with selectors, find by
+  text, select, hover, submit, back/forward, reload and wait. 43 tools in total.
 - **Notification center.** A bell in the dock with an unread badge and a popover
   collecting web widgets' page notifications (via a `window.Notification` shim in each
   frame), the assistant's notifications, downloads and update notices.

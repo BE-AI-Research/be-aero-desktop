@@ -438,4 +438,4 @@ class Spotlight {
   }
 }
 
-module.exports = { runCommand, openTerminal, Spotlight, webSearchUrl, ENGINES };
+module.exports = { runCommand, openTerminal, webSearchUrl, Spotlight, webSearchUrl, ENGINES };

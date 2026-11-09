@@ -51,6 +51,16 @@ applications, create web widgets, and drive web frames (read the page, navigate,
 type, run JavaScript). Conversations are saved and can be revisited, renamed and deleted.
 Pin the widget (📌) to keep the sidebar above other windows while an agentic task runs.
 
+- **Web access:** `web_search` returns results (no key or browser needed) and `fetch_url` reads
+  a page as text; `open_web_search` hands a query to your default browser and engine.
+- **Driving apps and web frames:** focus/minimize/maximize/restore/close windows, send
+  keystrokes to the focused app (`send_keys`), read/write the clipboard, run commands
+  (`run_command`, or `exec_capture` to get the output); in web widgets: list interactive
+  elements with selectors, find by text, click, type, select, hover, submit, back/forward,
+  reload, and wait for navigation.
+- **Message queue:** keep typing while it works - messages queue (shown dashed) and run in
+  order when the current turn finishes; Stop clears the queue too.
+- **Labels:** double-click the conversation title (or the ✎ button) to name a conversation.
 - **Providers:** Anthropic (Claude) through the official SDK, or anything OpenAI-compatible -
   OpenAI, **Ollama** and **LM Studio** locally, or a custom server. Pick one in
   Settings > AI assistant, add a key if the provider needs one (stored encrypted with the OS

@@ -490,6 +490,38 @@ function showWindow() {
   rebuildTrayMenu();
 }
 
+// Keyboard input to whatever application has focus - the assistant's way of
+// driving programs that have no API. Windows: .NET SendKeys through a
+// PowerShell one-liner (passed base64-encoded so no quoting can break it);
+// Linux: xdotool when present.
+function sendKeysToForeground({ text = '', keys = '' }) {
+  const { spawn } = require('child_process');
+  return new Promise((resolve) => {
+    if (process.platform === 'win32') {
+      // Literal text must escape SendKeys' own metacharacters.
+      const literal = String(text).replace(/[+^%~(){}[\]]/g, '{$&}');
+      const script = 'Add-Type -AssemblyName System.Windows.Forms; '
+        + (literal ? `[System.Windows.Forms.SendKeys]::SendWait(${JSON.stringify(literal)}); ` : '')
+        + (keys ? `[System.Windows.Forms.SendKeys]::SendWait(${JSON.stringify(String(keys))}); ` : '');
+      const enc = Buffer.from(script, 'utf16le').toString('base64');
+      const child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand', enc], { windowsHide: true, stdio: 'ignore' });
+      child.once('error', (err) => resolve({ ok: false, error: err.message }));
+      child.once('exit', (code) => resolve(code === 0 ? { ok: true } : { ok: false, error: `SendKeys exited ${code}` }));
+      return;
+    }
+    const steps = [];
+    if (text) steps.push(['type', '--delay', '15', '--', String(text)]);
+    if (keys) steps.push(['key', '--', ...String(keys).split(/\s+/).filter(Boolean)]);
+    const runStep = (i) => {
+      if (i >= steps.length) return resolve({ ok: true });
+      const child = spawn('xdotool', steps[i], { stdio: 'ignore' });
+      child.once('error', () => resolve({ ok: false, error: 'xdotool is not installed (needed to send keys on Linux)' }));
+      child.once('exit', (code) => (code === 0 ? runStep(i + 1) : resolve({ ok: false, error: `xdotool exited ${code}` })));
+    };
+    runStep(0);
+  });
+}
+
 // ---------------------------------------------------------------- Dock hotkey
 // Like the search hotkey, but for the dock: lift the sidebar above whatever
 // is on screen (a full-screen game included), light the dock up, and sink
@@ -1642,6 +1674,22 @@ app.whenReady().then(() => {
       action: (name, id) => (taskWindows ? taskWindows.action(name, id) : linuxTasks ? linuxTasks.action(name, id) : false)
     },
     notify: (title, body) => notifyCenter.add({ source: 'ai', sourceName: 'AI assistant', title, body }),
+    openWebSearch: (q) => shell.openExternal(require('./spotlight').webSearchUrl(store.get('search').webEngine, q)),
+    clipboard: {
+      read: () => require('electron').clipboard.readText(),
+      write: (t) => require('electron').clipboard.writeText(String(t || ''))
+    },
+    runCommand: (cmd) => require('./spotlight').runCommand(cmd),
+    sendKeys: (args) => sendKeysToForeground(args),
+    execCapture: (cmd, timeoutSec) => new Promise((resolve) => {
+      require('child_process').exec(String(cmd || ''), { timeout: timeoutSec * 1000, maxBuffer: 2 * 1024 * 1024, windowsHide: true },
+        (err, stdout, stderr) => resolve({
+          code: err ? (typeof err.code === 'number' ? err.code : 1) : 0,
+          timedOut: !!(err && err.killed),
+          stdout: String(stdout || '').slice(0, 20000),
+          stderr: String(stderr || '').slice(0, 4000)
+        }));
+    }),
     setPinned: (on) => {
       if (!win) return;
       if (on) { win.setAlwaysOnTop(true, 'screen-saver'); win.show(); }

@@ -96,6 +96,36 @@ const TOOLS = [
     }
   },
   {
+    name: 'web_search', category: 'read',
+    description: 'Search the web and get results (title, url, snippet) without opening a browser. Follow up with fetch_url to read a result.',
+    input_schema: obj({ query: str('Search query'), count: num('Number of results (default 8, max 20)') }, ['query']),
+    run: async (input, ctx) => ctx.webSearch(input.query, input.count || 8)
+  },
+  {
+    name: 'fetch_url', category: 'read',
+    description: 'Fetch a web page or text/JSON resource and return its readable text (no browser needed).',
+    input_schema: obj({ url: str('http(s) URL') }, ['url']),
+    run: async (input, ctx) => ctx.fetchPage(input.url)
+  },
+  {
+    name: 'web_elements', category: 'read',
+    description: 'List the interactive elements (links, buttons, inputs, selects) in a web widget page with CSS selectors you can pass to web_click / web_type / web_select.',
+    input_schema: obj({ id: str('Web widget id') }, ['id']),
+    run: async (input, ctx) => ctx.webOp(input.id, 'elements', {})
+  },
+  {
+    name: 'web_find', category: 'read',
+    description: 'Find elements in a web widget page whose visible text contains a phrase.',
+    input_schema: obj({ id: str('Web widget id'), query: str('Text to look for') }, ['id', 'query']),
+    run: async (input, ctx) => ctx.webOp(input.id, 'find', { query: input.query })
+  },
+  {
+    name: 'clipboard_read', category: 'read',
+    description: 'Read the text currently on the clipboard.',
+    input_schema: obj({}),
+    run: async (_in, ctx) => ({ text: ctx.clipboard.read() })
+  },
+  {
     name: 'web_read', category: 'read',
     description: 'Read the page currently loaded in a web widget: title, URL and visible text.',
     input_schema: obj({ id: str('Web widget id from list_widgets') }, ['id']),
@@ -215,6 +245,99 @@ const TOOLS = [
     description: 'Run JavaScript inside a web widget page and return its result (for anything the other web_* tools cannot express).',
     input_schema: obj({ id: str('Web widget id'), code: str('JavaScript expression or statements') }, ['id', 'code']),
     run: async (input, ctx) => ctx.webOp(input.id, 'eval', { code: input.code })
+  },
+  {
+    name: 'open_web_search', category: 'control',
+    description: "Open a web search for a query in the user's default browser with their chosen search engine (use when the user wants to see results themselves; use web_search to read results yourself).",
+    input_schema: obj({ query: str('Search query') }, ['query']),
+    run: async (input, ctx) => { await ctx.openWebSearch(input.query); return { ok: true }; }
+  },
+  {
+    name: 'clipboard_write', category: 'control',
+    description: 'Put text on the clipboard.',
+    input_schema: obj({ text: str('Text to copy') }, ['text']),
+    run: async (input, ctx) => { ctx.clipboard.write(input.text); return { ok: true }; }
+  },
+  {
+    name: 'minimize_app', category: 'control',
+    description: 'Minimize a running application window (id from list_running_apps).',
+    input_schema: obj({ id: num('Window id') }, ['id']),
+    run: async (input, ctx) => ({ ok: !!(await ctx.tasks.action('minimize', input.id)) })
+  },
+  {
+    name: 'maximize_app', category: 'control',
+    description: 'Maximize a running application window (id from list_running_apps).',
+    input_schema: obj({ id: num('Window id') }, ['id']),
+    run: async (input, ctx) => ({ ok: !!(await ctx.tasks.action('maximize', input.id)) })
+  },
+  {
+    name: 'restore_app', category: 'control',
+    description: 'Restore a minimized or maximized application window to normal (id from list_running_apps).',
+    input_schema: obj({ id: num('Window id') }, ['id']),
+    run: async (input, ctx) => ({ ok: !!(await ctx.tasks.action('restore', input.id)) })
+  },
+  {
+    name: 'send_keys', category: 'control',
+    description: 'Send keyboard input to the application that currently has focus (focus_app first). "text" types literal text; "keys" sends key combinations - on Windows in SendKeys syntax, e.g. "^s" (Ctrl+S), "%{F4}" (Alt+F4), "{ENTER}", "{TAB}"; on Linux as xdotool key names, e.g. "ctrl+s", "Return".',
+    input_schema: obj({ text: str('Literal text to type'), keys: str('Key combination(s) to press after the text') }),
+    run: async (input, ctx) => {
+      if (!input.text && !input.keys) return { ok: false, error: 'give text and/or keys' };
+      return ctx.sendKeys({ text: input.text || '', keys: input.keys || '' });
+    }
+  },
+  {
+    name: 'run_command', category: 'control',
+    description: 'Launch a program or open a file/URL/folder the way the Run dialog (Win+R) does - fire and forget, no output captured. Example: "notepad", "calc", "explorer C:\\Users".',
+    input_schema: obj({ command: str('Command line to run') }, ['command']),
+    run: async (input, ctx) => ({ ok: !!ctx.runCommand(input.command) })
+  },
+  {
+    name: 'exec_capture', category: 'control',
+    description: 'Run a shell command and return its output (stdout/stderr/exit code). For command-line work: listing files, git, ipconfig, package managers... Times out after timeoutSec (default 20).',
+    input_schema: obj({ command: str('Shell command'), timeoutSec: num('Timeout in seconds (max 120)') }, ['command']),
+    run: async (input, ctx) => ctx.execCapture(input.command, Math.min(120, Math.max(1, input.timeoutSec || 20)))
+  },
+  {
+    name: 'web_select', category: 'control',
+    description: 'Choose an option in a <select> inside a web widget page.',
+    input_schema: obj({ id: str('Web widget id'), selector: str('CSS selector of the select'), value: str('Option value or visible label') }, ['id', 'selector', 'value']),
+    run: async (input, ctx) => ctx.webOp(input.id, 'select', { selector: input.selector, value: input.value })
+  },
+  {
+    name: 'web_hover', category: 'control',
+    description: 'Hover over an element in a web widget page (opens hover menus).',
+    input_schema: obj({ id: str('Web widget id'), selector: str('CSS selector') }, ['id', 'selector']),
+    run: async (input, ctx) => ctx.webOp(input.id, 'hover', { selector: input.selector })
+  },
+  {
+    name: 'web_submit', category: 'control',
+    description: 'Submit a form in a web widget page (the form containing the selector, or the first form).',
+    input_schema: obj({ id: str('Web widget id'), selector: str('CSS selector of the form or an element inside it') }, ['id']),
+    run: async (input, ctx) => ctx.webOp(input.id, 'submit', { selector: input.selector })
+  },
+  {
+    name: 'web_back', category: 'control',
+    description: 'Go back one page in a web widget.',
+    input_schema: obj({ id: str('Web widget id') }, ['id']),
+    run: async (input, ctx) => ctx.webOp(input.id, 'back', {})
+  },
+  {
+    name: 'web_forward', category: 'control',
+    description: 'Go forward one page in a web widget.',
+    input_schema: obj({ id: str('Web widget id') }, ['id']),
+    run: async (input, ctx) => ctx.webOp(input.id, 'forward', {})
+  },
+  {
+    name: 'web_reload', category: 'control',
+    description: 'Reload the page in a web widget.',
+    input_schema: obj({ id: str('Web widget id') }, ['id']),
+    run: async (input, ctx) => ctx.webOp(input.id, 'reload', {})
+  },
+  {
+    name: 'web_wait', category: 'control',
+    description: 'Wait for an element to appear in a web widget page (selector), or just wait some milliseconds.',
+    input_schema: obj({ id: str('Web widget id'), selector: str('CSS selector to wait for'), ms: num('Milliseconds (default 10000, max 30000)') }, ['id']),
+    run: async (input, ctx) => ctx.webOp(input.id, 'wait', { selector: input.selector, ms: input.ms })
   },
   {
     name: 'notify', category: 'control',

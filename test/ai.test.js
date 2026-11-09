@@ -171,3 +171,60 @@ test('windowMessages never starts on a dangling tool result', () => {
   assert.notStrictEqual(w[0].role, 'tool');
   assert.ok(systemPrompt({ settings: () => ({ dock: 'free', theme: {} }) }).includes('layout mode "free"'));
 });
+
+const ws = require('../src/main/ai/websearch');
+
+test('web search parsing: DuckDuckGo redirect targets are unwrapped, html reduced to text', () => {
+  const html = '<div class="result"><a rel="nofollow" class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Fa&amp;rut=1">First <b>hit</b></a>'
+    + '<a class="result__snippet" href="x">Snippet &amp; more</a></div>'
+    + '<div class="result"><a class="result__a" href="https://example.org/b">Second</a><div class="result__snippet">Two</div></div>';
+  const r = ws.parseDuckDuckGo(html);
+  assert.deepStrictEqual(r.map((x) => x.url), ['https://example.com/a', 'https://example.org/b']);
+  assert.strictEqual(r[0].title, 'First hit');
+  assert.strictEqual(r[0].snippet, 'Snippet & more');
+  assert.strictEqual(ws.htmlToText('<nav>menu</nav><h1>Title</h1><p>Body &lt;x&gt;</p><style>p{}</style>'), 'Title\nBody <x>');
+  assert.strictEqual(ws.titleOf('<html><title> My &amp; Page </title>'), 'My & Page');
+});
+
+test('web search / fetch_url use injected fetch and never throw', async () => {
+  const fake = async (url) => ({
+    ok: true, status: 200, url,
+    headers: { get: () => 'text/html; charset=utf-8' },
+    text: async () => url.includes('duckduckgo')
+      ? '<a class="result__a" href="https://x.test/p">X</a><div class="result__snippet">s</div>'
+      : '<title>Page</title><body><p>hello</p><script>bad()</script></body>'
+  });
+  const s = await ws.webSearch('q', { fetchImpl: fake, count: 5 });
+  assert.strictEqual(s.results[0].url, 'https://x.test/p');
+  const p = await ws.fetchPage('https://x.test/p', { fetchImpl: fake });
+  assert.strictEqual(p.title, 'Page');
+  assert.strictEqual(p.text, 'hello');
+  const bad = await ws.fetchPage('ftp://nope', { fetchImpl: fake });
+  assert.match(bad.error, /http\(s\)/);
+  const down = await ws.webSearch('q', { fetchImpl: async () => { throw new Error('offline'); } });
+  assert.match(down.error, /offline/);
+});
+
+test('round-2 tools validate and route through the context', async () => {
+  assert.strictEqual(tools.validateInput('send_keys', { keys: '^s' }), null);
+  assert.strictEqual(tools.validateInput('exec_capture', { command: 'dir', timeoutSec: 5 }), null);
+  assert.match(tools.validateInput('web_select', { id: 'w', selector: 'select' }), /missing required field "value"/);
+  assert.strictEqual(tools.categoryOf('web_search'), 'read');
+  assert.strictEqual(tools.categoryOf('exec_capture'), 'control');
+  const calls = [];
+  const ctx = {
+    tasks: { action: async (n, id) => { calls.push([n, id]); return true; } },
+    sendKeys: async (a) => { calls.push(['keys', a]); return { ok: true }; },
+    clipboard: { read: () => 'clip', write: (t) => calls.push(['clip', t]) },
+    webOp: async (id, op, args) => ({ ok: true, id, op, args })
+  };
+  assert.deepStrictEqual(await tools.execute('maximize_app', { id: 7 }, ctx), { ok: true });
+  assert.deepStrictEqual(await tools.execute('clipboard_read', {}, ctx), { text: 'clip' });
+  await tools.execute('send_keys', { text: 'hi', keys: '{ENTER}' }, ctx);
+  const r = await tools.execute('web_wait', { id: 'w1', selector: '#done', ms: 500 }, ctx);
+  assert.strictEqual(r.op, 'wait');
+  assert.deepStrictEqual(calls[0], ['maximize', 7]);
+  assert.deepStrictEqual(calls[1], ['keys', { text: 'hi', keys: '{ENTER}' }]);
+  const none = await tools.execute('send_keys', {}, ctx);
+  assert.strictEqual(none.ok, false);
+});

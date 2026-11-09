@@ -49,6 +49,8 @@ contextBridge.exposeInMainWorld('aero', {
   aiSend: (id, text) => ipcRenderer.invoke('ai:send', id, text),
   aiStop: (id) => ipcRenderer.invoke('ai:stop', id),
   aiPin: (on) => ipcRenderer.invoke('ai:pin', on),
+  aiQueue: (id) => ipcRenderer.invoke('ai:queue', id),
+  aiUnqueue: (id, index) => ipcRenderer.invoke('ai:unqueue', id, index),
   onAiEvent: (cb) => subscribe('ai:event', cb),
   onAiAsk: (cb) => subscribe('ai:ask', cb),
   onAiWebOp: (cb) => subscribe('ai:web-op', cb),

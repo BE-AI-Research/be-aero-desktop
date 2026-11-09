@@ -975,3 +975,8 @@ webview.plugin-frame { background: #fff; }
 #set-ai-model-select { flex: 1; min-width: 0; font-size: 12px; background: rgba(255,255,255,.08); color: inherit; border: 1px solid rgba(255,255,255,.14); border-radius: 6px; padding: 4px 6px; }
 #set-ai-model-select option { background: #1b1b22; color: #eee; }
 #set-ai-model { width: 100%; margin-top: 6px; }
+
+.ai-queued { align-self: flex-end; opacity: .7; border: 1px dashed color-mix(in srgb, var(--accent) 55%, transparent); background: transparent; }
+.ai-queued .q-tag { font-size: 10px; letter-spacing: .08em; text-transform: uppercase; opacity: .7; margin-right: 6px; }
+.ai-queued .q-x { background: none; border: none; color: inherit; opacity: .6; cursor: pointer; margin-left: 6px; }
+.ai-title.editing { outline: 1px solid var(--accent); border-radius: 4px; padding: 0 4px; opacity: 1; background: rgba(0,0,0,.2); }

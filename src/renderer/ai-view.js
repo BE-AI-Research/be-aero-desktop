@@ -17,6 +17,7 @@
   let streamEl = null;      // the assistant bubble currently streaming
   let streamText = '';
   let pinned = false;
+  let queued = [];          // messages waiting behind the current turn
 
   const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
@@ -69,10 +70,44 @@
     scrollToEnd();
   }
 
+  function renderQueue() {
+    for (const el of msgsEl.querySelectorAll('.ai-queued')) el.remove();
+    queued.forEach((text, i) => {
+      const b = el('div', 'ai-msg ai-queued', msgsEl);
+      b.innerHTML = `<span class="q-tag">queued</span> ${esc(text)} <button class="q-x" title="Remove from queue">\u2715</button>`;
+      b.querySelector('.q-x').addEventListener('click', () => { if (current) aero.aiUnqueue(current, i); });
+    });
+    scrollToEnd();
+  }
+
+  // Label: the title becomes an inline editor; Enter or blur saves, Esc cancels.
+  function editLabel() {
+    if (!current || titleEl.isContentEditable) return;
+    const before = titleEl.textContent;
+    titleEl.contentEditable = 'true';
+    titleEl.classList.add('editing');
+    titleEl.focus();
+    document.getSelection().selectAllChildren(titleEl);
+    const finish = async (save) => {
+      titleEl.contentEditable = 'false';
+      titleEl.classList.remove('editing');
+      const next = titleEl.textContent.trim();
+      if (save && next && next !== before) {
+        await aero.aiRename(current, next);
+        await refreshList();
+      } else titleEl.textContent = before;
+    };
+    titleEl.onkeydown = (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); finish(true); }
+      else if (e.key === 'Escape') { e.preventDefault(); finish(false); }
+    };
+    titleEl.onblur = () => finish(true);
+  }
+
   function setBusy(on) {
     busy = on;
     root.classList.toggle('busy', on);
-    sendBtn.disabled = on;
+    sendBtn.title = on ? 'Queue this message for after the current turn' : 'Send (Enter)';
     stopBtn.hidden = !on;
     statusEl.textContent = on ? 'Thinking…' : '';
   }
@@ -116,14 +151,21 @@
 
   async function send(text) {
     const t = String(text || inputEl.value || '').trim();
-    if (!t || busy) return;
+    if (!t) return;
     inputEl.value = '';
     inputEl.style.height = '';
-    setBusy(true);
+    if (!busy) setBusy(true);
     // Optimistic user bubble; the service echoes the final conversation id.
     if (msgsEl.querySelector('.ai-hint')) msgsEl.innerHTML = '';
     bubble('user', esc(t));
     const res = await aero.aiSend(current, t);
+    if (res && res.queued) {
+      // Shown as queued (the 'queue' event carries the authoritative list);
+      // drop the optimistic bubble so it is not shown twice.
+      const bubbles = msgsEl.querySelectorAll('.ai-user');
+      if (bubbles.length) bubbles[bubbles.length - 1].remove();
+      return;
+    }
     if (res && res.conversationId && res.conversationId !== current) {
       current = res.conversationId;
       await refreshList();
@@ -171,6 +213,10 @@
       case 'error':
         bubble('error', esc(ev.message || 'Something went wrong.'));
         break;
+      case 'queue':
+        queued = Array.isArray(ev.items) ? ev.items : [];
+        renderQueue();
+        break;
       case 'done':
         setBusy(false);
         refreshList();
@@ -204,6 +250,8 @@
     });
     listEl.addEventListener('change', () => openConversation(listEl.value));
     root.querySelector('.ai-new').addEventListener('click', () => openConversation(null));
+    root.querySelector('.ai-label').addEventListener('click', editLabel);
+    titleEl.addEventListener('dblclick', editLabel);
     root.querySelector('.ai-delete').addEventListener('click', async () => {
       if (!current) return;
       await aero.aiDelete(current);
