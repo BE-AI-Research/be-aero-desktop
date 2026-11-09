@@ -921,13 +921,14 @@ webview.plugin-frame { background: #fff; }
 }
 
 /* ---------------------------------------------------------- AI chat widget */
-.ai-widget { height: 320px; display: flex; flex-direction: column; overflow: hidden; gap: 6px; }
-.ai-head { display: flex; align-items: center; gap: 6px; }
+.ai-widget { height: 340px; display: flex; flex-direction: column; overflow: hidden; gap: 8px; padding: 12px 14px 12px; }
+.ai-head { display: flex; align-items: center; gap: 6px; padding: 0 2px; }
 .ai-head .widget-title { margin-right: auto; }
 .ai-list { max-width: 46%; font-size: 11px; background: rgba(255,255,255,.08); color: inherit; border: 1px solid rgba(255,255,255,.14); border-radius: 6px; padding: 2px 4px; }
 .ai-pin.on { color: var(--accent); text-shadow: 0 0 8px var(--accent); }
 .ai-title { font-size: 11px; opacity: .7; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.ai-messages { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; padding-right: 2px; font-size: 12.5px; line-height: 1.45; }
+.ai-messages { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; padding: 8px; font-size: 12.5px; line-height: 1.45;
+  border: 1px solid rgba(255,255,255,.12); border-radius: 10px; background: rgba(0,0,0,.14); }
 .ai-msg { padding: 7px 10px; border-radius: 10px; max-width: 94%; word-wrap: break-word; overflow-wrap: anywhere; }
 .ai-user { align-self: flex-end; background: color-mix(in srgb, var(--accent) 28%, transparent); border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent); }
 .ai-assistant { align-self: flex-start; background: rgba(255,255,255,.07); border: 1px solid rgba(255,255,255,.1); }
@@ -941,7 +942,7 @@ webview.plugin-frame { background: #fff; }
 .ai-tool summary { cursor: pointer; list-style: none; padding: 2px 8px; border-radius: 6px; background: rgba(255,255,255,.06); }
 .ai-tool.err summary { background: rgba(255,80,80,.14); }
 .ai-tool-body { white-space: pre-wrap; font-family: Consolas, 'Cascadia Mono', monospace; font-size: 10.5px; padding: 4px 8px; max-height: 140px; overflow: auto; opacity: .85; }
-.ai-compose { display: flex; gap: 6px; align-items: flex-end; }
+.ai-compose { display: flex; gap: 6px; align-items: flex-end; padding: 0 2px; }
 .ai-input { flex: 1; resize: none; min-height: 32px; max-height: 140px; font: inherit; font-size: 12.5px; background: rgba(255,255,255,.08); color: inherit; border: 1px solid rgba(255,255,255,.14); border-radius: 8px; padding: 6px 8px; }
 .ai-input:focus { outline: none; border-color: var(--accent); }
 .ai-send, .ai-stop { min-width: 36px; padding: 6px 8px; }
@@ -970,3 +971,7 @@ webview.plugin-frame { background: #fff; }
 .n-meta { font-size: 10.5px; opacity: .55; margin-top: 2px; }
 .n-x { background: none; border: none; color: inherit; opacity: .5; cursor: pointer; font-size: 11px; align-self: flex-start; }
 .n-x:hover { opacity: 1; }
+
+#set-ai-model-select { flex: 1; min-width: 0; font-size: 12px; background: rgba(255,255,255,.08); color: inherit; border: 1px solid rgba(255,255,255,.14); border-radius: 6px; padding: 4px 6px; }
+#set-ai-model-select option { background: #1b1b22; color: #eee; }
+#set-ai-model { width: 100%; margin-top: 6px; }

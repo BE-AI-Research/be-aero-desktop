@@ -156,10 +156,10 @@
         </div>
         <label class="field-label">Model</label>
         <div class="row">
-          <input id="set-ai-model" type="text" spellcheck="false" list="ai-models" placeholder="Model id">
-          <datalist id="ai-models"></datalist>
+          <select id="set-ai-model-select" class="hidden"></select>
           <button class="btn" id="btn-ai-models">Fetch models</button>
         </div>
+        <input id="set-ai-model" type="text" spellcheck="false" placeholder="Model id (or pick one above after fetching)">
         <label class="field-label">When the assistant wants to change something</label>
         <select id="set-ai-permission">
           <option value="ask">Ask me each time</option>

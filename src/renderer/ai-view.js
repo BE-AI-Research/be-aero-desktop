@@ -80,7 +80,8 @@
   function renderConversation(conv) {
     msgsEl.innerHTML = '';
     streamEl = null;
-    if (!conv) { titleEl.textContent = 'New conversation'; return; }
+    const hint = () => bubble('hint', 'Ask anything - or ask it to change a theme, open an app, read a web widget, or take notes.');
+    if (!conv) { titleEl.textContent = 'New conversation'; hint(); return; }
     titleEl.textContent = conv.title || 'Conversation';
     for (const m of conv.messages || []) {
       if (m.role === 'user') bubble('user', esc(m.content));
@@ -90,9 +91,7 @@
         for (const r of m.results || []) toolRow(r.name, !r.isError, null, String(r.content || '').slice(0, 400));
       }
     }
-    if (!(conv.messages || []).length) {
-      bubble('hint', 'Ask anything - or ask it to change a theme, open an app, read a web widget, or take notes.');
-    }
+    if (!(conv.messages || []).length) hint();
   }
 
   async function refreshList() {

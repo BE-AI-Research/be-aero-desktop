@@ -519,15 +519,28 @@
   $('btn-ai-models').addEventListener('click', async () => {
     $('ai-status').textContent = 'Fetching models…';
     const r = await aero.aiModels();
-    const dl = $('ai-models');
-    dl.innerHTML = '';
-    if (r && r.models) {
-      for (const m of r.models) { const o = document.createElement('option'); o.value = m; dl.appendChild(o); }
-      $('ai-status').textContent = `${r.models.length} models available - pick one in the Model box.`;
-      if (!$('set-ai-model').value && r.models.length === 1) { $('set-ai-model').value = r.models[0]; aero.setSettings({ ai: { model: r.models[0] } }); }
+    const sel = $('set-ai-model-select');
+    sel.innerHTML = '';
+    if (r && r.models && r.models.length) {
+      const ph = document.createElement('option');
+      ph.value = ''; ph.textContent = `Choose a model (${r.models.length} available)`;
+      sel.appendChild(ph);
+      for (const m of r.models) { const o = document.createElement('option'); o.value = m; o.textContent = m; sel.appendChild(o); }
+      const cur = $('set-ai-model').value.trim();
+      sel.value = r.models.includes(cur) ? cur : '';
+      sel.classList.remove('hidden');
+      $('ai-status').textContent = `${r.models.length} models available - choose one.`;
+      if (!cur && r.models.length === 1) { sel.value = r.models[0]; $('set-ai-model').value = r.models[0]; aero.setSettings({ ai: { model: r.models[0] } }).then(refreshAiStatus); }
+    } else if (r && r.models) {
+      $('ai-status').textContent = 'The provider returned no models.';
     } else {
       $('ai-status').textContent = `Could not list models: ${r && r.error || 'unknown error'}`;
     }
+  });
+  $('set-ai-model-select').addEventListener('change', (e) => {
+    if (!e.target.value) return;
+    $('set-ai-model').value = e.target.value;
+    aero.setSettings({ ai: { model: e.target.value } }).then(refreshAiStatus);
   });
   $('set-ai-permission').addEventListener('change', (e) => aero.setSettings({ ai: { permission: e.target.value } }).then(refreshAiStatus));
   $('set-notify-toast').addEventListener('change', (e) => aero.setSettings({ notifications: { toast: e.target.checked } }));
