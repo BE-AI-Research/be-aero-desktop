@@ -89,12 +89,15 @@
         <h3 class="widget-title">AI</h3>
         <select class="ai-list" title="Conversations"></select>
         <button class="icon-btn ai-label" title="Label this conversation">&#9998;</button>
-        <button class="icon-btn ai-new" title="New conversation">&#65291;</button>
+        <button class="icon-btn ai-new" title="New chat tab">&#65291;</button>
         <button class="icon-btn ai-delete" title="Delete this conversation">&#128465;</button>
+        <button class="icon-btn ai-tasks-btn" title="Scheduled tasks">&#9201;</button>
         <button class="icon-btn ai-pin" title="Keep above other windows while the assistant works">&#128204;</button>
       </div>
-      <div class="ai-title" title="Double-click to label">New conversation</div>
+      <div class="ai-tabs"></div>
+      <div class="ai-title" title="Double-click to label">New chat</div>
       <div class="ai-messages"></div>
+      <div class="ai-tasks hidden"></div>
       <div class="ai-attachments"></div>
       <div class="ai-compose">
         <button class="btn ai-attach" title="Attach files (images, PDFs, text)">&#128206;</button>
@@ -163,6 +166,9 @@
           <button class="btn" id="btn-ai-models">Fetch models</button>
         </div>
         <input id="set-ai-model" type="text" spellcheck="false" placeholder="Model id (or pick one above after fetching)">
+        <label class="field-label">Tool-call limit per message</label>
+        <input id="set-ai-steps" type="number" min="1" max="500" step="1" title="How many tool steps one message may take before the assistant is stopped">
+        <div class="hint-text">Each tool use counts as a step; long autonomous jobs need more. Default 12.</div>
         <label class="field-label">When the assistant wants to change something</label>
         <select id="set-ai-permission">
           <option value="ask">Ask me each time</option>

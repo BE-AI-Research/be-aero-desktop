@@ -332,6 +332,7 @@
     $('set-ai-enabled').checked = aiCfg.enabled !== false;
     if (document.activeElement !== $('set-ai-persona')) $('set-ai-persona').value = aiCfg.systemPrompt || '';
     $('set-ai-permission').value = aiCfg.permission || 'ask';
+    if (document.activeElement !== $('set-ai-steps')) $('set-ai-steps').value = Number(aiCfg.maxSteps) || 12;
     $('set-notify-toast').checked = (s.notifications || {}).toast !== false;
     refreshAiStatus();
     if (!recordingDockHotkey && s.dock && s.dock.hotkey) {
@@ -543,6 +544,11 @@
     aero.setSettings({ ai: { model: e.target.value } }).then(refreshAiStatus);
   });
   $('set-ai-permission').addEventListener('change', (e) => aero.setSettings({ ai: { permission: e.target.value } }).then(refreshAiStatus));
+  $('set-ai-steps').addEventListener('change', (e) => {
+    const n = Math.max(1, Math.min(500, Math.round(Number(e.target.value) || 12)));
+    e.target.value = n;
+    aero.setSettings({ ai: { maxSteps: n } });
+  });
   $('set-notify-toast').addEventListener('change', (e) => aero.setSettings({ notifications: { toast: e.target.checked } }));
 
   // Dock hotkey: same recorder behaviour as the search one.

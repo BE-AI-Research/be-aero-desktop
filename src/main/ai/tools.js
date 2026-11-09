@@ -340,6 +340,34 @@ const TOOLS = [
     run: async (input, ctx) => ctx.webOp(input.id, 'wait', { selector: input.selector, ms: input.ms })
   },
   {
+    name: 'list_tasks', category: 'read',
+    description: 'List the scheduled tasks (recurring or one-off prompts that run automatically).',
+    input_schema: obj({}),
+    run: async (_in, ctx) => ({ tasks: ctx.tasks.list() })
+  },
+  {
+    name: 'schedule_task', category: 'control',
+    description: 'Create or update a scheduled task: a prompt the assistant runs automatically. schedule.type is once (at: ISO date-time), interval (every: minutes), daily (time: HH:MM) or weekly (time: HH:MM, days: [0-6], 0=Sunday). Pass id to update an existing task.',
+    input_schema: obj({
+      id: str('Existing task id (to update)'),
+      name: str('Short task name'),
+      prompt: str('What to do on each run, written as an instruction to yourself'),
+      schedule: { type: 'object', description: '{ type, at?, every?, time?, days? }' },
+      permission: { type: 'string', enum: ['inherit', 'allow', 'deny'], description: 'What the run may change while the user is away (default inherit)' },
+      conversationMode: { type: 'string', enum: ['shared', 'new'], description: 'shared: one running conversation; new: fresh each run' }
+    }, ['name', 'prompt', 'schedule']),
+    run: async (input, ctx) => {
+      const t = ctx.tasks.add({ id: input.id, name: input.name, prompt: input.prompt, schedule: input.schedule, permission: input.permission, conversationMode: input.conversationMode });
+      return { ok: true, id: t.id, name: t.name };
+    }
+  },
+  {
+    name: 'delete_task', category: 'control',
+    description: 'Delete a scheduled task by id (see list_tasks).',
+    input_schema: obj({ id: str('Task id') }, ['id']),
+    run: async (input, ctx) => { ctx.tasks.remove(input.id); return { ok: true }; }
+  },
+  {
     name: 'read_file', category: 'control',
     description: 'Read a text file from disk (code, notes, CSV, JSON, logs...). For images or PDFs ask the user to attach them to a message instead.',
     input_schema: obj({ path: str('Absolute file path'), maxChars: num('Maximum characters to return (default 60000)') }, ['path']),

@@ -58,6 +58,16 @@ Pin the widget (📌) to keep the sidebar above other windows while an agentic t
   (`run_command`, or `exec_capture` to get the output); in web widgets: list interactive
   elements with selectors, find by text, click, type, select, hover, submit, back/forward,
   reload, and wait for navigation.
+- **Chat tabs:** several conversations open at once; tabs persist across restarts, a dot marks
+  a tab with new activity, closing a tab keeps the conversation (🗑 deletes it).
+- **Task queue:** the ⏱ tab holds prompts that run on their own - once, every N minutes, daily
+  or weekly. Each task has its own permission policy for unattended runs (autonomous, read-only,
+  or "as in Settings" - where *ask* means read-only, because nobody is there to answer a dialog),
+  writes into its own labelled conversation, and reports to the notification center. The
+  assistant can schedule tasks itself ("every morning at 9, summarize my scratchpad").
+- **Rich text:** Markdown rendering - headings, lists, quotes, tables, code blocks with a copy
+  button - and clickable links that open in your default browser.
+- **Tool-call limit:** Settings sets how many tool steps one message may take (default 12).
 - **Attachments:** the 📎 button attaches images, PDFs and text/code files to a message - images
   and PDFs go to the model as content (PDFs with Anthropic; OpenAI-compatible providers get
   images only), text files inline. Gated `read_file` / `list_directory` tools cover files you

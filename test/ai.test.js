@@ -272,3 +272,52 @@ test('provider translation carries attachments on user turns only', () => {
   assert.ok(Array.isArray(oa[0].content) && oa[0].content[1].text === 'read this');
   assert.strictEqual(typeof oa[1].content, 'string');
 });
+
+const sched = require('../src/main/ai/scheduler');
+
+test('scheduler math: daily/weekly catch-up window, interval, once', () => {
+  const now = new Date('2026-11-09T10:00:00').getTime();   // a Monday
+  const at = (iso) => new Date(iso).getTime();
+  assert.strictEqual(sched.nextRunFor({ schedule: { type: 'daily', time: '09:00' } }, now, 0), at('2026-11-09T09:00:00'), 'missed by 1h -> run now');
+  assert.strictEqual(sched.nextRunFor({ schedule: { type: 'daily', time: '07:00' } }, now, 0), at('2026-11-10T07:00:00'), 'missed by 3h -> tomorrow');
+  assert.strictEqual(sched.nextRunFor({ schedule: { type: 'daily', time: '09:00' } }, now, now - 3600000), at('2026-11-10T09:00:00'), 'already ran today');
+  assert.strictEqual(sched.nextRunFor({ schedule: { type: 'weekly', time: '09:30', days: [1] } }, now, 0), at('2026-11-09T09:30:00'));
+  assert.strictEqual(sched.nextRunFor({ schedule: { type: 'weekly', time: '08:00', days: [3] } }, now, 0), at('2026-11-11T08:00:00'), 'next Wednesday');
+  assert.strictEqual(sched.nextRunFor({ schedule: { type: 'interval', every: 15 }, createdAt: now - 60000 }, now, 0), now - 60000 + 15 * 60000);
+  assert.strictEqual(sched.nextRunFor({ schedule: { type: 'interval', every: 15 } }, now, now - 20 * 60000), now - 5 * 60000, 'overdue interval is due');
+  assert.strictEqual(sched.nextRunFor({ schedule: { type: 'once', at: '2026-11-09T09:00:00' } }, now, 0), at('2026-11-09T09:00:00'));
+  assert.strictEqual(sched.nextRunFor({ schedule: { type: 'once', at: '2026-11-09T09:00:00' } }, now, now - 1), null, 'once already ran');
+  assert.match(sched.validateTask({ name: 'x', prompt: 'y', schedule: { type: 'daily', time: '9:60' } }), /HH:MM/);
+  assert.strictEqual(sched.validateTask({ name: 'x', prompt: 'y', schedule: { type: 'weekly', time: '09:00', days: [1, 3] } }), null);
+  assert.match(sched.describeSchedule({ schedule: { type: 'weekly', time: '09:00', days: [1, 3] } }), /Mon, Wed at 09:00/);
+});
+
+test('TaskScheduler runs due tasks once, disables one-shots, records status', async () => {
+  let clock = new Date('2026-11-09T10:00:00').getTime();
+  let tasks = [];
+  const runs = [];
+  const s = new sched.TaskScheduler({
+    getTasks: () => tasks, saveTasks: (t) => { tasks = t; }, now: () => clock,
+    run: async (task) => { runs.push(task.name); return task.name === 'bad' ? { error: 'boom' } : { conversationId: 'c1' }; }
+  });
+  const once = s.upsert({ name: 'once', prompt: 'p', schedule: { type: 'once', at: '2026-11-09T09:30:00' } });
+  s.upsert({ name: 'daily', prompt: 'p', schedule: { type: 'daily', time: '09:45' } });
+  s.upsert({ name: 'later', prompt: 'p', schedule: { type: 'daily', time: '18:00' } });
+  s.upsert({ name: 'bad', prompt: 'p', schedule: { type: 'interval', every: 1 } });
+  assert.throws(() => s.upsert({ name: 'nope', prompt: 'p', schedule: { type: 'hourly' } }), /schedule.type/);
+  await s.tick();
+  assert.deepStrictEqual(runs.sort(), ['daily', 'once'], 'only due tasks ran (interval waits one period)');
+  const after = s.list();
+  assert.strictEqual(after.find((t) => t.name === 'once').enabled, false, 'one-shot disabled itself');
+  assert.strictEqual(after.find((t) => t.name === 'daily').lastStatus, 'done');
+  assert.strictEqual(after.find((t) => t.name === 'daily').conversationId, 'c1');
+  await s.tick();
+  assert.strictEqual(runs.length, 2, 'nothing re-runs on the next tick');
+  clock += 61000;
+  await s.tick();
+  assert.ok(runs.includes('bad'));
+  assert.match(s.list().find((t) => t.name === 'bad').lastStatus, /error: boom/);
+  s.remove(once.id);
+  assert.ok(!s.list().some((t) => t.id === once.id));
+  assert.strictEqual(s.patch(s.list()[0].id, { enabled: false }).enabled, false);
+});

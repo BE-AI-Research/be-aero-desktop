@@ -10,6 +10,7 @@ const { createProvider, PRESETS } = require('./providers');
 const { runTurn } = require('./agent');
 const { webSearch, fetchPage } = require('./websearch');
 const attachments = require('./attachments');
+const { TaskScheduler } = require('./scheduler');
 const fs = require('fs');
 
 const WEB_OP_TIMEOUT_MS = 25000;
@@ -23,7 +24,38 @@ class AiService {
     this.queues = new Map();        // conversationId -> [text] waiting for the current turn
     this.pendingWebOps = new Map(); // opId -> { resolve, timer }
     this.pinned = false;
+    this.scheduler = new TaskScheduler({
+      getTasks: () => (this.config().tasks || []),
+      saveTasks: (tasks) => this.d.updateSettings({ ai: { tasks } }),
+      run: (task, info) => this.runTask(task, info),
+      onChange: (list) => { const w = this.d.getWindow(); if (w && !w.isDestroyed()) w.webContents.send('ai:tasks', list); }
+    });
+    this.scheduler.start();
     this.registerIpc();
+  }
+
+  // A scheduled task runs in its own conversation with its own permission
+  // policy: unattended runs never raise a dialog - "ask" means read-only.
+  async runTask(task, { scheduled } = {}) {
+    if (!this.enabled()) return { error: 'AI assistant is disabled' };
+    let convId = task.conversationMode === 'shared' ? task.conversationId : null;
+    if (convId) { try { this.conversations.get(convId); } catch { convId = null; } }
+    if (!convId) {
+      const c = this.conversations.create();
+      this.conversations.rename(c.id, `Task: ${task.name}`);
+      convId = c.id;
+    }
+    const globalMode = this.config().permission || 'ask';
+    const permission = task.permission && task.permission !== 'inherit'
+      ? task.permission : (globalMode === 'ask' ? 'deny' : globalMode);
+    const result = await this.send(convId, task.prompt, [], { permission, source: scheduled ? 'schedule' : 'task' });
+    try {
+      const conv = this.conversations.get(convId);
+      const last = [...conv.messages].reverse().find((m) => m.role === 'assistant' && m.content);
+      this.d.notify(`Task "${task.name}" ${result.error ? 'failed' : 'finished'}`,
+        result.error ? String(result.error) : String(last ? last.content : '').replace(/\s+/g, ' ').slice(0, 160));
+    } catch { /* best effort */ }
+    return { ...result, conversationId: convId };
   }
 
   // ---------------------------------------------------------- configuration
@@ -103,6 +135,11 @@ class AiService {
       sendKeys: (args) => d.sendKeys(args),
       runCommand: (cmd) => d.runCommand(cmd),
       execCapture: (cmd, timeoutSec) => d.execCapture(cmd, timeoutSec),
+      tasks: {
+        list: () => this.scheduler.list().map((t) => ({ id: t.id, name: t.name, prompt: t.prompt, schedule: t.schedule, enabled: t.enabled !== false, nextRun: t.nextRun, lastStatus: t.lastStatus || null, permission: t.permission })),
+        add: (task) => this.scheduler.upsert(task),
+        remove: (id) => this.scheduler.remove(id)
+      },
       files: {
         read: (p, maxChars) => {
           try {
@@ -144,8 +181,8 @@ class AiService {
   }
 
   // ---------------------------------------------------------- permissions
-  async permit(call) {
-    const mode = this.config().permission || 'ask';
+  async permit(call, override) {
+    const mode = override || this.config().permission || 'ask';
     if (mode === 'allow') return true;
     if (mode === 'deny') return false;
     const win = this.d.getWindow();
@@ -168,7 +205,7 @@ class AiService {
     if (win && !win.isDestroyed()) win.webContents.send('ai:event', { conversationId, ...event });
   }
 
-  async send(conversationId, text, atts) {
+  async send(conversationId, text, atts, opts = {}) {
     if (!this.enabled()) return { error: 'The AI assistant is disabled.' };
     const content = String(text || '').trim();
     const files = (Array.isArray(atts) ? atts : []).filter((a) => a && typeof a.path === 'string').slice(0, 10)
@@ -205,8 +242,8 @@ class AiService {
       const provider = this.provider();
       const result = await runTurn({
         provider, model, conversation: conv, ctx: this.toolContext(conv.id),
-        permit: (call) => this.permit(call), emit, signal: controller.signal,
-        maxSteps: Math.max(1, Math.min(30, Number(c.maxSteps) || 12))
+        permit: (call) => this.permit(call, opts.permission), emit, signal: controller.signal,
+        maxSteps: Math.max(1, Math.min(500, Number(c.maxSteps) || 12))
       });
       emit({ type: 'done', ...result });
       return { conversationId: conv.id, ...result };
@@ -288,6 +325,11 @@ class AiService {
     ipcMain.handle('ai:rename', (_e, id, title) => this.conversations.rename(id, title));
     ipcMain.handle('ai:delete', (_e, id) => { this.stop(id); this.conversations.remove(id); return true; });
     ipcMain.handle('ai:send', (_e, id, text, atts) => this.send(id, text, atts));
+    ipcMain.handle('ai:tasks', () => this.scheduler.list());
+    ipcMain.handle('ai:task-save', (_e, task) => { try { return this.scheduler.upsert(task); } catch (err) { return { error: err.message }; } });
+    ipcMain.handle('ai:task-delete', (_e, id) => { this.scheduler.remove(String(id)); return true; });
+    ipcMain.handle('ai:task-toggle', (_e, id, enabled) => this.scheduler.patch(String(id), { enabled: !!enabled }));
+    ipcMain.handle('ai:task-run', (_e, id) => { this.scheduler.runTask(String(id)); return true; });
     ipcMain.handle('ai:pick-files', async () => {
       const win = this.d.getWindow();
       const { canceled, filePaths } = await dialog.showOpenDialog(win && !win.isDestroyed() ? win : undefined, {

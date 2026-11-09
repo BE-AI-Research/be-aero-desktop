@@ -25,6 +25,12 @@
   the focused app, minimize/maximize/restore windows, clipboard read/write, run commands
   and capture their output; web widgets gain element listing with selectors, find by
   text, select, hover, submit, back/forward, reload and wait. 43 tools in total.
+- **Task queue.** Scheduled prompts that run unattended - once, every N minutes, daily or
+  weekly - each with its own permission policy, its own labelled conversation and a report
+  to the notification center. The assistant can create tasks on request.
+- **Chat tabs, rich text, tool-call limit.** Multiple conversations as tabs with unread
+  dots; full Markdown rendering with clickable links and copyable code blocks; a
+  configurable tool-step limit in Settings.
 - **Attachments.** A 📎 button attaches images, PDFs and text files to a message; images and
   PDFs reach the model as content, text files inline, and `read_file` / `list_directory`
   tools (permission-gated) handle files referred to by path.
