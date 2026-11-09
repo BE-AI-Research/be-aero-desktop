@@ -123,11 +123,12 @@
     return b;
   }
 
-  function toolRow(name, ok, input, result) {
+  function toolRow(name, ok, input, result, image) {
     const row = el('details', `ai-tool ${ok ? 'ok' : 'err'}`, msgsEl);
     const sum = el('summary', '', row);
     sum.textContent = `${ok ? '⚙' : '⚠'} ${name}`;
     el('div', 'ai-tool-body', row).textContent = `${JSON.stringify(input || {}, null, 1)}\n→ ${result || ''}`;
+    if (image) { const im = el('img', 'ai-tool-shot', row); im.src = image; im.alt = 'screenshot'; }
     scrollToEnd();
   }
 
@@ -222,7 +223,7 @@
     for (const m of conv.messages || []) {
       if (m.role === 'user') bubble('user', chipsBlock(m.attachments) + inline(m.content).replace(/\n/g, '<br>'));
       else if (m.role === 'assistant') { if (m.content) bubble('assistant', md(m.content)); }
-      else if (m.role === 'tool') for (const r of m.results || []) toolRow(r.name, !r.isError, null, String(r.content || '').slice(0, 400));
+      else if (m.role === 'tool') for (const r of m.results || []) toolRow(r.name, !r.isError, null, String(r.content || '').slice(0, 400), r.images && r.images[0] ? `data:${r.images[0].mime};base64,${r.images[0].data}` : null);
     }
     if (!(conv.messages || []).length) hint();
     const lv = liveFor(tab.convId);
@@ -327,7 +328,7 @@
         if (!isActive) tab.unread = true;
         break;
       case 'tool':
-        if (isActive) toolRow(ev.name, ev.ok, ev.input, ev.result);
+        if (isActive) toolRow(ev.name, ev.ok, ev.input, ev.result, ev.image);
         break;
       case 'queue':
         lv.queued = Array.isArray(ev.items) ? ev.items : [];
@@ -483,6 +484,7 @@
     listEl.addEventListener('change', () => { if (listEl.value) newTab(listEl.value, listEl.options[listEl.selectedIndex].textContent, true); });
     root.querySelector('.ai-new').addEventListener('click', () => newTab(null, null, true));
     root.querySelector('.ai-label').addEventListener('click', editLabel);
+    root.querySelector('.ai-min').addEventListener('click', () => aero.setSettings({ ai: { minimized: true } }));
     titleEl.addEventListener('dblclick', editLabel);
     root.querySelector('.ai-delete').addEventListener('click', async () => {
       const t = activeTab();

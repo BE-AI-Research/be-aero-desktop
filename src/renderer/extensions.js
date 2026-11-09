@@ -300,13 +300,21 @@
   // has reported one (the guest keeps running while minimized, so it does).
   function pushMinimizedToDock() {
     if (!window.AeroTasks) return;
-    window.AeroTasks.setMinimizedWidgets(
-      lastWebWidgets.filter((w) => w.minimized).map((w) => {
-        const entry = webFrames.get(w.id);
-        return { id: w.id, name: w.name, url: w.url, favicon: (entry && entry.favicon) || null };
-      }));
+    const parked = lastWebWidgets.filter((w) => w.minimized).map((w) => {
+      const entry = webFrames.get(w.id);
+      return { id: w.id, name: w.name, url: w.url, favicon: (entry && entry.favicon) || null };
+    });
+    // The AI chat parks in the dock too, under a sparkle.
+    if (aiMinimized) parked.push({ id: '__ai__', name: 'AI assistant', url: '', favicon: null, glyph: '\u2728' });
+    window.AeroTasks.setMinimizedWidgets(parked);
   }
   let lastWebWidgets = [];
+  let aiMinimized = false;
+  function setAiMinimized(on) {
+    if (aiMinimized === !!on) return;
+    aiMinimized = !!on;
+    pushMinimizedToDock();
+  }
 
   async function setWidgetMinimized(id, minimized) {
     const current = (await aero.getSettings()).webWidgets || [];
@@ -504,6 +512,7 @@
 
   window.AeroExtensions = {
     focusWebWidget,
+    setAiMinimized,
     init, renderPlugins, renderPanes, renderWebWidgets, onTelemetry, onTheme,
     plugins: () => plugins,
     panes: () => panes

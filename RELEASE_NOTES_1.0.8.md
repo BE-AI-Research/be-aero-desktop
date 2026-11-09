@@ -25,6 +25,12 @@
   the focused app, minimize/maximize/restore windows, clipboard read/write, run commands
   and capture their output; web widgets gain element listing with selectors, find by
   text, select, hover, submit, back/forward, reload and wait. 43 tools in total.
+- **Real browser control and global memory.** The assistant drives Chrome/Edge/Brave
+  through the DevTools protocol in a dedicated BE-Aero profile - tabs, navigation, numbered
+  elements, typing, scrolling, screenshots it can see - and web widgets get the same
+  upgraded toolkit (`web_open`, numbered elements, pointer-event clicks, screenshots). A
+  global memory keeps lasting facts about you across conversations, editable in Settings.
+  The chat widget can be minimized into the dock.
 - **Task queue.** Scheduled prompts that run unattended - once, every N minutes, daily or
   weekly - each with its own permission policy, its own labelled conversation and a report
   to the notification center. The assistant can create tasks on request.

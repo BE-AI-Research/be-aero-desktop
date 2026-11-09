@@ -58,6 +58,15 @@ Pin the widget (📌) to keep the sidebar above other windows while an agentic t
   (`run_command`, or `exec_capture` to get the output); in web widgets: list interactive
   elements with selectors, find by text, click, type, select, hover, submit, back/forward,
   reload, and wait for navigation.
+- **Drives your real browser:** with Chrome, Edge or Brave installed, the assistant opens the
+  browser in a dedicated BE-Aero profile (sign in to sites there once) and works it through the
+  DevTools protocol - tabs, navigation, page text, numbered elements to click and type into,
+  scrolling, waiting, and screenshots it can look at. Web widgets get the same treatment:
+  `web_open(url)`, numbered `web_elements`, real pointer-event clicks, and `web_screenshot`.
+- **Global memory:** lasting facts about you and your work persist across conversations and
+  are shown to the assistant at the start of each one; review, add or delete them in Settings,
+  or switch memory off.
+- **Minimize:** the — button parks the chat in the dock under a ✨ tile; click it to bring it back.
 - **Chat tabs:** several conversations open at once; tabs persist across restarts, a dot marks
   a tab with new activity, closing a tab keeps the conversation (🗑 deletes it).
 - **Task queue:** the ⏱ tab holds prompts that run on their own - once, every N minutes, daily

@@ -11,6 +11,9 @@ const { runTurn } = require('./agent');
 const { webSearch, fetchPage } = require('./websearch');
 const attachments = require('./attachments');
 const { TaskScheduler } = require('./scheduler');
+const { Memory } = require('./memory');
+const { BrowserController } = require('./browser');
+const { nativeImage, webContents } = require('electron');
 const fs = require('fs');
 
 const WEB_OP_TIMEOUT_MS = 25000;
@@ -24,6 +27,16 @@ class AiService {
     this.queues = new Map();        // conversationId -> [text] waiting for the current turn
     this.pendingWebOps = new Map(); // opId -> { resolve, timer }
     this.pinned = false;
+    this.memory = new Memory(path.join(deps.userDataDir, 'ai', 'memory.json'));
+    this.browser = new BrowserController({
+      profileDir: path.join(deps.userDataDir, 'ai', 'browser-profile'),
+      resizeImage: (png) => {
+        const img = nativeImage.createFromBuffer(png);
+        const w = img.getSize().width;
+        const scaled = w > 1024 ? img.resize({ width: 1024 }) : img;
+        return { mime: 'image/jpeg', data: scaled.toJPEG(60).toString('base64') };
+      }
+    });
     this.scheduler = new TaskScheduler({
       getTasks: () => (this.config().tasks || []),
       saveTasks: (tasks) => this.d.updateSettings({ ai: { tasks } }),
@@ -128,6 +141,10 @@ class AiService {
         return id;
       },
       webOp: (id, op, args) => this.webOp(id, op, args),
+      webOpen: (url, name) => this.webOpen(url, name),
+      browser: (op, args) => this.browserOp(op, args),
+      memory: this.memory,
+      memorySummary: () => (this.config().memoryEnabled === false ? '' : this.memory.summary()),
       webSearch: (q, count) => webSearch(q, { count }),
       fetchPage: (url) => fetchPage(url),
       openWebSearch: (q) => d.openWebSearch(q),
@@ -165,8 +182,90 @@ class AiService {
     };
   }
 
+  // A web widget by id, by name, or by site; the only one when unambiguous.
+  resolveWidget(hint) {
+    const list = (this.d.store.get('webWidgets') || []);
+    if (!list.length) return { error: 'there are no web widgets - use web_open(url) to create one' };
+    const h = String(hint || '').trim().toLowerCase();
+    if (!h) return list.length === 1 ? list[0] : { error: 'several web widgets exist - say which one', widgets: list.map((w) => ({ id: w.id, name: w.name, url: w.url })) };
+    const host = (u) => { try { return new URL(u).hostname.toLowerCase(); } catch { return ''; } };
+    const w = list.find((x) => x.id === hint) || list.find((x) => (x.name || '').toLowerCase() === h)
+      || list.find((x) => (x.name || '').toLowerCase().includes(h) || host(x.url).includes(h) || (x.url || '').toLowerCase().includes(h));
+    return w || { error: `no web widget matches "${hint}"`, widgets: list.map((x) => ({ id: x.id, name: x.name, url: x.url })) };
+  }
+
+  // Open a URL in a widget that already shows that site, or a new widget.
+  async webOpen(url, name) {
+    if (!/^https?:\/\//i.test(url || '')) return { ok: false, error: 'http(s) URLs only' };
+    const host = (u) => { try { return new URL(u).hostname.toLowerCase(); } catch { return ''; } };
+    const list = this.d.store.get('webWidgets') || [];
+    let w = list.find((x) => host(x.url) === host(url));
+    if (w) {
+      if (w.minimized) this.d.updateSettings({ webWidgets: list.map((x) => (x.id === w.id ? { ...x, minimized: false } : x)) });
+      const r = await this.webOp(w.id, 'navigate', { url });
+      return { ...r, id: w.id, name: w.name };
+    }
+    const id = 'w' + crypto.randomBytes(4).toString('hex');
+    this.d.updateSettings({ webWidgets: [...list, { id, url, name: name || host(url) }] });
+    // The renderer mounts the <webview> asynchronously; poll until it answers.
+    const until = Date.now() + 20000;
+    let last = null;
+    while (Date.now() < until) {
+      await new Promise((r) => setTimeout(r, 700));
+      last = await this.webOp(id, 'read', {});
+      if (last && last.ok && (last.text || '').length) break;
+    }
+    return { ...(last || { ok: true }), id, name: name || host(url), created: true };
+  }
+
+  async browserOp(op, args) {
+    const b = this.browser;
+    try {
+      if (op === 'tabs') { const tabs = await b.tabs(); return { ok: true, browser: (b.exe || {}).name || b.info().browser, tabs: tabs.map((t) => ({ id: t.id, title: t.title, url: t.url })) }; }
+      if (op === 'open') {
+        if (!/^https?:\/\//i.test(args.url || '')) return { ok: false, error: 'http(s) URLs only' };
+        const tab = await b.open(args.url);
+        return { ...(await b.read(tab)), note: 'This browser runs with the BE-Aero profile; the user may need to sign in to sites once.' };
+      }
+      const tab = await b.resolveTab(args.tab);
+      if (tab.error) return { ok: false, ...tab };
+      const spec = { index: args.index, selector: args.selector, text: args.text };
+      switch (op) {
+        case 'read': return b.read(tab);
+        case 'elements': return b.elements(tab);
+        case 'find': return b.find(tab, args.query);
+        case 'screenshot': return b.screenshot(tab);
+        case 'navigate': return /^https?:\/\//i.test(args.url || '') ? b.navigate(tab, args.url) : { ok: false, error: 'http(s) URLs only' };
+        case 'click': return b.click(tab, spec);
+        case 'type': return b.type(tab, spec, args.text, !!args.submit, args.clear !== false);
+        case 'select': return b.select(tab, spec, args.value);
+        case 'hover': return b.hover(tab, spec);
+        case 'scroll': return b.scroll(tab, args.dy);
+        case 'wait': return b.wait(tab, args.selector, args.ms);
+        case 'back': return b.history(tab, -1);
+        case 'forward': return b.history(tab, 1);
+        case 'activate': return b.activate(tab);
+        case 'close': return b.close(tab);
+        case 'eval': return b.eval(tab, args.code);
+        default: return { ok: false, error: `unknown browser op ${op}` };
+      }
+    } catch (err) {
+      return { ok: false, error: String(err && err.message || err) };
+    }
+  }
+
   // Ask the renderer (which owns the <webview>s) to perform one operation.
-  webOp(id, op, args) {
+  webOp(idOrName, op, args) {
+    const win = this.d.getWindow();
+    if (!win || win.isDestroyed()) return Promise.resolve({ ok: false, error: 'desktop window unavailable' });
+    const w = this.resolveWidget(idOrName);
+    if (w.error) return Promise.resolve({ ok: false, ...w });
+    const id = w.id;
+    if (op === 'screenshot') return this.webScreenshot(id, op, args);
+    return this.webOpRaw(id, op, args);
+  }
+
+  webOpRaw(id, op, args) {
     const win = this.d.getWindow();
     if (!win || win.isDestroyed()) return Promise.resolve({ ok: false, error: 'desktop window unavailable' });
     const opId = crypto.randomBytes(6).toString('hex');
@@ -178,6 +277,29 @@ class AiService {
       this.pendingWebOps.set(opId, { resolve, timer });
       win.webContents.send('ai:web-op', { opId, id, op, args: args || {} });
     });
+  }
+
+  // Screenshot of a web widget: the renderer identifies the guest, main
+  // captures it (the renderer sandbox cannot encode images).
+  async webScreenshot(id, op, args) {
+    const meta = await this.webOpRaw(id, op, args);
+    if (!meta || !meta.ok || !meta.webContentsId) return meta;
+    try {
+      const wc = webContents.fromId(meta.webContentsId);
+      if (!wc) return { ok: false, error: 'web widget page not found' };
+      // capturePage waits for a frame; an unpainted (hidden or offscreen)
+      // guest would wait forever, so bound it.
+      const img = await Promise.race([
+        wc.capturePage(),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('the page did not produce a frame within 8s (is the widget visible?)')), 8000))
+      ]);
+      const w = img.getSize().width;
+      const scaled = w > 1024 ? img.resize({ width: 1024 }) : img;
+      const { webContentsId: _omit, ...rest } = meta;
+      return { ...rest, images: [{ mime: 'image/jpeg', data: scaled.toJPEG(60).toString('base64') }] };
+    } catch (err) {
+      return { ok: false, error: `screenshot failed: ${err.message}` };
+    }
   }
 
   // ---------------------------------------------------------- permissions
@@ -330,6 +452,11 @@ class AiService {
     ipcMain.handle('ai:task-delete', (_e, id) => { this.scheduler.remove(String(id)); return true; });
     ipcMain.handle('ai:task-toggle', (_e, id, enabled) => this.scheduler.patch(String(id), { enabled: !!enabled }));
     ipcMain.handle('ai:task-run', (_e, id) => { this.scheduler.runTask(String(id)); return true; });
+    ipcMain.handle('ai:memory', () => this.memory.list());
+    ipcMain.handle('ai:memory-forget', (_e, id) => this.memory.forget(String(id)));
+    ipcMain.handle('ai:memory-clear', () => { this.memory.clear(); return true; });
+    ipcMain.handle('ai:memory-add', (_e, text) => { try { return this.memory.remember(String(text || '')); } catch (err) { return { error: err.message }; } });
+    ipcMain.handle('ai:browser-info', () => this.browser.info());
     ipcMain.handle('ai:pick-files', async () => {
       const win = this.d.getWindow();
       const { canceled, filePaths } = await dialog.showOpenDialog(win && !win.isDestroyed() ? win : undefined, {

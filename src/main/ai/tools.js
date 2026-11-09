@@ -109,14 +109,14 @@ const TOOLS = [
   },
   {
     name: 'web_elements', category: 'read',
-    description: 'List the interactive elements (links, buttons, inputs, selects) in a web widget page with CSS selectors you can pass to web_click / web_type / web_select.',
-    input_schema: obj({ id: str('Web widget id') }, ['id']),
+    description: 'List the interactive elements (links, buttons, inputs, selects) in a web widget page, NUMBERED. Pass an element\'s index to web_click / web_type / web_select.',
+    input_schema: obj({ id: str('Web widget id, name or site') }),
     run: async (input, ctx) => ctx.webOp(input.id, 'elements', {})
   },
   {
     name: 'web_find', category: 'read',
     description: 'Find elements in a web widget page whose visible text contains a phrase.',
-    input_schema: obj({ id: str('Web widget id'), query: str('Text to look for') }, ['id', 'query']),
+    input_schema: obj({ id: str('Web widget id, name or site'), query: str('Text to look for') }, ['query']),
     run: async (input, ctx) => ctx.webOp(input.id, 'find', { query: input.query })
   },
   {
@@ -127,9 +127,15 @@ const TOOLS = [
   },
   {
     name: 'web_read', category: 'read',
-    description: 'Read the page currently loaded in a web widget: title, URL and visible text.',
-    input_schema: obj({ id: str('Web widget id from list_widgets') }, ['id']),
+    description: 'Read the page currently loaded in a web widget: title, URL and visible text. The widget can be given by id, by name, or by site (e.g. "github"); with a single web widget it can be omitted.',
+    input_schema: obj({ id: str('Web widget id, name or site') }),
     run: async (input, ctx) => ctx.webOp(input.id, 'read', {})
+  },
+  {
+    name: 'web_screenshot', category: 'read',
+    description: 'Take a screenshot of a web widget page and look at it (returned as an image). Use when the text alone is confusing or layout matters.',
+    input_schema: obj({ id: str('Web widget id, name or site') }),
+    run: async (input, ctx) => ctx.webOp(input.id, 'screenshot', {})
   },
   // ------------------------------------------------------------- control
   {
@@ -217,33 +223,39 @@ const TOOLS = [
     }
   },
   {
+    name: 'web_open', category: 'control',
+    description: 'Open a URL in a web widget on the desktop (reuses a widget already showing that site, otherwise creates one) and return the page text. The simplest way to start browsing inside the desktop.',
+    input_schema: obj({ url: str('http(s) URL'), name: str('Name for a new widget (optional)') }, ['url']),
+    run: async (input, ctx) => ctx.webOpen(input.url, input.name)
+  },
+  {
     name: 'web_navigate', category: 'control',
     description: 'Navigate a web widget to a URL and wait for it to load.',
-    input_schema: obj({ id: str('Web widget id'), url: str('http(s) URL') }, ['id', 'url']),
+    input_schema: obj({ id: str('Web widget id, name or site'), url: str('http(s) URL') }, ['url']),
     run: async (input, ctx) => ctx.webOp(input.id, 'navigate', { url: input.url })
   },
   {
     name: 'web_click', category: 'control',
-    description: 'Click an element in a web widget, by CSS selector or by its visible text.',
-    input_schema: obj({ id: str('Web widget id'), selector: str('CSS selector'), text: str('Visible text of the element (used when selector is omitted)') }, ['id']),
-    run: async (input, ctx) => ctx.webOp(input.id, 'click', { selector: input.selector, text: input.text })
+    description: 'Click an element in a web widget: by index from web_elements (preferred), by CSS selector, or by visible text.',
+    input_schema: obj({ id: str('Web widget id, name or site'), index: num('Element index from web_elements'), selector: str('CSS selector'), text: str('Visible text') }),
+    run: async (input, ctx) => ctx.webOp(input.id, 'click', { index: input.index, selector: input.selector, text: input.text })
   },
   {
     name: 'web_type', category: 'control',
-    description: 'Type into an input in a web widget (CSS selector), optionally pressing Enter afterwards.',
-    input_schema: obj({ id: str('Web widget id'), selector: str('CSS selector of the input'), text: str('Text to type'), submit: bool('Press Enter afterwards') }, ['id', 'selector', 'text']),
-    run: async (input, ctx) => ctx.webOp(input.id, 'type', { selector: input.selector, text: input.text, submit: !!input.submit })
+    description: 'Type into an input in a web widget - target by index from web_elements, CSS selector, or placeholder/label text. Replaces the current value unless clear is false; submit presses Enter.',
+    input_schema: obj({ id: str('Web widget id, name or site'), index: num('Element index'), selector: str('CSS selector'), text: str('Text to type'), submit: bool('Press Enter afterwards'), clear: bool('Clear the field first (default true)') }, ['text']),
+    run: async (input, ctx) => ctx.webOp(input.id, 'type', { index: input.index, selector: input.selector, text: input.text, submit: !!input.submit, clear: input.clear !== false })
   },
   {
     name: 'web_scroll', category: 'control',
     description: 'Scroll a web widget page by a number of pixels (negative = up).',
-    input_schema: obj({ id: str('Web widget id'), dy: num('Pixels to scroll vertically') }, ['id', 'dy']),
+    input_schema: obj({ id: str('Web widget id, name or site'), dy: num('Pixels to scroll vertically') }, ['dy']),
     run: async (input, ctx) => ctx.webOp(input.id, 'scroll', { dy: input.dy })
   },
   {
     name: 'web_eval', category: 'control',
     description: 'Run JavaScript inside a web widget page and return its result (for anything the other web_* tools cannot express).',
-    input_schema: obj({ id: str('Web widget id'), code: str('JavaScript expression or statements') }, ['id', 'code']),
+    input_schema: obj({ id: str('Web widget id, name or site'), code: str('JavaScript expression or statements') }, ['code']),
     run: async (input, ctx) => ctx.webOp(input.id, 'eval', { code: input.code })
   },
   {
@@ -299,45 +311,173 @@ const TOOLS = [
   },
   {
     name: 'web_select', category: 'control',
-    description: 'Choose an option in a <select> inside a web widget page.',
-    input_schema: obj({ id: str('Web widget id'), selector: str('CSS selector of the select'), value: str('Option value or visible label') }, ['id', 'selector', 'value']),
-    run: async (input, ctx) => ctx.webOp(input.id, 'select', { selector: input.selector, value: input.value })
+    description: 'Choose an option in a <select> inside a web widget page (target by index or selector).',
+    input_schema: obj({ id: str('Web widget id, name or site'), index: num('Element index'), selector: str('CSS selector of the select'), value: str('Option value or visible label') }, ['value']),
+    run: async (input, ctx) => ctx.webOp(input.id, 'select', { index: input.index, selector: input.selector, value: input.value })
   },
   {
     name: 'web_hover', category: 'control',
     description: 'Hover over an element in a web widget page (opens hover menus).',
-    input_schema: obj({ id: str('Web widget id'), selector: str('CSS selector') }, ['id', 'selector']),
-    run: async (input, ctx) => ctx.webOp(input.id, 'hover', { selector: input.selector })
+    input_schema: obj({ id: str('Web widget id, name or site'), index: num('Element index'), selector: str('CSS selector'), text: str('Visible text') }),
+    run: async (input, ctx) => ctx.webOp(input.id, 'hover', { index: input.index, selector: input.selector, text: input.text })
   },
   {
     name: 'web_submit', category: 'control',
     description: 'Submit a form in a web widget page (the form containing the selector, or the first form).',
-    input_schema: obj({ id: str('Web widget id'), selector: str('CSS selector of the form or an element inside it') }, ['id']),
+    input_schema: obj({ id: str('Web widget id, name or site'), selector: str('CSS selector of the form or an element inside it') }),
     run: async (input, ctx) => ctx.webOp(input.id, 'submit', { selector: input.selector })
   },
   {
     name: 'web_back', category: 'control',
     description: 'Go back one page in a web widget.',
-    input_schema: obj({ id: str('Web widget id') }, ['id']),
+    input_schema: obj({ id: str('Web widget id, name or site') }),
     run: async (input, ctx) => ctx.webOp(input.id, 'back', {})
   },
   {
     name: 'web_forward', category: 'control',
     description: 'Go forward one page in a web widget.',
-    input_schema: obj({ id: str('Web widget id') }, ['id']),
+    input_schema: obj({ id: str('Web widget id, name or site') }),
     run: async (input, ctx) => ctx.webOp(input.id, 'forward', {})
   },
   {
     name: 'web_reload', category: 'control',
     description: 'Reload the page in a web widget.',
-    input_schema: obj({ id: str('Web widget id') }, ['id']),
+    input_schema: obj({ id: str('Web widget id, name or site') }),
     run: async (input, ctx) => ctx.webOp(input.id, 'reload', {})
   },
   {
     name: 'web_wait', category: 'control',
     description: 'Wait for an element to appear in a web widget page (selector), or just wait some milliseconds.',
-    input_schema: obj({ id: str('Web widget id'), selector: str('CSS selector to wait for'), ms: num('Milliseconds (default 10000, max 30000)') }, ['id']),
+    input_schema: obj({ id: str('Web widget id, name or site'), selector: str('CSS selector to wait for'), ms: num('Milliseconds (default 10000, max 30000)') }),
     run: async (input, ctx) => ctx.webOp(input.id, 'wait', { selector: input.selector, ms: input.ms })
+  },
+  // ------------------------------------------------------- OS browser (CDP)
+  {
+    name: 'browser_tabs', category: 'read',
+    description: "List the tabs open in the user's browser as driven by the assistant (Chrome/Edge/Brave via DevTools). Starts the browser with the BE-Aero profile if needed.",
+    input_schema: obj({}),
+    run: async (_in, ctx) => ctx.browser('tabs', {})
+  },
+  {
+    name: 'browser_open', category: 'control',
+    description: "Open a URL in a new tab of the user's OS browser (Chrome, Edge or Brave, driven through DevTools with a dedicated BE-Aero profile) and return the page text and tab id. The way to browse the real web for the user.",
+    input_schema: obj({ url: str('http(s) URL') }, ['url']),
+    run: async (input, ctx) => ctx.browser('open', { url: input.url })
+  },
+  {
+    name: 'browser_read', category: 'read',
+    description: 'Read the page in a browser tab: title, URL and visible text. tab = id (or prefix), or a word from its title/URL; omit when one tab is open.',
+    input_schema: obj({ tab: str('Tab id, or title/url fragment') }),
+    run: async (input, ctx) => ctx.browser('read', { tab: input.tab })
+  },
+  {
+    name: 'browser_elements', category: 'read',
+    description: 'List the interactive elements in a browser tab, NUMBERED, for browser_click / browser_type / browser_select.',
+    input_schema: obj({ tab: str('Tab id, or title/url fragment') }),
+    run: async (input, ctx) => ctx.browser('elements', { tab: input.tab })
+  },
+  {
+    name: 'browser_find', category: 'read',
+    description: 'Find elements in a browser tab whose visible text contains a phrase.',
+    input_schema: obj({ tab: str('Tab id, or title/url fragment'), query: str('Text to look for') }, ['query']),
+    run: async (input, ctx) => ctx.browser('find', { tab: input.tab, query: input.query })
+  },
+  {
+    name: 'browser_screenshot', category: 'read',
+    description: 'Take a screenshot of a browser tab and look at it (returned as an image).',
+    input_schema: obj({ tab: str('Tab id, or title/url fragment') }),
+    run: async (input, ctx) => ctx.browser('screenshot', { tab: input.tab })
+  },
+  {
+    name: 'browser_navigate', category: 'control',
+    description: 'Navigate a browser tab to a URL and wait for it to load; returns the page text.',
+    input_schema: obj({ tab: str('Tab id, or title/url fragment'), url: str('http(s) URL') }, ['url']),
+    run: async (input, ctx) => ctx.browser('navigate', { tab: input.tab, url: input.url })
+  },
+  {
+    name: 'browser_click', category: 'control',
+    description: 'Click an element in a browser tab: by index from browser_elements (preferred), CSS selector, or visible text.',
+    input_schema: obj({ tab: str('Tab id, or title/url fragment'), index: num('Element index'), selector: str('CSS selector'), text: str('Visible text') }),
+    run: async (input, ctx) => ctx.browser('click', { tab: input.tab, index: input.index, selector: input.selector, text: input.text })
+  },
+  {
+    name: 'browser_type', category: 'control',
+    description: 'Type into an input in a browser tab (index, selector or placeholder/label text). Replaces the value unless clear is false; submit presses Enter.',
+    input_schema: obj({ tab: str('Tab id, or title/url fragment'), index: num('Element index'), selector: str('CSS selector'), text: str('Text to type'), submit: bool('Press Enter afterwards'), clear: bool('Clear first (default true)') }, ['text']),
+    run: async (input, ctx) => ctx.browser('type', { tab: input.tab, index: input.index, selector: input.selector, text: input.text, submit: !!input.submit, clear: input.clear !== false })
+  },
+  {
+    name: 'browser_select', category: 'control',
+    description: 'Choose an option in a <select> in a browser tab.',
+    input_schema: obj({ tab: str('Tab id, or title/url fragment'), index: num('Element index'), selector: str('CSS selector'), value: str('Option value or label') }, ['value']),
+    run: async (input, ctx) => ctx.browser('select', { tab: input.tab, index: input.index, selector: input.selector, value: input.value })
+  },
+  {
+    name: 'browser_hover', category: 'control',
+    description: 'Hover over an element in a browser tab.',
+    input_schema: obj({ tab: str('Tab id, or title/url fragment'), index: num('Element index'), selector: str('CSS selector'), text: str('Visible text') }),
+    run: async (input, ctx) => ctx.browser('hover', { tab: input.tab, index: input.index, selector: input.selector, text: input.text })
+  },
+  {
+    name: 'browser_scroll', category: 'control',
+    description: 'Scroll a browser tab by pixels (negative = up).',
+    input_schema: obj({ tab: str('Tab id, or title/url fragment'), dy: num('Pixels') }, ['dy']),
+    run: async (input, ctx) => ctx.browser('scroll', { tab: input.tab, dy: input.dy })
+  },
+  {
+    name: 'browser_wait', category: 'control',
+    description: 'Wait for an element (selector) in a browser tab, or for some milliseconds.',
+    input_schema: obj({ tab: str('Tab id, or title/url fragment'), selector: str('CSS selector'), ms: num('Milliseconds (default 10000, max 30000)') }),
+    run: async (input, ctx) => ctx.browser('wait', { tab: input.tab, selector: input.selector, ms: input.ms })
+  },
+  {
+    name: 'browser_back', category: 'control',
+    description: 'Go back one page in a browser tab.',
+    input_schema: obj({ tab: str('Tab id, or title/url fragment') }),
+    run: async (input, ctx) => ctx.browser('back', { tab: input.tab })
+  },
+  {
+    name: 'browser_forward', category: 'control',
+    description: 'Go forward one page in a browser tab.',
+    input_schema: obj({ tab: str('Tab id, or title/url fragment') }),
+    run: async (input, ctx) => ctx.browser('forward', { tab: input.tab })
+  },
+  {
+    name: 'browser_activate', category: 'control',
+    description: 'Bring a browser tab to the front for the user to see.',
+    input_schema: obj({ tab: str('Tab id, or title/url fragment') }),
+    run: async (input, ctx) => ctx.browser('activate', { tab: input.tab })
+  },
+  {
+    name: 'browser_close_tab', category: 'control',
+    description: 'Close a browser tab.',
+    input_schema: obj({ tab: str('Tab id, or title/url fragment') }, ['tab']),
+    run: async (input, ctx) => ctx.browser('close', { tab: input.tab })
+  },
+  {
+    name: 'browser_eval', category: 'control',
+    description: 'Run JavaScript in a browser tab and return the result.',
+    input_schema: obj({ tab: str('Tab id, or title/url fragment'), code: str('JavaScript') }, ['code']),
+    run: async (input, ctx) => ctx.browser('eval', { tab: input.tab, code: input.code })
+  },
+  // ------------------------------------------------------- memory
+  {
+    name: 'memory_remember', category: 'read',
+    description: "Save a lasting fact to your global memory - about the user (name, role, preferences, how they like things done), their work, or the machine. Memory persists across all conversations and is shown to you at the start of each one. Don't store transient details.",
+    input_schema: obj({ text: str('The fact, in one or two sentences'), tags: { type: 'array', items: { type: 'string' }, description: 'Optional tags, e.g. ["preference"], ["project"]' } }, ['text']),
+    run: async (input, ctx) => { const m = ctx.memory.remember(input.text, input.tags); return { ok: true, id: m.id }; }
+  },
+  {
+    name: 'memory_recall', category: 'read',
+    description: 'Search your global memory (all entries when query is empty).',
+    input_schema: obj({ query: str('Words to look for') }),
+    run: async (input, ctx) => ({ memories: ctx.memory.recall(input.query || '').map((m) => ({ id: m.id, text: m.text, tags: m.tags })) })
+  },
+  {
+    name: 'memory_forget', category: 'read',
+    description: 'Delete a memory entry by id (see memory_recall).',
+    input_schema: obj({ id: str('Memory id') }, ['id']),
+    run: async (input, ctx) => ({ ok: ctx.memory.forget(input.id) })
   },
   {
     name: 'list_tasks', category: 'read',

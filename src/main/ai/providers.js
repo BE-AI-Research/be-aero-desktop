@@ -39,7 +39,10 @@ function toAnthropicMessages(messages) {
       out.push({
         role: 'user',
         content: (m.results || []).map((r) => ({
-          type: 'tool_result', tool_use_id: r.id, content: String(r.content || ''),
+          type: 'tool_result', tool_use_id: r.id,
+          content: r.images && r.images.length
+            ? [{ type: 'text', text: String(r.content || '') }, ...r.images.map((im) => ({ type: 'image', source: { type: 'base64', media_type: im.mime, data: im.data } }))]
+            : String(r.content || ''),
           ...(r.isError ? { is_error: true } : {})
         }))
       });
@@ -73,8 +76,17 @@ function toOpenAiMessages(system, messages) {
       }
       out.push(msg);
     } else if (m.role === 'tool') {
+      const shots = [];
       for (const r of m.results || []) {
         out.push({ role: 'tool', tool_call_id: r.id, content: String(r.content || '') });
+        for (const im of r.images || []) shots.push({ name: r.name, im });
+      }
+      // The tool role cannot carry images here; hand them over as a user turn.
+      if (shots.length) {
+        out.push({ role: 'user', content: [
+          { type: 'text', text: `Screenshot${shots.length > 1 ? 's' : ''} returned by ${[...new Set(shots.map((s) => s.name))].join(', ')}:` },
+          ...shots.map((s) => ({ type: 'image_url', image_url: { url: `data:${s.im.mime};base64,${s.im.data}` } }))
+        ] });
       }
     }
   }

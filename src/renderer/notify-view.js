@@ -71,9 +71,13 @@
       // Anchor above the dock widget, inside the sidebar.
       const dock = document.querySelector('.tasks-widget');
       const r = dock ? dock.getBoundingClientRect() : { top: window.innerHeight - 80, left: 8, width: 300 };
-      panel.style.left = `${Math.max(8, r.left)}px`;
+      panel.style.left = `${Math.max(8, Math.min(r.left, window.innerWidth - 248))}px`;
       panel.style.width = `${Math.max(240, Math.min(window.innerWidth - 16, r.width))}px`;
-      panel.style.bottom = `${Math.max(8, window.innerHeight - r.top + 8)}px`;
+      if (r.top > window.innerHeight * 0.4) {
+        panel.style.top = ''; panel.style.bottom = `${Math.max(8, window.innerHeight - r.top + 8)}px`;
+      } else {
+        panel.style.bottom = ''; panel.style.top = `${Math.min(window.innerHeight - 120, r.bottom + 8)}px`;
+      }
       aero.notifyRead(null); // opening the center reads everything
     }
   }

@@ -92,6 +92,7 @@
         <button class="icon-btn ai-new" title="New chat tab">&#65291;</button>
         <button class="icon-btn ai-delete" title="Delete this conversation">&#128465;</button>
         <button class="icon-btn ai-tasks-btn" title="Scheduled tasks">&#9201;</button>
+        <button class="icon-btn ai-min" title="Minimize to the dock">&#8212;</button>
         <button class="icon-btn ai-pin" title="Keep above other windows while the assistant works">&#128204;</button>
       </div>
       <div class="ai-tabs"></div>
@@ -176,6 +177,16 @@
           <option value="deny">Never - read-only assistant</option>
         </select>
         <div class="hint-text">Reading (settings, telemetry, search, web pages) never asks. Changing settings, launching apps, operating web widgets and closing windows is gated by this.</div>
+        <label class="field-label">Memory</label>
+        <label class="check"><input id="set-ai-memory" type="checkbox"> Let the assistant remember facts about me and my work across conversations</label>
+        <div id="ai-memory-list" class="plugin-list"></div>
+        <div class="row">
+          <input id="ai-memory-new" type="text" spellcheck="true" placeholder="Add a fact it should know...">
+          <button class="btn" id="btn-ai-memory-add">Remember</button>
+          <button class="btn btn-danger" id="btn-ai-memory-clear">Forget all</button>
+        </div>
+        <label class="field-label">Browser control</label>
+        <div class="hint-text" id="ai-browser-info">Checking for a Chromium-based browser...</div>
         <label class="check"><input id="set-notify-toast" type="checkbox"> Also show system toasts for web widget and AI notifications</label>
         <div class="hint-text" id="ai-status">Not configured.</div>
       </details>
@@ -366,6 +377,7 @@
   <script src="telemetry-view.js"></script>
   <script src="extensions.js"></script>
   <script src="tasks-view.js"></script>
+  <script src="../shared/pagescripts.js"></script>
   <script src="webops.js"></script>
   <script src="ai-view.js"></script>
   <script src="notify-view.js"></script>

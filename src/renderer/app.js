@@ -56,6 +56,12 @@
   AeroTasks.init({
     aero,
     onRestoreWidget: async (id) => {
+      if (id === '__ai__') {
+        await aero.setSettings({ ai: { minimized: false } });
+        const w = document.querySelector('.ai-widget');
+        if (w) setTimeout(() => w.scrollIntoView({ block: 'nearest', behavior: 'smooth' }), 100);
+        return;
+      }
       const cur = (await aero.getSettings()).webWidgets || [];
       await aero.setSettings({ webWidgets: cur.map((w) => (w.id === id ? { ...w, minimized: false } : w)) });
     }
@@ -328,11 +334,13 @@
     $('set-startup').checked = s.launchAtStartup;
     const aiCfg = s.ai || {};
     const aiEl = document.querySelector('.ai-widget');
-    if (aiEl) aiEl.classList.toggle('hidden', s.widgets.ai === false || aiCfg.enabled === false);
+    if (aiEl) aiEl.classList.toggle('hidden', s.widgets.ai === false || aiCfg.enabled === false || !!aiCfg.minimized);
+    if (window.AeroExtensions && AeroExtensions.setAiMinimized) AeroExtensions.setAiMinimized(!!aiCfg.minimized && aiCfg.enabled !== false && s.widgets.ai !== false);
     $('set-ai-enabled').checked = aiCfg.enabled !== false;
     if (document.activeElement !== $('set-ai-persona')) $('set-ai-persona').value = aiCfg.systemPrompt || '';
     $('set-ai-permission').value = aiCfg.permission || 'ask';
     if (document.activeElement !== $('set-ai-steps')) $('set-ai-steps').value = Number(aiCfg.maxSteps) || 12;
+    $('set-ai-memory').checked = aiCfg.memoryEnabled !== false;
     $('set-notify-toast').checked = (s.notifications || {}).toast !== false;
     refreshAiStatus();
     if (!recordingDockHotkey && s.dock && s.dock.hotkey) {
@@ -544,6 +552,37 @@
     aero.setSettings({ ai: { model: e.target.value } }).then(refreshAiStatus);
   });
   $('set-ai-permission').addEventListener('change', (e) => aero.setSettings({ ai: { permission: e.target.value } }).then(refreshAiStatus));
+  async function renderMemory() {
+    const list = await aero.aiMemory();
+    const box = $('ai-memory-list');
+    box.innerHTML = '';
+    if (!list.length) { const e = document.createElement('div'); e.className = 'hint-text'; e.textContent = 'Nothing remembered yet.'; box.appendChild(e); return; }
+    for (const m of list) {
+      const row = document.createElement('div');
+      row.className = 'plugin-row';
+      row.innerHTML = `<span class="plugin-name" title="${new Date(m.updatedAt).toLocaleString()}">${m.text.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]))}${m.tags && m.tags.length ? ` <small>[${m.tags.join(', ')}]</small>` : ''}</span><button class="icon-btn" title="Forget">\u2715</button>`;
+      row.querySelector('button').addEventListener('click', async () => { await aero.aiMemoryForget(m.id); renderMemory(); });
+      box.appendChild(row);
+    }
+  }
+  $('set-ai-memory').addEventListener('change', (e) => aero.setSettings({ ai: { memoryEnabled: e.target.checked } }));
+  $('btn-ai-memory-add').addEventListener('click', async () => {
+    const v = $('ai-memory-new').value.trim();
+    if (!v) return;
+    await aero.aiMemoryAdd(v);
+    $('ai-memory-new').value = '';
+    renderMemory();
+  });
+  $('ai-memory-new').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('btn-ai-memory-add').click(); });
+  $('btn-ai-memory-clear').addEventListener('click', async () => { await aero.aiMemoryClear(); renderMemory(); });
+  renderMemory();
+  aero.aiBrowserInfo().then((b) => {
+    $('ai-browser-info').textContent = b && b.available
+      ? `${b.browser}${b.isDefault ? ' (your default browser)' : ''} will be driven through DevTools with a dedicated BE-Aero profile - sign in to sites there once.`
+      : 'No Chromium-based browser (Chrome, Edge, Brave) found - browser tools are unavailable; web widgets still work.';
+  }).catch(() => {});
+  // Refresh the memory list when the assistant writes to it.
+  aero.onAiEvent((ev) => { if (ev && ev.type === 'tool' && /^memory_/.test(ev.name || '')) renderMemory(); });
   $('set-ai-steps').addEventListener('change', (e) => {
     const n = Math.max(1, Math.min(500, Math.round(Number(e.target.value) || 12)));
     e.target.value = n;

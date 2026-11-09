@@ -113,10 +113,10 @@
           const img = document.createElement('img');
           img.src = w.favicon;
           img.alt = '';
-          img.addEventListener('error', () => { ic.textContent = '🌐'; img.remove(); });
+          img.addEventListener('error', () => { ic.textContent = w.glyph || '🌐'; img.remove(); });
           ic.appendChild(img);
         } else {
-          ic.textContent = '🌐';
+          ic.textContent = w.glyph || '🌐';
         }
         t.addEventListener('click', () => onRestoreWidget && onRestoreWidget(w.id));
         t.addEventListener('contextmenu', (e) => { e.preventDefault(); onRestoreWidget && onRestoreWidget(w.id); });
