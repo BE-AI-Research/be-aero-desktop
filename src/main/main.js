@@ -285,7 +285,7 @@ function displayGeometry() {
 // (bounds changes, startup, losing focus) - unless Always on top is chosen.
 function sinkToDesktop() {
   if (process.platform !== 'win32' || !win || !taskWindows) return;
-  if (store.get('alwaysOnTop') || (aiService && aiService.isPinned())) return;
+  if (store.get('alwaysOnTop') || dockSummoned || (aiService && aiService.isPinned())) return;
   try {
     const handle = win.getNativeWindowHandle();
     const hwnd = handle.length >= 8 ? Number(handle.readBigUInt64LE(0)) : handle.readUInt32LE(0);
@@ -624,8 +624,8 @@ function updateSettings(patch) {
   }
   if (patch.telemetry && ('interval' in patch.telemetry || 'metrics' in patch.telemetry)) startTelemetry();
   if (spotlight && patch.theme) spotlight.applyTheme && spotlight.applyTheme(s.theme);
-  if (patch.dock && typeof patch.dock === 'object' && 'hotkey' in patch.dock) {
-    applyDockHotkey(s.dock.hotkey);
+  if (patch.appDock && typeof patch.appDock === 'object' && 'hotkey' in patch.appDock) {
+    applyDockHotkey(s.appDock.hotkey);
   }
   if (spotlight && patch.search) {
     if ('hotkey' in patch.search) spotlight.applyHotkey(s.search.hotkey);
@@ -665,8 +665,8 @@ function buildMenuTemplate() {
       widgetItem(`Application dock${dockHotkey ? '\t' + dockHotkey.replace('Control', 'Ctrl') : ''}`, 'tasks'),
       { label: 'Dock alignment', submenu: ['left', 'center', 'right'].map((a) => ({
         label: a[0].toUpperCase() + a.slice(1), type: 'radio',
-        checked: ((store.get('dock') || {}).align || 'center') === a,
-        click: () => updateSettings({ dock: { align: a } })
+        checked: ((store.get('appDock') || {}).align || 'center') === a,
+        click: () => updateSettings({ appDock: { align: a } })
       })) },
       widgetItem('Scratchpad', 'scratchpad'),
       widgetItem('AI chat', 'ai'),
@@ -1237,7 +1237,7 @@ ipcMain.handle('tasks:icon', async (_e, exe) => {
 function dockKnowsExe(exe) {
   if (typeof exe !== 'string') return false;
   if (process.platform === 'linux' ? !/\.desktop$/i.test(exe) : !/\.exe$/i.test(exe)) return false;
-  const pinned = (store.get('dock') || {}).pinned || [];
+  const pinned = (store.get('appDock') || {}).pinned || [];
   return isPinned(pinned, exe) || lastDockExes.has(exe.toLowerCase());
 }
 let lastDockExes = new Set();
@@ -1275,7 +1275,7 @@ ipcMain.handle('dock:menu', (_e, tile) => new Promise((resolve) => {
     .filter((w) => Number.isSafeInteger(w.hwnd) && w.hwnd > 0);
   const exe = typeof tile.exe === 'string' ? tile.exe : null;
   const name = String(tile.name || '').slice(0, 40) || 'App';
-  const pinned = (store.get('dock') || {}).pinned || [];
+  const pinned = (store.get('appDock') || {}).pinned || [];
   const done = (r) => resolve(r);
 
   const template = [{ label: name, enabled: false }, { type: 'separator' }];
@@ -1296,9 +1296,9 @@ ipcMain.handle('dock:menu', (_e, tile) => new Promise((resolve) => {
     template.push({
       label: isPinned(pinned, exe) ? 'Unpin from dock' : 'Pin to dock',
       click: () => {
-        const dock = store.get('dock') || {};
+        const dock = store.get('appDock') || {};
         dock.pinned = togglePinned(dock.pinned || [], exe, name);
-        store.get().dock = dock;
+        store.get().appDock = dock;
         store.save();
         if (win) win.webContents.send('settings:changed', publicSettings());
         done('pin');
@@ -1613,7 +1613,7 @@ app.whenReady().then(() => {
   globalShortcut.register(TOGGLE_SHORTCUT, toggleWindow);
   spotlight = new Spotlight({ store, root: ROOT });
   spotlight.init();
-  applyDockHotkey((store.get('dock') || {}).hotkey);
+  applyDockHotkey((store.get('appDock') || {}).hotkey);
 
   PLUGINS_DIR = path.join(app.getPath('userData'), 'plugins');
   require('fs').mkdirSync(PLUGINS_DIR, { recursive: true });

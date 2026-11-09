@@ -1054,3 +1054,5 @@ webview.plugin-frame { background: #fff; }
 .ai-tool-shot { display: block; max-width: 100%; border-radius: 6px; margin: 4px 8px 6px; border: 1px solid rgba(255,255,255,.14); }
 #ai-memory-list { max-height: 160px; overflow-y: auto; }
 #ai-memory-list .plugin-row small { opacity: .6; }
+
+.notify-tile .ticon svg { width: 22px; height: 22px; display: block; }

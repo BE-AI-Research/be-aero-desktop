@@ -80,9 +80,10 @@ const DEFAULTS = {
     notify: true,   // fallback builds (portable / Linux): notification only
     notifiedVersion: null   // last version the user was told about (no nagging)
   },
-  // Application dock: apps pinned to it. [{ exe, name }]
-  dock: {
-    pinned: [],
+  // Application dock widget. (The layout mode above is also called `dock`;
+  // this object used to share that key and silently broke both.)
+  appDock: {
+    pinned: [],       // [{ exe, name }]
     align: 'center',  // 'left' | 'center' | 'right'
     hotkey: 'Control+Alt+D'   // summons the dock above everything; falls back if taken
   },
@@ -134,7 +135,14 @@ class Store {
     this.data = merge(DEFAULTS, {});
     try {
       if (fs.existsSync(this.file)) {
-        this.data = merge(DEFAULTS, JSON.parse(fs.readFileSync(this.file, 'utf8')));
+        const saved = JSON.parse(fs.readFileSync(this.file, 'utf8'));
+        // Older builds stored the app-dock object under `dock`, colliding
+        // with the layout mode of the same name. Move it to appDock.
+        if (saved && saved.dock && typeof saved.dock === 'object') {
+          saved.appDock = merge(saved.appDock || {}, saved.dock);
+          saved.dock = 'right';
+        }
+        this.data = merge(DEFAULTS, saved);
       }
     } catch (err) {
       console.error('Failed to read settings, using defaults:', err);

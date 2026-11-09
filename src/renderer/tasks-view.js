@@ -145,7 +145,7 @@
 
   // Pins live in settings; the sidebar pushes them here on every change.
   function update(settings) {
-    const dock = settings.dock || {};
+    const dock = settings.appDock || {};
     if (barEl) {
       const align = { left: 'flex-start', right: 'flex-end' }[dock.align] || 'center';
       barEl.style.justifyContent = align;

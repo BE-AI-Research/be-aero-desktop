@@ -54,10 +54,13 @@
   }
 
   function renderTile(barEl) {
-    tileEl = document.createElement('div');
-    tileEl.className = `tile notify-tile${state.unread ? ' has-unread' : ''}`;
+    // Same element shape as an app tile so it gets the dock's size, hover
+    // and hit-area styling - a bare div had no layout and nothing to click.
+    tileEl = document.createElement('button');
+    tileEl.className = `dock-tile notify-tile${state.unread ? ' has-unread' : ''}`;
+    tileEl.type = 'button';
     tileEl.title = state.unread ? `${state.unread} new notification${state.unread === 1 ? '' : 's'}` : 'Notifications';
-    tileEl.innerHTML = `<div class="ticon">${BELL}</div>${state.unread ? `<span class="count">${state.unread > 99 ? '99+' : state.unread}</span>` : ''}`;
+    tileEl.innerHTML = `<div class="dock-ico ticon">${BELL}</div>${state.unread ? `<span class="count">${state.unread > 99 ? '99+' : state.unread}</span>` : ''}`;
     tileEl.addEventListener('click', (e) => { e.stopPropagation(); togglePanel(); });
     tileEl.addEventListener('contextmenu', (e) => { e.preventDefault(); aero.notifyClear(); });
     barEl.appendChild(tileEl);

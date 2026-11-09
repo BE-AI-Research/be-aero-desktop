@@ -343,8 +343,8 @@
     $('set-ai-memory').checked = aiCfg.memoryEnabled !== false;
     $('set-notify-toast').checked = (s.notifications || {}).toast !== false;
     refreshAiStatus();
-    if (!recordingDockHotkey && s.dock && s.dock.hotkey) {
-      aero.dockHotkey().then((hk) => { $('set-dock-hotkey').value = AeroHotkey.pretty(hk || s.dock.hotkey); });
+    if (!recordingDockHotkey && s.appDock && s.appDock.hotkey) {
+      aero.dockHotkey().then((hk) => { $('set-dock-hotkey').value = AeroHotkey.pretty(hk || s.appDock.hotkey); });
     }
     $('set-update-auto').checked = (s.updates || {}).auto !== false;
     $('set-update-notify').checked = (s.updates || {}).notify !== false;
@@ -595,9 +595,9 @@
   const dockHotkeyStatus = $('dock-hotkey-status');
   const DOCK_HOTKEY_IDLE = 'Brings the dock up over anything on screen - even a game. Press again or pick an app to dismiss.';
   async function saveDockHotkey(accel) {
-    const s = await aero.setSettings({ dock: { hotkey: accel } });
+    const s = await aero.setSettings({ appDock: { hotkey: accel } });
     const actual = await aero.dockHotkey();
-    dockHotkeyInput.value = AeroHotkey.pretty(actual || s.dock.hotkey);
+    dockHotkeyInput.value = AeroHotkey.pretty(actual || s.appDock.hotkey);
     if (actual && AeroHotkey.normalize(actual) !== AeroHotkey.normalize(accel)) {
       dockHotkeyStatus.textContent =
         `${AeroHotkey.pretty(accel)} is already taken by another app - using ${AeroHotkey.pretty(actual)} instead.`;
@@ -619,7 +619,7 @@
     if (!recordingDockHotkey) return;
     recordingDockHotkey = false;
     dockHotkeyInput.classList.remove('recording');
-    dockHotkeyInput.value = AeroHotkey.pretty((settings.dock || {}).hotkey) || '';
+    dockHotkeyInput.value = AeroHotkey.pretty((settings.appDock || {}).hotkey) || '';
     if (dockHotkeyStatus.textContent.startsWith('Listening')) dockHotkeyStatus.textContent = DOCK_HOTKEY_IDLE;
   });
   dockHotkeyInput.addEventListener('keydown', async (e) => {
