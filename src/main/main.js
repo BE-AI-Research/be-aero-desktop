@@ -1774,6 +1774,7 @@ app.whenReady().then(() => {
   mediaCtl = new (require('./media').MediaController)();
   ipcMain.handle('media:info', () => mediaCtl.info());
   ipcMain.handle('media:action', (_e, name) => mediaCtl.action(String(name || '')));
+  ipcMain.handle('media:seek', (_e, seconds) => mediaCtl.seek(Number(seconds)));
   whisper = new (require('./whisper').Whisper)({ dir: path.join(app.getPath('userData'), 'whisper') });
   piper = new (require('./piper').Piper)({ dir: path.join(app.getPath('userData'), 'piper') });
   voice = new (require('./voice').Voice)({

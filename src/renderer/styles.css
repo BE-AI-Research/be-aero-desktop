@@ -1091,8 +1091,18 @@ webview.plugin-frame { background: #fff; }
 .media-title { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .media-sub { font-size: 11px; opacity: .75; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .media-app { font-size: 10px; opacity: .5; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
-.media-progress { height: 3px; border-radius: 2px; background: rgba(255,255,255,.12); overflow: hidden; }
-.media-bar { height: 100%; width: 0; background: var(--accent); transition: width .4s linear; }
+.media-track { position: relative; height: 14px; display: flex; align-items: center; flex: none; touch-action: none; }
+.media-progress { position: relative; width: 100%; height: 3px; border-radius: 2px; background: rgba(255,255,255,.12); overflow: hidden; transition: height .12s; }
+.media-bar { height: 100%; width: 0; background: var(--accent); }
+.media-thumb { position: absolute; top: 50%; left: 0; width: 12px; height: 12px; margin: -6px 0 0 -6px; border-radius: 50%;
+  background: #fff; box-shadow: 0 0 0 2px var(--accent), 0 1px 4px rgba(0,0,0,.45); opacity: 0; transform: scale(.6);
+  transition: opacity .12s, transform .12s; pointer-events: none; }
+.media-can-seek .media-track { cursor: pointer; }
+.media-can-seek .media-thumb { opacity: .9; transform: scale(.85); }
+.media-can-seek .media-track:hover .media-thumb, .media-scrubbing .media-thumb { opacity: 1; transform: scale(1.15); }
+.media-can-seek .media-track:hover .media-progress, .media-scrubbing .media-progress { height: 5px; }
+.media-time { font-size: 10px; opacity: .6; text-align: right; margin-top: -4px; font-variant-numeric: tabular-nums; min-height: 12px; }
+.media-none .media-time { visibility: hidden; }
 .media-controls { display: flex; align-items: center; gap: 2px; }
 .media-spacer { flex: 1; }
 .media-btn { font-size: 13px; width: 28px; height: 24px; }
