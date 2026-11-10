@@ -659,10 +659,128 @@
   }
 
   // ------------------------------------------------------------ voice
+  // The microphone is captured here (so the user chooses the device) and
+  // streamed to main as 16 kHz mono PCM; main runs the offline recognizer.
+  // Replies come back from main as WAV and play on the chosen speaker.
+  const PCM_RATE = 16000;
   let voiceCfg = {};
   let listening = false;
   let micBtn = null;
-  function setVoice(cfg) { voiceCfg = cfg || {}; if (!voiceCfg.speak && window.speechSynthesis) speechSynthesis.cancel(); }
+  let capture = null;          // { stream, ctx, node, src }
+  let player = null;           // current <audio> for a spoken reply
+  let speakQueue = Promise.resolve();
+
+  function setVoice(cfg) {
+    voiceCfg = cfg || {};
+    if (!voiceCfg.speak) stopSpeaking();
+  }
+
+  // Float32 at any sample rate -> Int16 at 16 kHz (linear interpolation).
+  function toPcm16(float32, fromRate) {
+    if (fromRate === PCM_RATE) {
+      const out = new Int16Array(float32.length);
+      for (let i = 0; i < float32.length; i++) { const v = Math.max(-1, Math.min(1, float32[i])); out[i] = v < 0 ? v * 0x8000 : v * 0x7FFF; }
+      return out;
+    }
+    const ratio = fromRate / PCM_RATE;
+    const n = Math.floor(float32.length / ratio);
+    const out = new Int16Array(n);
+    for (let i = 0; i < n; i++) {
+      const pos = i * ratio;
+      const i0 = Math.floor(pos);
+      const i1 = Math.min(float32.length - 1, i0 + 1);
+      const v = Math.max(-1, Math.min(1, float32[i0] + (float32[i1] - float32[i0]) * (pos - i0)));
+      out[i] = v < 0 ? v * 0x8000 : v * 0x7FFF;
+    }
+    return out;
+  }
+
+  async function openMic(onChunk) {
+    const constraints = { audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 } };
+    if (voiceCfg.micId) constraints.audio.deviceId = { exact: voiceCfg.micId };
+    let stream;
+    try { stream = await navigator.mediaDevices.getUserMedia(constraints); }
+    catch (err) {
+      if (voiceCfg.micId) { delete constraints.audio.deviceId; stream = await navigator.mediaDevices.getUserMedia(constraints); }   // the saved device is gone
+      else throw err;
+    }
+    const ctx = new AudioContext();
+    const src = ctx.createMediaStreamSource(stream);
+    const node = ctx.createScriptProcessor(4096, 1, 1);
+    node.onaudioprocess = (e) => {
+      const f = e.inputBuffer.getChannelData(0);
+      let sum = 0;
+      for (let i = 0; i < f.length; i++) sum += f[i] * f[i];
+      onChunk(toPcm16(f, ctx.sampleRate), Math.sqrt(sum / f.length));
+    };
+    src.connect(node);
+    node.connect(ctx.destination);   // a ScriptProcessor only runs while connected; the gain is muted below
+    const mute = ctx.createGain(); mute.gain.value = 0;
+    node.disconnect(); node.connect(mute); mute.connect(ctx.destination);
+    return { stream, ctx, node, src, mute };
+  }
+
+  function closeMic(c) {
+    if (!c) return;
+    try { c.node.disconnect(); c.src.disconnect(); c.mute.disconnect(); } catch { /* fine */ }
+    try { c.stream.getTracks().forEach((t) => t.stop()); } catch { /* fine */ }
+    try { c.ctx.close(); } catch { /* fine */ }
+  }
+
+  function setListening(on) {
+    listening = on;
+    if (micBtn) {
+      micBtn.classList.toggle('on', on);
+      micBtn.style.setProperty('--level', '0');
+      micBtn.title = on ? 'Listening - click to stop' : 'Voice input (offline speech recognition)';
+    }
+  }
+
+  function onVoice(ev) {
+    if (!ev) return;
+    if (ev.type === 'ready') { if (listening) statusEl.textContent = 'Listening…'; return; }
+    if (ev.type === 'final' && ev.text) {
+      const cur = inputEl.value;
+      inputEl.value = (cur ? cur.replace(/\s*$/, ' ') : '') + ev.text;
+      inputEl.dispatchEvent(new Event('input'));
+      if (voiceCfg.autoSend) send();
+      return;
+    }
+    if (ev.type === 'error') bubble('error', esc(ev.text || 'Voice input failed.'));
+    if (ev.type === 'end' || ev.type === 'error') { stopMic(); }
+  }
+
+  async function startMic() {
+    if (listening) return;
+    stopSpeaking();
+    statusEl.textContent = 'Starting the microphone…';
+    try {
+      capture = await openMic((pcm, rms) => {
+        if (!listening) return;
+        aero.aiVoiceFeed(new Uint8Array(pcm.buffer));
+        if (micBtn) micBtn.style.setProperty('--level', String(Math.min(1, rms * 6)));
+      });
+    } catch (err) {
+      bubble('error', `Microphone unavailable: ${esc(err && err.message || err)}`);
+      statusEl.textContent = '';
+      return;
+    }
+    setListening(true);
+    statusEl.textContent = 'Listening…';
+    const ok = await aero.aiVoiceStart();
+    if (!ok) stopMic();
+  }
+
+  async function stopMic() {
+    if (capture) { closeMic(capture); capture = null; }
+    const was = listening;
+    setListening(false);
+    if (was) { try { await aero.aiVoiceStop(); } catch { /* fine */ } }
+    syncBusy();
+  }
+
+  function toggleMic() { return listening ? stopMic() : startMic(); }
+
   function speakable(text) {
     return String(text || '')
       .replace(/```[\s\S]*?```/g, ' code block omitted. ')
@@ -673,38 +791,60 @@
       .replace(/https?:\/\/\S+/g, ' link ')
       .replace(/\s+/g, ' ').trim().slice(0, 4000);
   }
-  function speak(text) {
-    if (!voiceCfg.speak || !window.speechSynthesis) return;
-    const t = speakable(text);
-    if (!t) return;
-    const u = new SpeechSynthesisUtterance(t);
-    u.rate = Math.max(0.5, Math.min(2, Number(voiceCfg.rate) || 1));
-    if (voiceCfg.voiceName) { const v = speechSynthesis.getVoices().find((x) => x.name === voiceCfg.voiceName); if (v) u.voice = v; }
-    speechSynthesis.speak(u);
-  }
-  function setListening(on) {
-    listening = on;
-    if (micBtn) { micBtn.classList.toggle('on', on); micBtn.title = on ? 'Listening - click to stop' : 'Voice input (offline speech recognition)'; }
-  }
-  function onVoice(ev) {
-    if (!ev) return;
-    if (ev.type === 'ready') { setListening(true); statusEl.textContent = 'Listening…'; return; }
-    if (ev.type === 'final' && ev.text) {
-      const cur = inputEl.value;
-      inputEl.value = (cur ? cur.replace(/\s*$/, ' ') : '') + ev.text;
-      inputEl.dispatchEvent(new Event('input'));
-      if (voiceCfg.autoSend) send();
-      return;
-    }
-    if (ev.type === 'error') { bubble('error', esc(ev.text || 'Voice input failed.')); }
-    if (ev.type === 'end' || ev.type === 'error') { setListening(false); syncBusy(); }
-  }
-  async function toggleMic() {
-    if (listening) { await aero.aiVoiceStop(); setListening(false); syncBusy(); return; }
+
+  function stopSpeaking() {
+    if (player) { try { player.pause(); } catch { /* fine */ } player = null; }
     if (window.speechSynthesis) speechSynthesis.cancel();
-    statusEl.textContent = 'Starting the microphone…';
-    await aero.aiVoiceStart();
   }
 
-  window.AeroAi = { init, md, setVoice, speakable };
+  // Play a rendered WAV on the configured speaker; fall back to the
+  // browser's own synthesis when main has no engine.
+  async function speakNow(text) {
+    const t = speakable(text);
+    if (!t) return;
+    let wav = null;
+    try { wav = await aero.aiVoiceSpeak(t, { voice: voiceCfg.voiceName || '', rate: Number(voiceCfg.rate) || 1 }); } catch { wav = null; }
+    if (wav) {
+      const a = new Audio(`data:audio/wav;base64,${wav}`);
+      player = a;
+      if (voiceCfg.speakerId && typeof a.setSinkId === 'function') { try { await a.setSinkId(voiceCfg.speakerId); } catch { /* default device */ } }
+      await new Promise((res) => { a.onended = res; a.onerror = res; a.play().catch(res); });
+      if (player === a) player = null;
+      return;
+    }
+    if (!window.speechSynthesis) return;
+    await new Promise((res) => {
+      const u = new SpeechSynthesisUtterance(t);
+      u.rate = Math.max(0.5, Math.min(2, Number(voiceCfg.rate) || 1));
+      if (voiceCfg.voiceName) { const v = speechSynthesis.getVoices().find((x) => x.name === voiceCfg.voiceName); if (v) u.voice = v; }
+      u.onend = res; u.onerror = res;
+      speechSynthesis.speak(u);
+    });
+  }
+  function speak(text, force) {
+    if (!force && !voiceCfg.speak) return;
+    speakQueue = speakQueue.then(() => speakNow(text)).catch(() => {});
+    return speakQueue;
+  }
+
+  // Settings helpers: devices need one granted getUserMedia for labels.
+  async function audioDevices() {
+    try { const s = await navigator.mediaDevices.getUserMedia({ audio: true }); s.getTracks().forEach((t) => t.stop()); } catch { /* labels may be empty */ }
+    const all = await navigator.mediaDevices.enumerateDevices();
+    return {
+      mics: all.filter((d) => d.kind === 'audioinput').map((d) => ({ id: d.deviceId, label: d.label || `Microphone ${d.deviceId.slice(0, 6)}` })),
+      speakers: all.filter((d) => d.kind === 'audiooutput').map((d) => ({ id: d.deviceId, label: d.label || `Speaker ${d.deviceId.slice(0, 6)}` }))
+    };
+  }
+  // Listen for `ms` and report the peak level (0-1) through onLevel.
+  async function micTest(onLevel, ms = 5000) {
+    let peak = 0;
+    const c = await openMic((_pcm, rms) => { const l = Math.min(1, rms * 6); peak = Math.max(peak, l); onLevel(l); });
+    await new Promise((res) => setTimeout(res, ms));
+    closeMic(c);
+    return peak;
+  }
+
+  window.AeroAi = { init, md, setVoice, speakable, speak: (t) => speak(t, true), stopSpeaking, audioDevices, micTest, startMic, stopMic };
+
 })();

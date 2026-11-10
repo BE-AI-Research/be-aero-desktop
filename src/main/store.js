@@ -123,7 +123,7 @@ const DEFAULTS = {
     zoom: 1,             // chat text scale (0.8 - 1.6)
     contextTokens: 0,    // request budget; 0 = default for the provider (local servers 16k)
     compactWithModel: true,
-    voice: { speak: false, voiceName: '', rate: 1, autoSend: false }
+    voice: { speak: false, voiceName: '', rate: 1, autoSend: false, micId: '', speakerId: '' }
   },
   notifications: {
     toast: true              // also show OS toasts for web-widget / AI notifications

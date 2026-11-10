@@ -250,6 +250,7 @@
   // ---------------------------------------------------------------
   const WIDGET_GLYPH = { search: '\uD83D\uDD0D', clock: '\uD83D\uDD52', weather: '\u26C5', telemetry: '\uD83D\uDCCA', media: '\uD83C\uDFB5', scratchpad: '\uD83D\uDCDD' };
   const WIDGET_NAME = { search: 'Search', clock: 'Chronometer', weather: 'Weather', telemetry: 'System telemetry', media: 'Media controller', scratchpad: 'Scratchpad' };
+  let voiceNames = null;   // TTS voices, filled lazily (used by applySettings before the voice section below)
   const searchInput = $('search-input');
   async function refreshHotkeyLabel() {
     const hk = await aero.searchHotkey();
@@ -645,17 +646,51 @@
     }
   }
   $('set-ai-memory').addEventListener('change', (e) => aero.setSettings({ ai: { memoryEnabled: e.target.checked } }));
-  // Voice: dictation availability from main, speech voices from the renderer.
-  function fillVoices(selected) {
+  // Voice: microphone and speaker are the renderer's devices (pick them
+  // like any web app); voices and dictation come from main's engine.
+  async function fillVoices(selected) {
     const sel = $('set-ai-voice-name');
-    const voices = window.speechSynthesis ? speechSynthesis.getVoices() : [];
-    if (!voices.length) { if (!sel.options.length) { const o = document.createElement('option'); o.value = ''; o.textContent = 'System default voice'; sel.appendChild(o); } return; }
+    if (!voiceNames) {
+      try { voiceNames = (await aero.aiVoiceVoices()).map((v) => ({ name: v.name, label: `${v.name}${v.lang ? ` (${v.lang})` : ''}` })); } catch { voiceNames = []; }
+      if (!voiceNames.length && window.speechSynthesis) voiceNames = speechSynthesis.getVoices().map((v) => ({ name: v.name, label: `${v.name} (${v.lang})` }));
+    }
     sel.innerHTML = '';
     const d = document.createElement('option'); d.value = ''; d.textContent = 'System default voice'; sel.appendChild(d);
-    for (const v of voices) { const o = document.createElement('option'); o.value = v.name; o.textContent = `${v.name} (${v.lang})`; sel.appendChild(o); }
-    sel.value = voices.some((v) => v.name === selected) ? selected : '';
+    for (const v of voiceNames) { const o = document.createElement('option'); o.value = v.name; o.textContent = v.label; sel.appendChild(o); }
+    sel.value = voiceNames.some((v) => v.name === selected) ? selected : '';
   }
-  if (window.speechSynthesis) speechSynthesis.addEventListener('voiceschanged', () => fillVoices($('set-ai-voice-name').value));
+  if (window.speechSynthesis) speechSynthesis.addEventListener('voiceschanged', () => { if (voiceNames && !voiceNames.length) { voiceNames = null; fillVoices($('set-ai-voice-name').value); } });
+  async function fillDevices() {
+    if (!window.AeroAi || !AeroAi.audioDevices) return;
+    const cfg = ((await aero.getSettings()).ai || {}).voice || {};
+    let devs = { mics: [], speakers: [] };
+    try { devs = await AeroAi.audioDevices(); } catch { /* no permission or no devices */ }
+    const fill = (sel, list, chosen, none) => {
+      sel.innerHTML = '';
+      const d = document.createElement('option'); d.value = ''; d.textContent = list.length ? 'System default' : none; sel.appendChild(d);
+      for (const x of list) { const o = document.createElement('option'); o.value = x.id; o.textContent = x.label; sel.appendChild(o); }
+      sel.value = list.some((x) => x.id === chosen) ? chosen : '';
+    };
+    fill($('set-ai-mic'), devs.mics, cfg.micId || '', 'No microphone found');
+    fill($('set-ai-speaker'), devs.speakers, cfg.speakerId || '', 'No output device found');
+  }
+  $('set-ai-mic').addEventListener('change', (e) => aero.setSettings({ ai: { voice: { micId: e.target.value } } }));
+  $('set-ai-speaker').addEventListener('change', (e) => aero.setSettings({ ai: { voice: { speakerId: e.target.value } } }));
+  $('btn-ai-devices').addEventListener('click', fillDevices);
+  $('btn-ai-mic-test').addEventListener('click', async () => {
+    const bar = $('ai-mic-meter').firstElementChild;
+    const btn = $('btn-ai-mic-test');
+    btn.disabled = true; btn.textContent = 'Listening…';
+    try {
+      const peak = await AeroAi.micTest((l) => { bar.style.width = `${Math.round(l * 100)}%`; });
+      $('ai-voice-info').textContent = peak > 0.05 ? `Microphone works (peak level ${Math.round(peak * 100)}%).` : 'No sound reached the microphone - check the device selected above and its Windows privacy setting.';
+    } catch (err) { $('ai-voice-info').textContent = `Microphone test failed: ${err && err.message || err}`; }
+    bar.style.width = '0%'; btn.disabled = false; btn.textContent = 'Test';
+  });
+  $('btn-ai-speaker-test').addEventListener('click', async () => {
+    const cfg = ((await aero.getSettings()).ai || {}).voice || {};
+    if (window.AeroAi) { AeroAi.setVoice(cfg); AeroAi.speak('This is the BE-Aero assistant speaking on the selected device.'); }
+  });
   $('set-ai-voice-autosend').addEventListener('change', (e) => aero.setSettings({ ai: { voice: { autoSend: e.target.checked } } }));
   $('set-ai-voice-speak').addEventListener('change', (e) => aero.setSettings({ ai: { voice: { speak: e.target.checked } } }));
   $('set-ai-voice-name').addEventListener('change', (e) => aero.setSettings({ ai: { voice: { voiceName: e.target.value } } }));
@@ -663,10 +698,13 @@
   if (aero.aiVoiceAvailable) {
     aero.aiVoiceAvailable().then((v) => {
       $('ai-voice-info').textContent = v && v.stt
-        ? `Dictation: ${v.engine}. Click the microphone in the chat and speak; the text lands in the message box.`
+        ? `Dictation: ${v.engine}. Click the microphone in the chat and speak; the text lands in the message box.${v.tts === false ? ' Spoken replies use the browser voice (install espeak-ng for a system voice).' : ''}`
         : `Dictation unavailable: ${v && v.reason || 'unknown'}`;
     }).catch(() => {});
   }
+  // Devices are read when the AI settings section is opened (needs the mic permission once).
+  const aiSection = document.querySelector('details[data-section="ai"]');
+  if (aiSection) aiSection.addEventListener('toggle', () => { if (aiSection.open) fillDevices(); });
   $('btn-ai-memory-add').addEventListener('click', async () => {
     const v = $('ai-memory-new').value.trim();
     if (!v) return;
