@@ -104,17 +104,42 @@ function diskUsage(drive) {
   }
 }
 
-function sample(opts = {}) {
-  const now = cpuTimes();
-  const idleDelta = now.idle - last.idle;
-  const totalDelta = now.total - last.total;
+// CPU use is measured between two readings of the OS counters. Many callers
+// ask for a sample (the telemetry timer, plugins, the app API, the
+// assistant), so a reading is only taken once MIN_CPU_WINDOW_MS has passed
+// since the last one; quicker callers get the latest result. Otherwise an
+// extra call just before the timer leaves it a window of a few ms, and on
+// Linux, whose per-core counters move in 10 ms ticks, most cores then read
+// 0% and the rest jump to 100%.
+const MIN_CPU_WINDOW_MS = 750;
+let lastAt = Date.now();
+let cpuResult = { cpu: 0, perCore: last.cores.map(() => 0) };
+
+function cpuUsage(prev, now) {
+  // A changed core count (CPUs taken offline or brought back) would pair the
+  // wrong cores by position: start a new window instead.
+  if (prev.cores.length !== now.cores.length) return null;
+  const totalDelta = now.total - prev.total;
+  if (totalDelta <= 0) return null;
   const perCore = now.cores.map((c, i) => {
-    const p = last.cores[i];
-    const td = p ? c.total - p.total : 0;
+    const p = prev.cores[i];
+    const td = c.total - p.total;
     return td > 0 ? Math.round(pct((1 - (c.idle - p.idle) / td) * 100)) : 0;
   });
-  last = now;
-  const cpu = totalDelta > 0 ? (1 - idleDelta / totalDelta) * 100 : 0;
+  return { cpu: pct((1 - (now.idle - prev.idle) / totalDelta) * 100), perCore };
+}
+
+function sample(opts = {}) {
+  const t = Date.now();
+  if (t - lastAt >= MIN_CPU_WINDOW_MS || cpuResult.perCore.length === 0) {
+    const now = cpuTimes();
+    const r = cpuUsage(last, now);
+    if (r) cpuResult = r;
+    else if (now.cores.length !== cpuResult.perCore.length) cpuResult = { cpu: cpuResult.cpu, perCore: now.cores.map(() => 0) };
+    last = now;
+    lastAt = t;
+  }
+  const { cpu, perCore } = cpuResult;
 
   const totalMem = os.totalmem();
   const freeMem = os.freemem();
@@ -136,4 +161,4 @@ function sample(opts = {}) {
   return out;
 }
 
-module.exports = { sample, parseNetstat, parseProcNetDev, diskUsage };
+module.exports = { sample, cpuUsage, parseNetstat, parseProcNetDev, diskUsage };

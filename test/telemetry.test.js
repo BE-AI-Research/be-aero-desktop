@@ -25,3 +25,22 @@ test('diskUsage reports the system drive', { skip: process.platform !== 'win32' 
   assert.ok(d && d.percent >= 0 && d.percent <= 100 && d.totalGB > 0);
   assert.strictEqual(d.drive, 'C:');
 });
+
+test('CPU heatmap: quick extra callers reuse the last reading instead of shrinking the window', () => {
+  const a = sample();
+  const b = sample(); // immediately after: must not take a new, near-empty reading
+  assert.deepStrictEqual(b.perCore, a.perCore);
+  assert.strictEqual(b.cpu, a.cpu);
+});
+
+test('CPU heatmap: per-core use from 10 ms Linux-style ticks, and a changed core count starts over', () => {
+  const { cpuUsage } = require('../src/main/telemetry');
+  const snap = (cores) => ({ idle: cores.reduce((s, c) => s + c.idle, 0), total: cores.reduce((s, c) => s + c.total, 0), cores });
+  const prev = snap([{ idle: 1000, total: 2000 }, { idle: 5000, total: 6000 }]);
+  const now = snap([{ idle: 1150, total: 2300 }, { idle: 5300, total: 6300 }]);
+  const r = cpuUsage(prev, now);
+  assert.deepStrictEqual(r.perCore, [50, 0]);
+  assert.strictEqual(Math.round(r.cpu), 25);
+  assert.strictEqual(cpuUsage(prev, snap([{ idle: 1150, total: 2300 }])), null);
+  assert.strictEqual(cpuUsage(prev, prev), null);
+});
