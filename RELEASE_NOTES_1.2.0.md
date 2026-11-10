@@ -27,6 +27,13 @@ Ask for a comparison, a trend, a schedule or a summary and the assistant can ans
 - **No more jump at the end of each reply.** The chat no longer redraws itself.
 - **Reading back while a reply streams** no longer pulls you down to the bottom.
 
+### Clearer speech
+- Replies read aloud (Piper or system voices) now sound natural: abbreviations like "e.g.",
+  "i.e.", "etc." and "vs." are spoken as words; symbols and numbers too ("50%", "$5/mo",
+  "22°C", "1-3 days", "&", "->"); units after numbers ("16 GB", "200 ms", "60 km/h");
+  technical acronyms are spelled ("A P I", "C P U"); file names, emails and links read
+  cleanly; lists, headings and tables get proper pauses; code blocks and emoji are skipped.
+
 ### Layering
 - The settings panel and the toolbar with the main menu always stay on top of widgets,
   however you stack them.

@@ -1126,15 +1126,11 @@
 
   function toggleMic() { return listening ? stopMic() : startMic(); }
 
+  // Reply text -> plain spoken sentences (src/shared/speech.js): symbols,
+  // abbreviations, units, acronyms, lists, tables, code and links.
   function speakable(text) {
-    return String(text || '')
-      .replace(/```[\s\S]*?```/g, ' code block omitted. ')
-      .replace(/`[^`]*`/g, ' ')
-      .replace(/!\[[^\]]*\]\([^)]*\)/g, ' ')
-      .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
-      .replace(/[*_#>|~]+/g, ' ')
-      .replace(/https?:\/\/\S+/g, ' link ')
-      .replace(/\s+/g, ' ').trim().slice(0, 4000);
+    if (window.AeroSpeech) return AeroSpeech.toSpeech(text, 4000);
+    return String(text || '').replace(/```[\s\S]*?```/g, ' ').replace(/[*_#>|~`]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 4000);
   }
 
   function stopSpeaking() {
