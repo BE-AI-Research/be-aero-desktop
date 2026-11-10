@@ -162,6 +162,8 @@ class MediaController {
     this.lastThumb = '';
     this.artCache = new Map();
     this.missing = 0;      // Linux: when playerctl was last found absent
+    this.mpris = null;     // Linux: D-Bus backend when playerctl is not installed
+    this.linuxBackend = null;   // 'playerctl' | 'dbus' | null
   }
 
   // ---------------------------------------------------------------- windows
@@ -242,17 +244,36 @@ class MediaController {
     return out === null ? {} : (parseVolume(out) || {});
   }
 
+  // Linux: playerctl when installed, otherwise MPRIS straight over D-Bus
+  // (gdbus / busctl), which every desktop session has. Debian does not ship
+  // playerctl, so the D-Bus path is the one most people use.
   async infoLinux() {
-    if (Date.now() - this.missing < 30000) return { available: false, status: 'none', hint: 'Install playerctl to control media players (sudo apt install playerctl).' };
+    if (Date.now() - this.missing < 30000) return this.infoDbus();
     const out = await run('playerctl', ['metadata', '--format', '{{status}}\t{{title}}\t{{artist}}\t{{album}}\t{{playerName}}\t{{position}}\t{{mpris:length}}\t{{mpris:artUrl}}']);
     if (out === null) {
       // playerctl exits non-zero both when absent and when no player runs.
       const which = await run('sh', ['-c', 'command -v playerctl']);
-      if (!which) { this.missing = Date.now(); return { available: false, status: 'none', hint: 'Install playerctl to control media players (sudo apt install playerctl).' }; }
+      if (!which) { this.missing = Date.now(); return this.infoDbus(); }
+      this.linuxBackend = 'playerctl';
       return { available: true, status: 'none', ...(await this.volumeLinux()) };
     }
+    this.linuxBackend = 'playerctl';
     const info = parsePlayerctl(out) || { status: 'none' };
     info.sampledAt = Date.now();      // MPRIS reports the position as of now
+    const thumb = await this.artFor(info.artUrl);
+    delete info.artUrl;
+    return { available: true, ...info, thumb, ...(await this.volumeLinux()) };
+  }
+
+  async infoDbus() {
+    if (!this.mpris) this.mpris = new (require('./mpris').Mpris)();
+    const info = await this.mpris.info();
+    if (!info) {
+      this.linuxBackend = null;
+      return { available: false, status: 'none', hint: 'No way to reach media players: install playerctl (sudo apt install playerctl) or the gdbus tool from GLib.' };
+    }
+    this.linuxBackend = 'dbus';
+    if (info.status === 'none') return { available: true, status: 'none', ...(await this.volumeLinux()) };
     const thumb = await this.artFor(info.artUrl);
     delete info.artUrl;
     return { available: true, ...info, thumb, ...(await this.volumeLinux()) };
@@ -267,6 +288,7 @@ class MediaController {
       const am = name === 'mute' ? ['set', 'Master', 'toggle'] : ['set', 'Master', name === 'volup' ? '5%+' : '5%-'];
       return (await run('amixer', am)) !== null;
     }
+    if (this.linuxBackend === 'dbus' && this.mpris) return this.mpris.action(name);
     const verb = { play: 'play', pause: 'pause', toggle: 'play-pause', next: 'next', prev: 'previous', stop: 'stop' }[name];
     return verb ? (await run('playerctl', [verb])) !== null : false;
   }
@@ -283,7 +305,10 @@ class MediaController {
     const s = Number(seconds);
     if (!Number.isFinite(s) || s < 0 || s > 24 * 3600) return false;
     if (process.platform === 'win32') return (await this.send(`seek ${s.toFixed(3)}`)) === 'ok';
-    if (process.platform === 'linux') return (await run('playerctl', ['position', s.toFixed(3)])) !== null;
+    if (process.platform === 'linux') {
+      if (this.linuxBackend === 'dbus' && this.mpris) return this.mpris.seek(s);
+      return (await run('playerctl', ['position', s.toFixed(3)])) !== null;
+    }
     return false;
   }
 
