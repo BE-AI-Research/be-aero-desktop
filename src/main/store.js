@@ -127,6 +127,7 @@ const DEFAULTS = {
     keepAlive: '30m',
     toolCalls: 'auto',   // auto (by model family, with fallback) | native (JSON tools field) | compat (text tool calls)    // local servers (Ollama): keep the model loaded this long after a reply; '0' = don't
     taskMaxRuntimeMin: 30,
+    taskModel: '',       // model for scheduled tasks; '' = the chat model (a task can override)
     compactWithModel: true,
     voice: {
       engine: 'auto',        // auto (Whisper when installed) | whisper | system

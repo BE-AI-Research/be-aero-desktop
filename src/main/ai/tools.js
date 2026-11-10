@@ -551,12 +551,13 @@ const TOOLS = [
       prompt: str('What to do on each run, written as an instruction to yourself'),
       permission: { type: 'string', enum: ['inherit', 'allow', 'deny'], description: 'What the run may change while the user is away (default inherit: the Settings permission, where "ask" means read-only)' },
       conversationMode: { type: 'string', enum: ['shared', 'new'], description: 'shared: one running conversation for the task (default); new: a fresh conversation each run' },
+      model: str('Optional model id for this task only (see the models the server offers); omit to use the Tasks model from Settings, or the chat model'),
       schedule: { type: 'object', description: 'Deprecated: use when' }
     }, ['name', 'prompt']),
     run: async (input, ctx) => {
       if (!input.when && !input.schedule && !input.id) return { error: 'when is required, e.g. "daily 09:00", "every 2h", "in 20m"' };
       try {
-        const t = ctx.tasks.add({ id: input.id, name: input.name, prompt: input.prompt, when: input.when, schedule: input.schedule, permission: input.permission, conversationMode: input.conversationMode });
+        const t = ctx.tasks.add({ id: input.id, name: input.name, prompt: input.prompt, when: input.when, schedule: input.schedule, permission: input.permission, conversationMode: input.conversationMode, ...(input.model !== undefined ? { model: input.model } : {}) });
         const next = ctx.tasks.list().find((x) => x.id === t.id);
         return { ok: true, id: t.id, name: t.name, when: t.when, nextRun: next ? next.nextRun : null };
       } catch (err) {

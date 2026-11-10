@@ -75,7 +75,10 @@ class AiService {
       ? task.permission : (globalMode === 'ask' ? 'deny' : globalMode);
     const when = task.when ? ` - ${task.when}` : '';
     const header = scheduled ? `[Scheduled task "${task.name}"${when}. Nobody is watching: finish the job and keep the summary short.]\n` : '';
-    const result = await this.send(convId, header + task.prompt, [], { permission, source: scheduled ? 'schedule' : 'task', signal });
+    // Model: the task's own choice, else the Tasks model in Settings, else
+    // the chat model.
+    const model = this.taskModel(task);
+    const result = await this.send(convId, header + task.prompt, [], { permission, source: scheduled ? 'schedule' : 'task', signal, model });
     try {
       const conv = this.conversations.get(convId);
       const last = [...conv.messages].reverse().find((m) => m.role === 'assistant' && m.content);
@@ -338,7 +341,7 @@ class AiService {
       execCapture: (cmd, timeoutSec) => d.execCapture(cmd, timeoutSec),
       tasks: {
         list: () => this.scheduler.list().map((t) => ({
-          id: t.id, name: t.name, when: t.when, prompt: t.prompt, state: t.state,
+          id: t.id, name: t.name, when: t.when, prompt: t.prompt, state: t.state, model: this.taskModel(t), modelSource: t.model ? 'task' : this.config().taskModel ? 'tasks setting' : 'chat model',
           nextRun: t.nextRun ? new Date(t.nextRun).toLocaleString() : null,
           lastOutcome: t.lastOutcome || null, failures: t.failures || 0, permission: t.permission, error: t.whenError || undefined
         })),
@@ -578,7 +581,7 @@ class AiService {
     if (preset.needsKey && !this.apiKey()) {
       return { error: `${preset.label} needs an API key - add one in Settings > AI assistant.`, conversationId: conv.id };
     }
-    const model = c.model || preset.model;
+    const model = opts.model || c.model || preset.model;
     if (!model) return { error: 'Choose a model in Settings > AI assistant.', conversationId: conv.id };
 
     this.conversations.append(conv.id, { role: 'user', content, ...(files.length ? { attachments: files } : {}) });
@@ -588,10 +591,16 @@ class AiService {
 
   // One agent turn over the conversation as it stands on disk (the user's
   // message already appended). Shared by send() and resume().
+  // The model a scheduled task runs on (see runTask).
+  taskModel(task) {
+    const c = this.config();
+    return String((task && task.model) || c.taskModel || c.model || this.preset().model || '').trim();
+  }
+
   async runConversation(conv, opts = {}) {
     const c = this.config();
     const preset = this.preset();
-    const model = c.model || preset.model;
+    const model = String(opts.model || c.model || preset.model || '').trim();
     const controller = new AbortController();
     if (opts.signal) {
       if (opts.signal.aborted) controller.abort();

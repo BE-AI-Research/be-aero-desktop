@@ -747,6 +747,9 @@
       </div>
       <div class="ai-when-preview hint-text"></div>
       <div class="row">
+        <select name="model" title="Model this task runs on" data-current="${esc(t.model || '')}"><option value="">Model: default for tasks</option>${t.model ? `<option value="${esc(t.model)}" selected>Model: ${esc(t.model)}</option>` : ''}</select>
+      </div>
+      <div class="row">
         <select name="conversationMode" title="Where the results go">
           <option value="shared"${t.conversationMode !== 'new' ? ' selected' : ''}>One running conversation for this task</option>
           <option value="new"${t.conversationMode === 'new' ? ' selected' : ''}>A fresh conversation each run</option>
@@ -764,7 +767,7 @@
 
   function readForm(form, base) {
     const f = new FormData(form);
-    const out = { ...(base || {}), name: String(f.get('name')).trim(), prompt: String(f.get('prompt')).trim(), when: String(f.get('when')).trim(), conversationMode: f.get('conversationMode'), permission: f.get('permission') };
+    const out = { ...(base || {}), name: String(f.get('name')).trim(), prompt: String(f.get('prompt')).trim(), when: String(f.get('when')).trim(), conversationMode: f.get('conversationMode'), permission: f.get('permission'), model: String(f.get('model') || '') };
     delete out.schedule;
     for (const k of ['summary', 'nextRun', 'running', 'queued', 'enabled', 'lastStatus', 'whenError']) delete out[k];
     return out;
@@ -801,6 +804,17 @@
         preview.textContent = r.ok ? `Next: ${r.times.map(fmtTime).join(' · ')}` : (r.error || 'Not a time I know');
       };
       whenIn.addEventListener('input', showPreview);
+      // Fill the model list from the server (kept for the session).
+      const modelSel = form.querySelector('[name=model]');
+      (async () => {
+        if (!window.__aeroModels) { try { const r = await aero.aiModels(); window.__aeroModels = (r && r.models) || []; } catch { window.__aeroModels = []; } }
+        const cur = modelSel.dataset.current;
+        const st = await aero.getSettings();
+        const def = (st.ai && (st.ai.taskModel || st.ai.model)) || '';
+        modelSel.options[0].textContent = `Model: default for tasks${def ? ` (${def})` : ''}`;
+        for (const m of window.__aeroModels) { if (m === cur) continue; const o = document.createElement('option'); o.value = m; o.textContent = `Model: ${m}`; modelSel.appendChild(o); }
+        modelSel.value = cur;
+      })();
       form.querySelector('[name=preset]').addEventListener('change', (e) => { if (e.target.value) { whenIn.value = e.target.value; e.target.value = ''; showPreview(); } });
       showPreview();
       form.addEventListener('submit', async (e) => {
@@ -820,7 +834,7 @@
         : state === 'done' ? 'done' : state === 'paused' ? (t.failures >= 3 ? `paused after ${t.failures} failures` : 'paused')
         : t.nextRun ? `next ${fmtTime(t.nextRun)}` : 'not scheduled';
       const last = t.lastOutcome ? ` · last: ${t.lastOutcome}` : '';
-      const perm = t.permission === 'allow' ? ' · autonomous' : t.permission === 'deny' ? ' · read-only' : '';
+      const perm = (t.permission === 'allow' ? ' · autonomous' : t.permission === 'deny' ? ' · read-only' : '') + (t.model ? ` · ${t.model.split('/').pop()}` : '');
       row.innerHTML = `<button class="icon-btn t-state" title="${state === 'active' ? 'Pause' : 'Resume'}">${state === 'active' ? '⏸' : '▶'}</button>
         <div class="ai-task-main"><div class="ai-task-name">${esc(t.name)}${t.createdBy === 'agent' ? ' <span class="ai-task-by" title="Created by the assistant">AI</span>' : ''}</div>
         <div class="ai-task-meta">${esc(t.summary || t.when || '')} · ${esc(status)}${esc(last)}${perm}</div>

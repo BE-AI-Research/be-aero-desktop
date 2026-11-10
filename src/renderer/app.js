@@ -583,6 +583,7 @@
     $('set-ai-url').disabled = st.provider === 'anthropic';
     $('set-ai-url').placeholder = st.provider === 'anthropic' ? 'Default Anthropic endpoint' : st.provider === 'becode' ? 'unix://~/.be-code/api/api.sock' : 'Server URL (e.g. http://localhost:11434/v1)';
     if (document.activeElement !== $('set-ai-model')) $('set-ai-model').value = st.model || '';
+    fillTaskModel(st.model || '');
     $('set-ai-key').placeholder = st.hasKey ? 'API key saved (enter a new one to replace)' : (preset.needsKey ? 'API key (required)' : 'API key (optional)');
     const line = !st.enabled ? 'AI assistant is disabled.'
       : (preset.needsKey && !st.hasKey) ? `${st.presetLabel}: add an API key to start.`
@@ -595,6 +596,25 @@
   $('set-ai-context').addEventListener('change', (e) => aero.setSettings({ ai: { contextTokens: Math.max(0, Number(e.target.value) || 0) } }).then(refreshAiStatus));
   $('set-ai-compact').addEventListener('change', (e) => aero.setSettings({ ai: { compactWithModel: e.target.checked } }));
   $('set-ai-toolcalls').addEventListener('change', (e) => aero.setSettings({ ai: { toolCalls: e.target.value } }));
+
+  // "Model for scheduled tasks": the server's models (fetched once per
+  // section open), plus whatever is saved even if the list is unavailable.
+  let serverModels = null;
+  async function fillTaskModel(chatModel) {
+    const sel = $('set-ai-task-model');
+    const saved = ((await aero.getSettings()).ai || {}).taskModel || '';
+    if (serverModels === null) {
+      serverModels = [];
+      try { const r = await aero.aiModels(); if (r && Array.isArray(r.models)) serverModels = r.models; } catch { /* offline */ }
+    }
+    const list = [...new Set([...serverModels, ...(saved ? [saved] : [])])];
+    sel.innerHTML = '';
+    const d = document.createElement('option'); d.value = ''; d.textContent = `Same as the chat model${chatModel ? ` (${chatModel})` : ''}`; sel.appendChild(d);
+    for (const m of list) { const o = document.createElement('option'); o.value = m; o.textContent = m; sel.appendChild(o); }
+    sel.value = saved;
+  }
+  $('set-ai-task-model').addEventListener('change', (e) => aero.setSettings({ ai: { taskModel: e.target.value } }));
+  $('btn-ai-models').addEventListener('click', () => { serverModels = null; setTimeout(() => fillTaskModel($('set-ai-model').value), 1200); });
   $('set-ai-enabled').addEventListener('change', (e) => aero.setSettings({ ai: { enabled: e.target.checked } }));
   let personaTimer = null;
   $('set-ai-persona').addEventListener('input', (e) => {
