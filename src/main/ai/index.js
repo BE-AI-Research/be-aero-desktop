@@ -44,6 +44,8 @@ class AiService {
       getTasks: () => (this.config().tasks || []),
       saveTasks: (tasks) => this.d.updateSettings({ ai: { tasks } }),
       run: (task, info) => this.runTask(task, info),
+      notify: (title, body) => this.d.notify(title, body),
+      maxRuntimeMin: () => Number(this.config().taskMaxRuntimeMin) || 30,
       onChange: (list) => { const w = this.d.getWindow(); if (w && !w.isDestroyed()) w.webContents.send('ai:tasks', list); }
     });
     this.scheduler.start();
@@ -52,7 +54,7 @@ class AiService {
 
   // A scheduled task runs in its own conversation with its own permission
   // policy: unattended runs never raise a dialog - "ask" means read-only.
-  async runTask(task, { scheduled } = {}) {
+  async runTask(task, { scheduled, signal } = {}) {
     if (!this.enabled()) return { error: 'AI assistant is disabled' };
     let convId = task.conversationMode === 'shared' ? task.conversationId : null;
     if (convId) { try { this.conversations.get(convId); } catch { convId = null; } }
@@ -61,10 +63,19 @@ class AiService {
       this.conversations.rename(c.id, `Task: ${task.name}`);
       convId = c.id;
     }
+    // The task's conversation may be busy (someone chatting in it, or the
+    // previous run still answering). Wait for it rather than queueing: a
+    // queued message would be reported as finished before it ran.
+    while (this.runs.has(convId)) {
+      if (signal && signal.aborted) return { stopped: true, conversationId: convId };
+      await new Promise((r) => setTimeout(r, 1000));
+    }
     const globalMode = this.config().permission || 'ask';
     const permission = task.permission && task.permission !== 'inherit'
       ? task.permission : (globalMode === 'ask' ? 'deny' : globalMode);
-    const result = await this.send(convId, task.prompt, [], { permission, source: scheduled ? 'schedule' : 'task' });
+    const when = task.when ? ` - ${task.when}` : '';
+    const header = scheduled ? `[Scheduled task "${task.name}"${when}. Nobody is watching: finish the job and keep the summary short.]\n` : '';
+    const result = await this.send(convId, header + task.prompt, [], { permission, source: scheduled ? 'schedule' : 'task', signal });
     try {
       const conv = this.conversations.get(convId);
       const last = [...conv.messages].reverse().find((m) => m.role === 'assistant' && m.content);
@@ -110,6 +121,47 @@ class AiService {
 
   preset() {
     return PRESETS[this.config().provider] || PRESETS.custom;
+  }
+
+  // One Backend per server URL, kept for the session (it remembers whether
+  // the server can report model status).
+  backend() {
+    const c = this.config();
+    const p = this.preset();
+    if (p.kind === 'anthropic' || !p.local) return null;
+    const url = c.baseUrl || p.baseUrl;
+    if (!this.backendObj || this.backendObj.url !== url) {
+      this.backendObj = { url, b: new (require('./backend').Backend)({ baseUrl: url }), evicted: false, window: 0 };
+    }
+    return this.backendObj;
+  }
+
+  // Before each model call: report an eviction once, and a window change.
+  async checkBackend(model, emit) {
+    const be = this.backend();
+    if (!be) return null;
+    const st = await be.b.status(model);
+    if (!st) return null;
+    if (!st.loaded) {
+      if (!be.evicted) { be.evicted = true; emit({ type: 'notice', text: `The model ${model} is not loaded on the server (evicted by another model or idle expiry). This reply includes load time and re-reading the conversation.` }); }
+    } else {
+      be.evicted = false;
+      if (be.window && st.window && st.window !== be.window) {
+        emit({ type: 'notice', text: `The server's context window for ${model} changed ${be.window.toLocaleString()} -> ${st.window.toLocaleString()} tokens; the conversation budget follows it.` });
+      }
+      if (st.window) be.window = st.window;
+    }
+    return st;
+  }
+
+  // After a reply: extend the model's residency so a pause between
+  // messages does not unload it (Ollama keep_alive; default 30 minutes).
+  refreshKeepAlive(model) {
+    const be = this.backend();
+    if (!be) return;
+    const ka = String(this.config().keepAlive || '30m');
+    if (ka === '0') return;
+    be.b.keepAlive(model, ka).catch(() => {});
   }
 
   // Token budget for one request: the user's number, else a default for
@@ -276,9 +328,14 @@ class AiService {
       runCommand: (cmd) => d.runCommand(cmd),
       execCapture: (cmd, timeoutSec) => d.execCapture(cmd, timeoutSec),
       tasks: {
-        list: () => this.scheduler.list().map((t) => ({ id: t.id, name: t.name, prompt: t.prompt, schedule: t.schedule, enabled: t.enabled !== false, nextRun: t.nextRun, lastStatus: t.lastStatus || null, permission: t.permission })),
-        add: (task) => this.scheduler.upsert(task),
-        remove: (id) => this.scheduler.remove(id)
+        list: () => this.scheduler.list().map((t) => ({
+          id: t.id, name: t.name, when: t.when, prompt: t.prompt, state: t.state,
+          nextRun: t.nextRun ? new Date(t.nextRun).toLocaleString() : null,
+          lastOutcome: t.lastOutcome || null, failures: t.failures || 0, permission: t.permission, error: t.whenError || undefined
+        })),
+        add: (task) => this.scheduler.upsert(task, { createdBy: 'agent' }),
+        remove: (id) => this.scheduler.remove(id),
+        setState: (id, state) => this.scheduler.setState(id, state)
       },
       files: {
         read: (p, maxChars) => {
@@ -501,7 +558,7 @@ class AiService {
     if (!conv) conv = this.conversations.create();
     if (this.runs.has(conv.id)) {
       const q = this.queues.get(conv.id) || [];
-      q.push({ text: content, attachments: files });
+      q.push({ text: content, attachments: files, opts });
       this.queues.set(conv.id, q);
       this.emit(conv.id, { type: 'queue', items: q.map((x) => x.text || `(${(x.attachments || []).length} file${(x.attachments || []).length === 1 ? '' : 's'})`) });
       return { queued: true, position: q.length, conversationId: conv.id };
@@ -527,6 +584,10 @@ class AiService {
     const preset = this.preset();
     const model = c.model || preset.model;
     const controller = new AbortController();
+    if (opts.signal) {
+      if (opts.signal.aborted) controller.abort();
+      else opts.signal.addEventListener('abort', () => controller.abort(), { once: true });
+    }
     this.runs.set(conv.id, controller);
     const emit = (ev) => this.emit(conv.id, ev);
     try {
@@ -535,8 +596,12 @@ class AiService {
         provider, model, conversation: conv, ctx: this.toolContext(conv.id),
         permit: (call) => this.permit(call, opts.permission), emit, signal: controller.signal,
         maxSteps: Math.max(1, Math.min(500, Number(c.maxSteps) || 12)),
-        context: { budget: this.contextBudget(), calibration: this.calibration(), compactWithModel: c.compactWithModel !== false }
+        context: {
+          budget: this.contextBudget(), calibration: this.calibration(), compactWithModel: c.compactWithModel !== false,
+          checkBackend: () => this.checkBackend(model, emit)
+        }
       });
+      if (result && !result.error && !result.stopped) this.refreshKeepAlive(model);
       // A server that went away mid-task: the renderer polls and resumes.
       if (result && result.error && result.retryable) emit({ type: 'offline', message: result.error, local: !!preset.local });
       emit({ type: 'done', ...result });
@@ -552,7 +617,7 @@ class AiService {
       if (q && q.length) {
         const next = q.shift();
         this.emit(conv.id, { type: 'queue', items: q.map((x) => x.text || '(files)') });
-        setImmediate(() => this.send(conv.id, next.text, next.attachments));
+        setImmediate(() => this.send(conv.id, next.text, next.attachments, next.opts || {}));
       }
     }
   }
@@ -630,6 +695,15 @@ class AiService {
     ipcMain.handle('ai:task-delete', (_e, id) => { this.scheduler.remove(String(id)); return true; });
     ipcMain.handle('ai:task-toggle', (_e, id, enabled) => this.scheduler.patch(String(id), { enabled: !!enabled }));
     ipcMain.handle('ai:task-run', (_e, id) => { this.scheduler.runTask(String(id)); return true; });
+    ipcMain.handle('ai:task-preview', (_e, when) => {
+      const { upcoming, validateTask, normalizeWhen } = require('./scheduler');
+      try {
+        const now = Date.now();
+        const times = upcoming(String(when || ''), now, 3, now);
+        const err = validateTask({ name: 'x', prompt: 'x', when: String(when || ''), createdAt: now }, { now });
+        return { ok: !err, error: err || null, times, normalized: normalizeWhen(when) };
+      } catch (err) { return { ok: false, error: err.message, times: [] }; }
+    });
     ipcMain.handle('ai:memory', () => this.memory.list());
     ipcMain.handle('ai:memory-forget', (_e, id) => this.memory.forget(String(id)));
     ipcMain.handle('ai:memory-clear', () => { this.memory.clear(); return true; });

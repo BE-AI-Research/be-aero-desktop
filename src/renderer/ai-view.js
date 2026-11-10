@@ -519,7 +519,7 @@
     stopBtn.hidden = !on;
     sendBtn.title = on ? 'Queue this message for after the current turn' : 'Send (Enter)';
     if (lv && lv.offline) statusEl.textContent = lv.offlineText || 'Server offline - will resume when it is back.';
-    else if (on) statusEl.textContent = lv.retryText || 'Thinking…';
+    else if (on) statusEl.textContent = lv.stallText || lv.retryText || 'Thinking…';
     else if (voiceOffHint && !listening) statusEl.textContent = 'Voice off - click the microphone or press the voice hotkey to dictate again.';
     else statusEl.textContent = contextLine(lv);
   }
@@ -650,6 +650,12 @@
       case 'error':
         if (isActive) bubble('error', esc(ev.message || 'Something went wrong.'));
         break;
+      case 'stall':
+        lv.stallText = ev.stage === 1
+          ? `Waiting for the model: no output for ${ev.seconds} s (loading, re-reading the conversation, or queued behind another request).`
+          : ev.stage === 2 ? `Still waiting for the model after ${ev.seconds} s. Stop cancels; nothing is lost.` : '';
+        if (isActive) syncBusy();
+        break;
       case 'retry':
         // Whatever streamed before the failure is discarded; the call is
         // being made again with the same state.
@@ -672,7 +678,7 @@
         break;
       case 'done':
         if (lv.streamEl && lv.streamText) paintStream(lv);
-        lv.busy = false; lv.streamEl = null; lv.streamText = ''; lv.retryText = '';
+        lv.busy = false; lv.streamEl = null; lv.streamText = ''; lv.retryText = ''; lv.stallText = '';
         if (!isActive) tab.unread = true;
         else if (ev.stopped || ev.error) {
           // A question that got no answer keeps a Resend button.
@@ -718,23 +724,24 @@
     return d < 0 ? `${v} ago` : `in ${v}`;
   };
 
+  // Presets fill the "When" field; anything BE-Code's forms accept can be typed.
+  const WHEN_PRESETS = [
+    ['', 'Quick pick...'], ['in 20m', 'In 20 minutes'], ['in 1h', 'In an hour'], ['at 09:00', 'Once at 9:00'],
+    ['every 30m', 'Every 30 minutes'], ['every 2h', 'Every 2 hours'], ['daily 09:00', 'Every day at 9:00'],
+    ['weekdays 08:30', 'Weekdays at 8:30'], ['mon,thu 14:30', 'Mon & Thu at 14:30'], ['sat,sun 10:00', 'Weekends at 10:00'],
+    ['0 */4 * * *', 'Cron: every 4 hours']
+  ];
+
   function taskForm(task) {
-    const t = task || { name: '', prompt: '', schedule: { type: 'daily', time: '09:00', every: 60, days: [1, 2, 3, 4, 5] }, conversationMode: 'shared', permission: 'inherit', enabled: true };
-    const s = t.schedule || {};
-    const localDT = s.at ? new Date(s.at) : new Date(Date.now() + 3600000);
-    const pad = (n) => String(n).padStart(2, '0');
-    const dtValue = `${localDT.getFullYear()}-${pad(localDT.getMonth() + 1)}-${pad(localDT.getDate())}T${pad(localDT.getHours())}:${pad(localDT.getMinutes())}`;
-    const typeLabel = { daily: 'Daily', weekly: 'Weekly', interval: 'Every N minutes', once: 'Once' };
+    const t = task || { name: '', prompt: '', when: 'daily 09:00', conversationMode: 'shared', permission: 'inherit' };
     return `<form class="ai-task-form">
       <input name="name" placeholder="Task name" value="${esc(t.name)}" required>
       <textarea name="prompt" rows="3" placeholder="What should the assistant do? e.g. 'Summarize my scratchpad and write a to-do list for today'" required>${esc(t.prompt)}</textarea>
       <div class="row">
-        <select name="type">${['daily', 'weekly', 'interval', 'once'].map((v) => `<option value="${v}"${(s.type || 'daily') === v ? ' selected' : ''}>${typeLabel[v]}</option>`).join('')}</select>
-        <input name="time" type="time" value="${esc(s.time || '09:00')}" class="sched daily weekly">
-        <input name="every" type="number" min="1" value="${Number(s.every) || 60}" class="sched interval" title="minutes">
-        <input name="at" type="datetime-local" value="${dtValue}" class="sched once">
+        <input name="when" value="${esc(t.when || '')}" placeholder="When: daily 09:00 · every 2h · in 20m · weekdays 08:30" spellcheck="false" required>
+        <select name="preset" title="Common times">${WHEN_PRESETS.map(([v, l]) => `<option value="${esc(v)}">${esc(l)}</option>`).join('')}</select>
       </div>
-      <div class="row sched weekly ai-days">${DAYS.map((d, i) => `<label><input type="checkbox" name="day${i}"${(s.days || [1, 2, 3, 4, 5]).includes(i) ? ' checked' : ''}> ${d}</label>`).join('')}</div>
+      <div class="ai-when-preview hint-text"></div>
       <div class="row">
         <select name="conversationMode" title="Where the results go">
           <option value="shared"${t.conversationMode !== 'new' ? ' selected' : ''}>One running conversation for this task</option>
@@ -746,20 +753,27 @@
           <option value="deny"${t.permission === 'deny' ? ' selected' : ''}>Permissions: read-only</option>
         </select>
       </div>
+      <div class="ai-task-error"></div>
       <div class="row"><button type="submit" class="btn">${t.id ? 'Save' : 'Add task'}</button><button type="button" class="btn ai-task-cancel">Cancel</button></div>
     </form>`;
   }
 
   function readForm(form, base) {
     const f = new FormData(form);
-    const type = f.get('type');
-    const schedule = { type };
-    if (type === 'once') schedule.at = new Date(String(f.get('at'))).toISOString();
-    if (type === 'interval') schedule.every = Number(f.get('every')) || 60;
-    if (type === 'daily' || type === 'weekly') schedule.time = String(f.get('time'));
-    if (type === 'weekly') schedule.days = DAYS.map((_, i) => i).filter((i) => f.get(`day${i}`));
-    return { ...(base || {}), name: String(f.get('name')).trim(), prompt: String(f.get('prompt')).trim(), schedule, conversationMode: f.get('conversationMode'), permission: f.get('permission') };
+    const out = { ...(base || {}), name: String(f.get('name')).trim(), prompt: String(f.get('prompt')).trim(), when: String(f.get('when')).trim(), conversationMode: f.get('conversationMode'), permission: f.get('permission') };
+    delete out.schedule;
+    for (const k of ['summary', 'nextRun', 'running', 'queued', 'enabled', 'lastStatus', 'whenError']) delete out[k];
+    return out;
   }
+
+  const fmtTime = (ts) => {
+    const d = new Date(ts);
+    const now = new Date();
+    const sameDay = d.toDateString() === now.toDateString();
+    const tomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1).toDateString() === d.toDateString();
+    const hm = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    return sameDay ? `today ${hm}` : tomorrow ? `tomorrow ${hm}` : `${d.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })} ${hm}`;
+  };
 
   function renderTasks() {
     if (activeKey !== TASKS_KEY) return;
@@ -771,13 +785,24 @@
       const wrap = el('div', 'ai-task-edit', tasksEl);
       wrap.innerHTML = taskForm(editingTask.id ? editingTask : null);
       const form = wrap.querySelector('form');
-      const typeSel = form.querySelector('[name=type]');
-      const showSched = () => { for (const x of form.querySelectorAll('.sched')) x.classList.toggle('hidden', !x.classList.contains(typeSel.value)); };
-      typeSel.addEventListener('change', showSched); showSched();
+      const whenIn = form.querySelector('[name=when]');
+      const preview = form.querySelector('.ai-when-preview');
+      const errEl = form.querySelector('.ai-task-error');
+      let pv = 0;
+      const showPreview = async () => {
+        const mine = ++pv;
+        const r = await aero.aiTaskPreview(whenIn.value);
+        if (mine !== pv) return;
+        preview.classList.toggle('bad', !r.ok);
+        preview.textContent = r.ok ? `Next: ${r.times.map(fmtTime).join(' · ')}` : (r.error || 'Not a time I know');
+      };
+      whenIn.addEventListener('input', showPreview);
+      form.querySelector('[name=preset]').addEventListener('change', (e) => { if (e.target.value) { whenIn.value = e.target.value; e.target.value = ''; showPreview(); } });
+      showPreview();
       form.addEventListener('submit', async (e) => {
         e.preventDefault();
         const r = await aero.aiTaskSave(readForm(form, editingTask.id ? editingTask : {}));
-        if (r && r.error) { const n = form.querySelector('[name=name]'); n.setCustomValidity(r.error); form.reportValidity(); n.setCustomValidity(''); return; }
+        if (r && r.error) { errEl.textContent = r.error; return; }
         editingTask = null;
         renderTasks();
       });
@@ -785,16 +810,27 @@
     }
     const list = el('div', 'ai-task-list', tasksEl);
     for (const t of taskList) {
-      const row = el('div', `ai-task${t.enabled === false ? ' off' : ''}${t.running ? ' running' : ''}`, list);
-      row.innerHTML = `<label class="ai-task-on" title="${t.enabled === false ? 'Enable' : 'Disable'}"><input type="checkbox"${t.enabled === false ? '' : ' checked'}></label>
-        <div class="ai-task-main"><div class="ai-task-name">${esc(t.name)}</div>
-        <div class="ai-task-meta">${esc(t.summary)} · next ${esc(when(t.nextRun))}${t.lastStatus ? ` · last: ${esc(t.lastStatus)}` : ''}${t.permission === 'allow' ? ' · autonomous' : t.permission === 'deny' ? ' · read-only' : ''}</div></div>
-        <div class="ai-task-actions"><button class="icon-btn t-run" title="Run now">▶</button><button class="icon-btn t-open" title="Open its conversation"${t.conversationId ? '' : ' disabled'}>💬</button><button class="icon-btn t-edit" title="Edit">✎</button><button class="icon-btn t-del" title="Delete">🗑</button></div>`;
-      row.querySelector('input').addEventListener('change', (e) => aero.aiTaskToggle(t.id, e.target.checked));
+      const state = t.state || (t.enabled === false ? 'paused' : 'active');
+      const row = el('div', `ai-task ${state}${t.running ? ' running' : ''}`, list);
+      const status = t.running ? 'running now' : t.queued ? 'waiting to run'
+        : state === 'done' ? 'done' : state === 'paused' ? (t.failures >= 3 ? `paused after ${t.failures} failures` : 'paused')
+        : t.nextRun ? `next ${fmtTime(t.nextRun)}` : 'not scheduled';
+      const last = t.lastOutcome ? ` · last: ${t.lastOutcome}` : '';
+      const perm = t.permission === 'allow' ? ' · autonomous' : t.permission === 'deny' ? ' · read-only' : '';
+      row.innerHTML = `<button class="icon-btn t-state" title="${state === 'active' ? 'Pause' : 'Resume'}">${state === 'active' ? '⏸' : '▶'}</button>
+        <div class="ai-task-main"><div class="ai-task-name">${esc(t.name)}${t.createdBy === 'agent' ? ' <span class="ai-task-by" title="Created by the assistant">AI</span>' : ''}</div>
+        <div class="ai-task-meta">${esc(t.summary || t.when || '')} · ${esc(status)}${esc(last)}${perm}</div>
+        ${t.whenError ? `<div class="ai-task-meta bad">${esc(t.whenError)}</div>` : ''}</div>
+        <div class="ai-task-actions"><button class="icon-btn t-run" title="Run now"${t.running ? ' disabled' : ''}>⚡</button><button class="icon-btn t-open" title="Open its conversation"${t.conversationId ? '' : ' disabled'}>💬</button><button class="icon-btn t-edit" title="Edit">✎</button><button class="icon-btn t-del" title="Delete">🗑</button></div>`;
+      row.querySelector('.t-state').addEventListener('click', () => aero.aiTaskToggle(t.id, state !== 'active'));
       row.querySelector('.t-run').addEventListener('click', () => aero.aiTaskRun(t.id));
       row.querySelector('.t-open').addEventListener('click', () => { if (t.conversationId) newTab(t.conversationId, `Task: ${t.name}`, true); });
       row.querySelector('.t-edit').addEventListener('click', () => { editingTask = t; renderTasks(); });
-      row.querySelector('.t-del').addEventListener('click', () => aero.aiTaskDelete(t.id));
+      const del = row.querySelector('.t-del');
+      del.addEventListener('click', () => {
+        if (!del.classList.contains('confirm')) { del.classList.add('confirm'); del.title = 'Click again to delete'; setTimeout(() => { del.classList.remove('confirm'); del.title = 'Delete'; }, 2500); return; }
+        aero.aiTaskDelete(t.id);
+      });
     }
   }
 

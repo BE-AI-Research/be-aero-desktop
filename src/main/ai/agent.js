@@ -4,6 +4,7 @@
 const tools = require('./tools');
 const ctxbuf = require('./context');
 const { chatWithRetry, isRetryable } = require('./resilience');
+const { watchStall, budgetForWindow } = require('./backend');
 
 const MAX_CONTEXT_MESSAGES = 60;
 const MAX_TOOL_RESULT_CHARS = 20000;
@@ -69,7 +70,8 @@ async function compactConversation({ provider, model, conversation, ctx, emit, s
 async function runTurn({ provider, model, conversation, ctx, permit, emit, signal, maxSteps = 12, context = {} }) {
   const defs = ctx.noTools ? [] : tools.definitions();
   const system = systemPrompt(ctx);
-  const budget = Number(context.budget) > 0 ? Number(context.budget) : ctxbuf.DEFAULT_BUDGETS.local;
+  const baseBudget = Number(context.budget) > 0 ? Number(context.budget) : ctxbuf.DEFAULT_BUDGETS.local;
+  let budget = baseBudget;
   const calibration = context.calibration || new ctxbuf.Calibration();
   let steps = 0;
   for (;;) {
@@ -79,6 +81,14 @@ async function runTurn({ provider, model, conversation, ctx, permit, emit, signa
     try {
       // The context buffer: collapse old tool traffic, then summarize with
       // the model, then trim - the ladder BE-Code uses for small windows.
+      // Before each call (BE-Code checkBackend): is the model still loaded,
+      // and with which window? A reload at a smaller window shrinks the
+      // budget so the conversation is compacted to fit, not truncated.
+      if (context.checkBackend) {
+        let st = null;
+        try { st = await context.checkBackend(); } catch { st = null; }
+        if (st && st.loaded && st.window > 0) budget = budgetForWindow(st.window, baseBudget);
+      }
       let prep = ctxbuf.prepare(conversation, { budget, cpt: calibration.cpt, system });
       if (prep.needsCompaction && context.compactWithModel !== false) {
         emit({ type: 'notice', text: `Context at about ${prep.tokens.toLocaleString()} of ${budget.toLocaleString()} tokens - summarizing the older part of this conversation.` });
@@ -89,10 +99,17 @@ async function runTurn({ provider, model, conversation, ctx, permit, emit, signa
       }
       let messages = prep.messages;
       if (prep.needsCompaction) messages = windowMessages(messages).slice(-12);
-      res = await chatWithRetry(provider, {
-        model, system, tools: defs, signal, messages,
-        onText: (delta) => emit({ type: 'delta', text: delta })
-      }, { emit, signal });
+      // Silence is reported, not left to look like a hang (model loading,
+      // prompt re-processing, or queued behind another client).
+      const stall = watchStall((delta) => emit({ type: 'delta', text: delta }),
+        (stage, idleMs) => emit({ type: 'stall', stage, seconds: Math.round(idleMs / 1000) }), context.stall || {});
+      try {
+        res = await chatWithRetry(provider, {
+          model, system, tools: defs, signal, messages,
+          onText: stall.onText
+        }, { emit, signal });
+      } finally { stall.stop(); }
+      emit({ type: 'stall', stage: 0, seconds: 0 });
       if (res && res.usage && res.usage.input) calibration.observe(ctxbuf.totalChars(messages, system), res.usage.input);
       emit({ type: 'context', tokens: ctxbuf.estimateTokens(messages, system, calibration.cpt), budget, compacted: !!conversation.summary });
     } catch (err) {

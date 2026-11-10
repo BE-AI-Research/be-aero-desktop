@@ -63,6 +63,7 @@ contextBridge.exposeInMainWorld('aero', {
   aiTaskDelete: (id) => ipcRenderer.invoke('ai:task-delete', id),
   aiTaskToggle: (id, enabled) => ipcRenderer.invoke('ai:task-toggle', id, enabled),
   aiTaskRun: (id) => ipcRenderer.invoke('ai:task-run', id),
+  aiTaskPreview: (when) => ipcRenderer.invoke('ai:task-preview', when),
   onAiTasks: (cb) => subscribe('ai:tasks', cb),
   aiStop: (id) => ipcRenderer.invoke('ai:stop', id),
   aiPin: (on) => ipcRenderer.invoke('ai:pin', on),

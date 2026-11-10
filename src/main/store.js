@@ -123,7 +123,9 @@ const DEFAULTS = {
     systemPrompt: '',
     maxSteps: 12,
     zoom: 1,             // chat text scale (0.8 - 1.6)
-    contextTokens: 0,    // request budget; 0 = default for the provider (local servers 16k)
+    contextTokens: 0,    // request budget; 0 = default for the provider (local servers 16k), capped by the live window
+    keepAlive: '30m',    // local servers (Ollama): keep the model loaded this long after a reply; '0' = don't
+    taskMaxRuntimeMin: 30,
     compactWithModel: true,
     voice: {
       engine: 'auto',        // auto (Whisper when installed) | whisper | system

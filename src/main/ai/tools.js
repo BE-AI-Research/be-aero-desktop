@@ -543,18 +543,25 @@ const TOOLS = [
   },
   {
     name: 'schedule_task', category: 'control',
-    description: 'Create or update a scheduled task: a prompt the assistant runs automatically. schedule.type is once (at: ISO date-time), interval (every: minutes), daily (time: HH:MM) or weekly (time: HH:MM, days: [0-6], 0=Sunday). Pass id to update an existing task.',
+    description: 'Create or update a scheduled task: an instruction the assistant runs automatically, even when nobody is watching. `when` is ONE plain string in local time: "in 20m", "at 09:00", "at 2026-12-01 09:00", "every 30m" / "every 2h", "daily 09:00", "weekdays 08:30", "mon,thu 14:30", or a five-field cron expression. Recurring tasks run at most every 5 minutes. A time missed while the computer was off runs once when it is back. A task that fails 3 times in a row is paused. Pass id to update an existing task (see list_tasks).',
     input_schema: obj({
       id: str('Existing task id (to update)'),
       name: str('Short task name'),
+      when: str('When to run, e.g. "daily 09:00", "every 2h", "in 20m", "weekdays 08:30", "mon,thu 14:30"'),
       prompt: str('What to do on each run, written as an instruction to yourself'),
-      schedule: { type: 'object', description: '{ type, at?, every?, time?, days? }' },
-      permission: { type: 'string', enum: ['inherit', 'allow', 'deny'], description: 'What the run may change while the user is away (default inherit)' },
-      conversationMode: { type: 'string', enum: ['shared', 'new'], description: 'shared: one running conversation; new: fresh each run' }
-    }, ['name', 'prompt', 'schedule']),
+      permission: { type: 'string', enum: ['inherit', 'allow', 'deny'], description: 'What the run may change while the user is away (default inherit: the Settings permission, where "ask" means read-only)' },
+      conversationMode: { type: 'string', enum: ['shared', 'new'], description: 'shared: one running conversation for the task (default); new: a fresh conversation each run' },
+      schedule: { type: 'object', description: 'Deprecated: use when' }
+    }, ['name', 'prompt']),
     run: async (input, ctx) => {
-      const t = ctx.tasks.add({ id: input.id, name: input.name, prompt: input.prompt, schedule: input.schedule, permission: input.permission, conversationMode: input.conversationMode });
-      return { ok: true, id: t.id, name: t.name };
+      if (!input.when && !input.schedule && !input.id) return { error: 'when is required, e.g. "daily 09:00", "every 2h", "in 20m"' };
+      try {
+        const t = ctx.tasks.add({ id: input.id, name: input.name, prompt: input.prompt, when: input.when, schedule: input.schedule, permission: input.permission, conversationMode: input.conversationMode });
+        const next = ctx.tasks.list().find((x) => x.id === t.id);
+        return { ok: true, id: t.id, name: t.name, when: t.when, nextRun: next ? next.nextRun : null };
+      } catch (err) {
+        return { error: err.message };
+      }
     }
   },
   {
@@ -562,6 +569,20 @@ const TOOLS = [
     description: 'Delete a scheduled task by id (see list_tasks).',
     input_schema: obj({ id: str('Task id') }, ['id']),
     run: async (input, ctx) => { ctx.tasks.remove(input.id); return { ok: true }; }
+  },
+  {
+    name: 'pause_task', category: 'control',
+    description: 'Pause a scheduled task (it stops running until resumed).',
+    input_schema: obj({ id: str('Task id') }, ['id']),
+    run: async (input, ctx) => ({ ok: !!ctx.tasks.setState(input.id, 'paused') })
+  },
+  {
+    name: 'resume_task', category: 'control',
+    description: 'Resume a paused scheduled task. Times missed while it was paused are not replayed; it continues from now.',
+    input_schema: obj({ id: str('Task id') }, ['id']),
+    run: async (input, ctx) => {
+      try { return { ok: !!ctx.tasks.setState(input.id, 'active') }; } catch (err) { return { error: err.message }; }
+    }
   },
   {
     name: 'read_file', category: 'control',

@@ -1206,3 +1206,14 @@ webview.plugin-frame { background: #fff; }
 .visual-widget { display: flex; flex-direction: column; padding: 8px 10px 10px; }
 .visual-widget .visual-frame { flex: 1; min-height: 0; border-radius: 8px; }
 .visual-widget .webw-btn.confirm { background: rgba(248,113,113,.35); }
+
+/* Tasks: when field preview, state, errors */
+.ai-task-form [name=when] { flex: 1; min-width: 0; font-family: Consolas, 'Cascadia Mono', monospace; }
+.ai-task-form [name=preset] { flex: none; max-width: 130px; }
+.ai-when-preview { margin: -2px 2px 2px; }
+.ai-when-preview.bad, .ai-task-meta.bad, .ai-task-error { color: #f87171; }
+.ai-task-error:empty { display: none; }
+.ai-task.paused .ai-task-name, .ai-task.done .ai-task-name { opacity: .55; }
+.ai-task.running .ai-task-name::after { content: ' \25CF'; color: var(--accent); }
+.ai-task-by { font-size: 9px; font-weight: 700; padding: 0 4px; border-radius: 4px; background: rgba(var(--accent-rgb), .3); vertical-align: middle; }
+.ai-task .t-del.confirm { background: rgba(248,113,113,.35); }
