@@ -81,6 +81,7 @@ contextBridge.exposeInMainWorld('aero', {
   onAiVoice: (cb) => subscribe('ai:voice', cb),
   mediaInfo: () => ipcRenderer.invoke('media:info'),
   mediaAction: (name) => ipcRenderer.invoke('media:action', name),
+  mediaSeek: (seconds) => ipcRenderer.invoke('media:seek', seconds),
   aiResume: (id) => ipcRenderer.invoke('ai:resume', id),
   aiDeleteMessage: (id, index, which) => ipcRenderer.invoke('ai:delete-message', id, index, which),
   aiResend: (id, index, text) => ipcRenderer.invoke('ai:resend', id, index, text),

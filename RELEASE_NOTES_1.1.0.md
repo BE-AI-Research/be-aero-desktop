@@ -9,7 +9,9 @@ Installed Windows copies update automatically.
 - **Media controller widget.** What is playing anywhere on the machine (Spotify, a browser,
   a player), with cover art, progress, play/pause, previous/next and volume up/down/mute.
   Windows reads the system media session; Linux uses `playerctl` (MPRIS) and
-  `wpctl`/`pactl`. The assistant gets `media_status` and `media_control`.
+  `wpctl`/`pactl`. The progress line runs in real time and has a scrubber to seek; the
+  widget resizes (art and text scale with it) and minimizes to the dock. The assistant
+  gets `media_status` and `media_control`.
 - **Voice mode for the assistant.** A microphone button dictates into the message box.
   Transcription uses **Whisper** (whisper.cpp), downloaded once from Settings > Voice input
   in three sizes, checked against pinned checksums and run on your computer; Windows

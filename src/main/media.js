@@ -70,6 +70,9 @@ while ($true) {
     $out = [PSCustomObject]@{
       status = ([string]$pb.PlaybackStatus).ToLower(); title = [string]$props.Title; artist = [string]$props.Artist; album = [string]$props.AlbumTitle
       app = [string]$s.SourceAppUserModelId; position = [double]$tl.Position.TotalSeconds; duration = [double]$tl.EndTime.TotalSeconds
+      updatedAt = [double]$tl.LastUpdatedTime.ToUnixTimeMilliseconds()
+      canSeek = [bool]$pb.Controls.IsPlaybackPositionEnabled
+      rate = $(if ($pb.PlaybackRate) { [double]$pb.PlaybackRate } else { 1.0 })
       canNext = [bool]$pb.Controls.IsNextEnabled; canPrev = [bool]$pb.Controls.IsPreviousEnabled
       canPlay = [bool]$pb.Controls.IsPlayEnabled; canPause = [bool]$pb.Controls.IsPauseEnabled
       thumb = $thumb; thumbSame = $thumbSame
@@ -83,18 +86,39 @@ while ($true) {
     if ($mgr) { $s = $mgr.GetCurrentSession() }
     if ($null -eq $s) { [Console]::Out.WriteLine('none'); continue }
     $r = $false
-    switch ($cmd) {
+    if ($cmd.StartsWith('seek ')) {
+      $ticks = [int64]([double]$cmd.Substring(5) * 10000000)
+      $r = Await ($s.TryChangePlaybackPositionAsync($ticks)) ([bool])
+    } else { switch ($cmd) {
       'play'   { $r = Await ($s.TryPlayAsync()) ([bool]) }
       'pause'  { $r = Await ($s.TryPauseAsync()) ([bool]) }
       'toggle' { $r = Await ($s.TryTogglePlayPauseAsync()) ([bool]) }
       'next'   { $r = Await ($s.TrySkipNextAsync()) ([bool]) }
       'prev'   { $r = Await ($s.TrySkipPreviousAsync()) ([bool]) }
       'stop'   { $r = Await ($s.TryStopAsync()) ([bool]) }
-    }
+    } }
     if ($r) { [Console]::Out.WriteLine('ok') } else { [Console]::Out.WriteLine('err') }
   }
 }
 `;
+
+// Where the track is NOW. Windows reports the timeline only when the app
+// publishes it (often just on play/pause/seek), stamped with LastUpdatedTime;
+// while playing, the live position is that report plus the time since,
+// scaled by the playback rate, clamped to the track. A missing or
+// implausible stamp (older than the track itself) leaves the report as is.
+function livePosition(info, now = Date.now()) {
+  const pos = Number(info && info.position) || 0;
+  const dur = Number(info && info.duration) || 0;
+  const at = Number(info && info.updatedAt) || 0;
+  if (!info || info.status !== 'playing' || at <= 0) return pos;
+  const elapsed = (now - at) / 1000;
+  if (elapsed < 0) return pos;
+  if (dur > 0 && elapsed > dur + 60) return pos;
+  const rate = Number(info.rate) > 0 ? Number(info.rate) : 1;
+  const live = pos + elapsed * rate;
+  return dur > 0 ? Math.min(dur, live) : live;
+}
 
 // playerctl's tab-separated metadata line -> info object.
 function parsePlayerctl(line) {
@@ -185,7 +209,8 @@ class MediaController {
     if (!r || r.status === 'none') return { available: true, status: 'none' };
     if (r.thumbSame) r.thumb = this.lastThumb; else this.lastThumb = r.thumb || '';
     delete r.thumbSame;
-    return { available: true, volume: null, muted: null, ...r };
+    const now = Date.now();
+    return { available: true, volume: null, muted: null, ...r, reported: r.position, position: livePosition(r, now), sampledAt: now };
   }
 
   // ------------------------------------------------------------------ linux
@@ -227,6 +252,7 @@ class MediaController {
       return { available: true, status: 'none', ...(await this.volumeLinux()) };
     }
     const info = parsePlayerctl(out) || { status: 'none' };
+    info.sampledAt = Date.now();      // MPRIS reports the position as of now
     const thumb = await this.artFor(info.artUrl);
     delete info.artUrl;
     return { available: true, ...info, thumb, ...(await this.volumeLinux()) };
@@ -252,6 +278,15 @@ class MediaController {
     return { available: false, status: 'none', hint: 'Media control is not available on this platform yet.' };
   }
 
+  // Jump to `seconds` in the current track.
+  async seek(seconds) {
+    const s = Number(seconds);
+    if (!Number.isFinite(s) || s < 0 || s > 24 * 3600) return false;
+    if (process.platform === 'win32') return (await this.send(`seek ${s.toFixed(3)}`)) === 'ok';
+    if (process.platform === 'linux') return (await run('playerctl', ['position', s.toFixed(3)])) !== null;
+    return false;
+  }
+
   async action(name) {
     if (!ACTIONS.has(name)) return false;
     if (process.platform === 'win32') return (await this.send(name)) === 'ok';
@@ -265,4 +300,4 @@ class MediaController {
   }
 }
 
-module.exports = { MediaController, parsePlayerctl, parseVolume, ACTIONS };
+module.exports = { MediaController, parsePlayerctl, parseVolume, livePosition, ACTIONS };
