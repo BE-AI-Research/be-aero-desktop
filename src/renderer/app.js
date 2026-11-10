@@ -734,7 +734,8 @@
     for (const v of list) {
       const o = document.createElement('option');
       o.value = v.key;
-      o.textContent = `${v.installed ? '\u2713 ' : ''}${v.name} - ${v.quality.replace('_', ' ')}${v.speakers > 1 ? `, ${v.speakers} speakers` : ''} (${mb(v.size)})`;
+      o.textContent = `${v.installed ? '\u2713 ' : ''}${v.name} - ${v.quality.replace('_', ' ')}${v.speakers > 1 ? `, ${v.speakers} speakers` : ''} (${mb(v.size)})${v.supported === false ? ' - not supported yet' : ''}`;
+      if (v.supported === false) o.disabled = true;
       sel.appendChild(o);
     }
     sel.value = list.some((v) => v.key === selected) ? selected : (list[0] ? list[0].key : '');

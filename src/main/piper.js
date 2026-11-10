@@ -41,11 +41,35 @@ function hashFile(file, algo) {
 }
 
 // Catalog rows for the UI: [{ key, name, lang, language, country, quality, speakers, size, installed }]
+// The standalone engine (2023.11.14-2) phonemizes with espeak-ng or uses raw
+// text; voices built for other phonemizers (pinyin, Japanese, Thai, Hebrew,
+// Lithuanian) need the newer Python-only Piper.
+const SUPPORTED_PHONEME_TYPES = new Set(['espeak', 'text']);
+const voiceSupported = (v) => SUPPORTED_PHONEME_TYPES.has((v && v.phonemeType) || 'espeak');
+
 function catalogList(installed = new Set()) {
   return Object.entries(CATALOG.voices).map(([key, v]) => ({
     key, name: v.name, lang: v.lang, language: v.language, country: v.country, quality: v.quality,
-    speakers: v.speakers, speakerIds: v.speakerIds || null, size: v.onnx.size + v.config.size, installed: installed.has(key)
+    speakers: v.speakers, speakerIds: v.speakerIds || null, size: v.onnx.size + v.config.size, installed: installed.has(key),
+    supported: voiceSupported(v)
   }));
+}
+
+// Voices trained with Piper 1.5+ list diphthongs ("aɪ", "oʊ"...) as extra
+// phoneme_id_map keys. The standalone engine requires every key to be one
+// code point and refuses the whole voice ("Phonemes must be one codepoint").
+// Its espeak phonemizer never emits those combined symbols - it emits the
+// single characters, which every such map also contains - so dropping the
+// multi-code-point keys is lossless for it. Pure; returns null when nothing
+// needs to change.
+function compatConfig(json) {
+  const map = json && json.phoneme_id_map;
+  if (!map || typeof map !== 'object') return null;
+  const long = Object.keys(map).filter((p) => [...p].length !== 1);
+  if (!long.length) return null;
+  const out = { ...json, phoneme_id_map: {} };
+  for (const [p, ids] of Object.entries(map)) if ([...p].length === 1) out.phoneme_id_map[p] = ids;
+  return out;
 }
 
 // Turn the chat's rate (0.5-2, 1 = normal) into piper's length_scale.
@@ -151,6 +175,7 @@ class Piper {
   async installVoice(key, onProgress = () => {}) {
     const v = CATALOG.voices[key];
     if (!v) throw new Error(`unknown Piper voice ${key}`);
+    if (!voiceSupported(v)) throw new Error(`${v.name} uses ${v.phonemeType} phonemes, which this Piper engine cannot read. Choose another voice.`);
     fs.mkdirSync(this.voiceDir, { recursive: true });
     if (!fs.existsSync(this.configPath(key))) {
       await this.download(VOICE_BASE + v.config.path, this.configPath(key), { md5: v.config.md5, size: v.config.size });
@@ -178,7 +203,7 @@ class Piper {
     if (!CATALOG.voices[key]) return false;
     for (const [k, w] of this.workers) if (w.voice === key) { this.killWorker(k); }
     let ok = false;
-    for (const f of [this.voicePath(key), this.configPath(key)]) { try { fs.unlinkSync(f); ok = true; } catch { /* gone */ } }
+    for (const f of [this.voicePath(key), this.configPath(key), path.join(this.voiceDir, `${key}.compat.json`)]) { try { fs.unlinkSync(f); ok = true; } catch { /* gone */ } }
     return ok;
   }
 
@@ -191,8 +216,23 @@ class Piper {
     return require('./sonames').repairSonames(this.binDir, platform);
   }
 
+  // The config file piper actually reads: the downloaded (checksum-verified)
+  // one, or a compatible copy beside it when its phoneme map needs trimming.
+  engineConfigPath(key) {
+    const src = this.configPath(key);
+    const dst = path.join(this.voiceDir, `${key}.compat.json`);
+    try {
+      const st = fs.statSync(src);
+      try { if (fs.statSync(dst).mtimeMs >= st.mtimeMs) return dst; } catch { /* not made yet */ }
+      const fixed = compatConfig(JSON.parse(fs.readFileSync(src, 'utf8')));
+      if (!fixed) return src;
+      fs.writeFileSync(dst, JSON.stringify(fixed));
+      return dst;
+    } catch { return src; }
+  }
+
   args(opts, outFile) {
-    const a = ['--model', this.voicePath(opts.voice), '--config', this.configPath(opts.voice),
+    const a = ['--model', this.voicePath(opts.voice), '--config', this.engineConfigPath(opts.voice),
       '--length_scale', String(lengthScaleFor(opts.rate)),
       '--noise_scale', String(clampNum(opts.noiseScale, 0, 1.5, 0.667)),
       '--noise_w', String(clampNum(opts.noiseW, 0, 1.5, 0.8)),
@@ -277,6 +317,8 @@ class Piper {
     if (!t) return null;
     if (!fs.existsSync(this.binPath())) throw new Error('Piper is not installed - download it in Settings > Text to speech.');
     if (!opts.voice || !fs.existsSync(this.voicePath(opts.voice))) throw new Error('Choose and download a Piper voice in Settings > Text to speech.');
+    const cv = CATALOG.voices[opts.voice];
+    if (cv && !voiceSupported(cv)) throw new Error(`${cv.name} uses ${cv.phonemeType} phonemes, which this Piper engine cannot read. Choose another voice in Settings > Text to speech.`);
     const out = path.join(os.tmpdir(), `aero-piper-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.wav`);
     try {
       let ok = false;
@@ -317,4 +359,4 @@ function clampNum(v, lo, hi, dflt) {
   return Number.isFinite(n) ? Math.max(lo, Math.min(hi, n)) : dflt;
 }
 
-module.exports = { Piper, CATALOG, ENGINES, catalogList, lengthScaleFor, hashFile };
+module.exports = { Piper, CATALOG, ENGINES, catalogList, lengthScaleFor, hashFile, compatConfig, voiceSupported };

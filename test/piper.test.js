@@ -126,3 +126,41 @@ test('Linux library repair: missing or broken sonames become copies of the bundl
     assert.deepStrictEqual(p.repairLinuxLibs('win32'), []);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('compatConfig drops multi-code-point phonemes (Piper 1.5+ voices) and keeps every id', () => {
+  const { compatConfig } = require('../src/main/piper');
+  const j = { num_symbols: 256, phoneme_type: 'espeak', phoneme_id_map: { _: [0], a: [14], 'ɪ': [74], 'aɪ': [160], o: [27], 'ʊ': [100], 'oʊ': [164] } };
+  const c = compatConfig(j);
+  assert.deepStrictEqual(Object.keys(c.phoneme_id_map), ['_', 'a', 'ɪ', 'o', 'ʊ']);
+  assert.deepStrictEqual(c.phoneme_id_map.a, [14]);
+  assert.strictEqual(c.num_symbols, 256);
+  assert.strictEqual(compatConfig({ phoneme_id_map: { a: [1], b: [2] } }), null, 'nothing to change');
+});
+
+test('engineConfigPath hands piper a trimmed copy and leaves the verified download alone', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aero-piper-cfg-'));
+  try {
+    const p = new Piper({ dir });
+    fs.mkdirSync(p.voiceDir, { recursive: true });
+    const raw = JSON.stringify({ phoneme_id_map: { a: [1], 'ɪ': [2], 'aɪ': [3] } });
+    fs.writeFileSync(p.configPath('en_US-amy-medium'), raw);
+    const used = p.engineConfigPath('en_US-amy-medium');
+    assert.ok(used.endsWith('en_US-amy-medium.compat.json'));
+    assert.deepStrictEqual(Object.keys(JSON.parse(fs.readFileSync(used, 'utf8')).phoneme_id_map), ['a', 'ɪ']);
+    assert.strictEqual(fs.readFileSync(p.configPath('en_US-amy-medium'), 'utf8'), raw, 'original untouched');
+    fs.writeFileSync(p.configPath('en_US-lessac-medium'), JSON.stringify({ phoneme_id_map: { a: [1] } }));
+    assert.strictEqual(p.engineConfigPath('en_US-lessac-medium'), p.configPath('en_US-lessac-medium'));
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('voices built for other phonemizers are marked unsupported and refused before download', async () => {
+  const { catalogList, voiceSupported, CATALOG } = require('../src/main/piper');
+  const list = catalogList();
+  const off = list.filter((v) => !v.supported).map((v) => v.key).sort();
+  assert.ok(off.includes('zh_CN-xiao_ya-medium') && off.includes('ja_JP-hi_fi_captain-medium'));
+  assert.ok(!off.includes('en_US-amy-medium') && !off.includes('uk_UA-ukrainian_tts-medium'), 'espeak and text voices stay');
+  assert.strictEqual(voiceSupported(CATALOG.voices['en_US-lessac-medium']), true);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aero-piper-u-'));
+  try { await assert.rejects(new Piper({ dir }).installVoice('zh_CN-xiao_ya-medium'), /pinyin phonemes/); }
+  finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
