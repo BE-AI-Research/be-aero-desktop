@@ -172,6 +172,15 @@ class AiService {
     return ctxbuf.budgetFor(c.provider || 'anthropic', p.kind, c.contextTokens, !!p.local);
   }
 
+  // Remembered per provider + model for the app session: whether native
+  // tool calls worked, or the server rejected them (then text calls).
+  toolSession(model) {
+    if (!this.toolSessions) this.toolSessions = new Map();
+    const key = `${this.config().provider}|${this.config().baseUrl}|${model}`;
+    if (!this.toolSessions.has(key)) this.toolSessions.set(key, {});
+    return this.toolSessions.get(key);
+  }
+
   calibration() {
     const key = `${this.config().provider}|${this.config().model}`;
     if (!this.calibrations.has(key)) this.calibrations.set(key, new ctxbuf.Calibration());
@@ -597,6 +606,8 @@ class AiService {
         permit: (call) => this.permit(call, opts.permission), emit, signal: controller.signal,
         maxSteps: Math.max(1, Math.min(500, Number(c.maxSteps) || 12)),
         context: {
+          toolMode: c.toolCalls || 'auto',
+          session: this.toolSession(model),
           budget: this.contextBudget(), calibration: this.calibration(), compactWithModel: c.compactWithModel !== false,
           checkBackend: () => this.checkBackend(model, emit)
         }

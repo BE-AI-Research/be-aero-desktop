@@ -1,7 +1,7 @@
 # BE-Aero Desktop v1.2.1
 
-Scheduled tasks rebuilt on BE-Code's proven model, and the assistant copes better when a
-local model is evicted or reloaded.
+Scheduled tasks rebuilt on BE-Code's proven model, support for every model's way of calling
+tools (including Qwen's XML), and better handling when a local model is evicted or reloaded.
 
 ## Scheduled tasks
 
@@ -29,6 +29,23 @@ Tasks now use the same scheduling model as BE-Code.
   raised to 5 minutes).
 
 Your existing tasks are converted automatically.
+
+## Every model's way of calling tools
+BE-Aero now understands the tool-call formats local models actually use, as BE-Code does:
+native JSON calls, `<tool_call>{json}</tool_call>`, **Qwen's XML layout**
+(`<function=...><parameter=...>`), Llama's bare JSON, Mistral's `[TOOL_CALLS]`, Gemma's
+`tool_code` blocks, and fenced JSON. A tool call written as text is run, never mistaken for
+the final answer.
+- **Thinking models** (Qwen3, DeepSeek-R1, gpt-oss): reasoning is kept off the screen and out
+  of the conversation, and while the model thinks the chat shows "Thinking..." instead of
+  looking stuck.
+- **Per-model settings:** models without reliable native tool support (Gemma, Phi,
+  DeepSeek-R1) automatically use text tool calls. If a server rejects tool calls, BE-Aero
+  switches to text tool calls for that model. You can force either mode under Settings >
+  AI assistant > Tool call format.
+- **Forgiving:** double-encoded arguments, "parameters" instead of "arguments", trailing
+  commas and similar slips are accepted. A tool call cut off mid-way, or an empty reply
+  after a long think, gets one automatic retry.
 
 ## Local models (Ollama, LM Studio)
 - **Evicted models are noticed.** Before each request BE-Aero checks whether the model is

@@ -650,6 +650,10 @@
       case 'error':
         if (isActive) bubble('error', esc(ev.message || 'Something went wrong.'));
         break;
+      case 'thinking':
+        lv.retryText = 'Thinking…';
+        if (isActive) syncBusy();
+        break;
       case 'stall':
         lv.stallText = ev.stage === 1
           ? `Waiting for the model: no output for ${ev.seconds} s (loading, re-reading the conversation, or queued behind another request).`

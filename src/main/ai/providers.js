@@ -9,6 +9,7 @@
 // what makes "local providers" a configuration rather than a feature.
 
 const attachments = require('./attachments');
+const toolcalls = require('./toolcalls');
 const { parseUnixBase, defaultBeCodeSocket, socketFetch } = require('./transport');
 
 // local: a server on this machine or LAN (small windows, may restart - the
@@ -65,10 +66,24 @@ function toAnthropicTools(tools) {
 }
 
 // Provider-neutral -> OpenAI chat/completions shape.
-function toOpenAiMessages(system, messages) {
+// compat: the server gets no tools field; earlier calls and results are
+// written into the transcript in the embedded text format instead.
+function toOpenAiMessages(system, messages, { compat = false } = {}) {
   const out = [];
   if (system) out.push({ role: 'system', content: system });
   for (const m of messages) {
+    if (compat && m.role === 'assistant') {
+      const text = [m.content ? String(m.content) : '', ...(m.toolCalls || []).map(toolcalls.callAsText)].filter(Boolean).join('\n');
+      out.push({ role: 'assistant', content: text });
+      continue;
+    }
+    if (compat && m.role === 'tool') {
+      out.push({ role: 'user', content: (m.results || []).map(toolcalls.resultAsText).join('\n') });
+      const shots = [];
+      for (const r of m.results || []) for (const im of r.images || []) shots.push(im);
+      if (shots.length) out.push({ role: 'user', content: [{ type: 'text', text: 'Screenshots returned by the tool:' }, ...shots.map((im) => ({ type: 'image_url', image_url: { url: `data:${im.mime};base64,${im.data}` } }))] });
+      continue;
+    }
     if (m.role === 'user') {
       out.push({
         role: 'user',
@@ -114,12 +129,17 @@ function applyOpenAiDelta(state, chunk) {
   if (!choice) return;
   const d = choice.delta || {};
   if (typeof d.content === 'string' && d.content) state.text += d.content;
+  // Thinking models (Qwen3, DeepSeek-R1, gpt-oss) stream their reasoning in a
+  // separate field on Ollama / vLLM / LM Studio.
+  const r = (typeof d.reasoning === 'string' ? d.reasoning : '') + (typeof d.reasoning_content === 'string' ? d.reasoning_content : '');
+  if (r) state.reasoning = (state.reasoning || '') + r;
   for (const tc of d.tool_calls || []) {
     const i = tc.index ?? 0;
     const cur = state.calls[i] || (state.calls[i] = { id: '', name: '', args: '' });
     if (tc.id) cur.id = tc.id;
     if (tc.function && tc.function.name) cur.name += tc.function.name;
     if (tc.function && typeof tc.function.arguments === 'string') cur.args += tc.function.arguments;
+    else if (tc.function && tc.function.arguments && typeof tc.function.arguments === 'object') cur.args = JSON.stringify(tc.function.arguments);
   }
   if (choice.finish_reason) state.finish = choice.finish_reason;
 }
@@ -128,12 +148,12 @@ function finishOpenAiState(state) {
   const toolCalls = [];
   state.calls.forEach((c, i) => {
     if (!c || !c.name) return;
-    let input = {};
-    try { input = c.args ? JSON.parse(c.args) : {}; } catch { input = { _unparsed: c.args }; }
+    // Forgiving: double-encoded JSON, trailing commas, single quotes.
+    const input = toolcalls.parseArgs(c.args) || { _unparsed: c.args };
     toolCalls.push({ id: c.id || `call_${i}`, name: c.name, input });
   });
   return {
-    text: state.text, toolCalls,
+    text: state.text, toolCalls, reasoning: state.reasoning || '', finish: state.finish || null,
     stopReason: toolCalls.length ? 'tool_use' : state.finish === 'length' ? 'max_tokens' : 'end_turn'
   };
 }
@@ -222,25 +242,26 @@ class OpenAiCompatProvider {
     };
   }
 
-  async chat({ model, system, messages, tools, onText, signal, maxTokens = 16000 }) {
+  async chat({ model, system, messages, tools, onText, onReasoning, signal, maxTokens = 16000, compat = false }) {
     if (!this.baseUrl) throw new Error('No server URL configured for this provider.');
     const body = {
       model, stream: true, max_tokens: maxTokens,
-      messages: toOpenAiMessages(system, messages),
-      ...(tools && tools.length ? { tools: toOpenAiTools(tools), tool_choice: 'auto' } : {})
+      messages: toOpenAiMessages(system, messages, { compat }),
+      ...(!compat && tools && tools.length ? { tools: toOpenAiTools(tools), tool_choice: 'auto' } : {})
     };
     const res = await this.fetch(`${this.baseUrl}/chat/completions`, {
       method: 'POST', headers: this.headers(), body: JSON.stringify(body), signal
     });
     if (!res.ok) throw await this.httpError(res, this.socketPath || this.baseUrl);
-    const state = { text: '', calls: [], finish: null };
+    const state = { text: '', calls: [], finish: null, reasoning: '' };
     const ctype = res.headers.get('content-type') || '';
     if (!/text\/event-stream/i.test(ctype)) {
       // Server ignored stream:true and answered in one JSON body.
       const json = await res.json();
       const msg = json.choices && json.choices[0] && json.choices[0].message || {};
       state.text = msg.content || '';
-      (msg.tool_calls || []).forEach((tc, i) => { state.calls[i] = { id: tc.id, name: tc.function.name, args: tc.function.arguments || '' }; });
+      state.reasoning = msg.reasoning_content || msg.reasoning || '';
+      (msg.tool_calls || []).forEach((tc, i) => { const a = tc.function.arguments; state.calls[i] = { id: tc.id, name: tc.function.name, args: a && typeof a === 'object' ? JSON.stringify(a) : (a || '') }; });
       state.finish = json.choices && json.choices[0] && json.choices[0].finish_reason;
       if (onText && state.text) onText(state.text);
       return { ...finishOpenAiState(state), usage: json.usage ? { input: json.usage.prompt_tokens, output: json.usage.completion_tokens } : null };
@@ -263,8 +284,10 @@ class OpenAiCompatProvider {
         let chunk;
         try { chunk = JSON.parse(data); } catch { continue; }
         const before = state.text.length;
+        const rBefore = state.reasoning.length;
         applyOpenAiDelta(state, chunk);
         if (onText && state.text.length > before) onText(state.text.slice(before));
+        if (onReasoning && state.reasoning.length > rBefore) onReasoning(state.reasoning.slice(rBefore));
         if (chunk.usage) usage = { input: chunk.usage.prompt_tokens, output: chunk.usage.completion_tokens };
       }
     }

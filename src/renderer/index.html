@@ -177,6 +177,12 @@
         </div>
         <input id="set-ai-model" type="text" spellcheck="false" placeholder="Model id (or pick one above after fetching)">
         <div class="hint-text" id="ai-provider-hint"></div>
+        <label class="field-label">Tool call format</label>
+        <select id="set-ai-toolcalls">
+          <option value="auto">Automatic (by model; Qwen XML, Llama, Mistral, Gemma understood)</option>
+          <option value="native">Native JSON (the server's tools support)</option>
+          <option value="compat">Text tool calls (for models without tool support)</option>
+        </select>
         <label class="field-label">Tool-call limit per message</label>
         <input id="set-ai-steps" type="number" min="1" max="500" step="1" title="How many tool steps one message may take before the assistant is stopped">
         <div class="hint-text">Each tool use counts as a step; long autonomous jobs need more. Default 12.</div>

@@ -5,6 +5,7 @@ const tools = require('./tools');
 const ctxbuf = require('./context');
 const { chatWithRetry, isRetryable } = require('./resilience');
 const { watchStall, budgetForWindow } = require('./backend');
+const toolcalls = require('./toolcalls');
 
 const MAX_CONTEXT_MESSAGES = 60;
 const MAX_TOOL_RESULT_CHARS = 20000;
@@ -69,7 +70,21 @@ async function compactConversation({ provider, model, conversation, ctx, emit, s
 
 async function runTurn({ provider, model, conversation, ctx, permit, emit, signal, maxSteps = 12, context = {} }) {
   const defs = ctx.noTools ? [] : tools.definitions();
-  const system = systemPrompt(ctx);
+  const baseSystem = systemPrompt(ctx);
+  // Tool-call format (BE-Code profiles): 'native' sends the tools field;
+  // 'compat' embeds the tool list in the prompt and reads calls from text.
+  // In 'auto' a profile can require compat (Gemma, Phi, DeepSeek-R1), and a
+  // server that rejects the tools field switches the session to compat.
+  // Whatever the mode, calls written as text (Qwen XML, <tool_call> JSON,
+  // Mistral, Llama, Gemma tool_code) are recognised.
+  const profile = toolcalls.profileFor(model);
+  const session = context.session || {};
+  const setting = context.toolMode || 'auto';
+  const compatMode = () => defs.length > 0 && setting !== 'native' && (setting === 'compat' || profile.compat === 'always' || !!session.compat);
+  const systemFor = () => (compatMode() ? `${baseSystem}\n\n${toolcalls.compatInstructions(defs)}` : baseSystem);
+  let system = systemFor();
+  let cutOffRetried = false;
+  let emptyNudged = false;
   const baseBudget = Number(context.budget) > 0 ? Number(context.budget) : ctxbuf.DEFAULT_BUDGETS.local;
   let budget = baseBudget;
   const calibration = context.calibration || new ctxbuf.Calibration();
@@ -89,6 +104,7 @@ async function runTurn({ provider, model, conversation, ctx, permit, emit, signa
         try { st = await context.checkBackend(); } catch { st = null; }
         if (st && st.loaded && st.window > 0) budget = budgetForWindow(st.window, baseBudget);
       }
+      system = systemFor();
       let prep = ctxbuf.prepare(conversation, { budget, cpt: calibration.cpt, system });
       if (prep.needsCompaction && context.compactWithModel !== false) {
         emit({ type: 'notice', text: `Context at about ${prep.tokens.toLocaleString()} of ${budget.toLocaleString()} tokens - summarizing the older part of this conversation.` });
@@ -101,23 +117,66 @@ async function runTurn({ provider, model, conversation, ctx, permit, emit, signa
       if (prep.needsCompaction) messages = windowMessages(messages).slice(-12);
       // Silence is reported, not left to look like a hang (model loading,
       // prompt re-processing, or queued behind another client).
-      const stall = watchStall((delta) => emit({ type: 'delta', text: delta }),
+      // <think> blocks never reach the screen; a separate reasoning stream
+      // counts as activity and shows as "thinking".
+      const think = new toolcalls.ThinkFilter();
+      const stall = watchStall((delta) => { const v = think.feed(delta); if (v) emit({ type: 'delta', text: v }); },
         (stage, idleMs) => emit({ type: 'stall', stage, seconds: Math.round(idleMs / 1000) }), context.stall || {});
+      let thinkingShown = false;
+      const onReasoning = () => { stall.onText(''); if (!thinkingShown) { thinkingShown = true; emit({ type: 'thinking' }); } };
       try {
         res = await chatWithRetry(provider, {
-          model, system, tools: defs, signal, messages,
-          onText: stall.onText
+          model, system, tools: compatMode() ? [] : defs, compat: compatMode(), signal, messages,
+          onText: stall.onText, onReasoning
         }, { emit, signal });
+        const tail = think.flush();
+        if (tail) emit({ type: 'delta', text: tail });
       } finally { stall.stop(); }
       emit({ type: 'stall', stage: 0, seconds: 0 });
       if (res && res.usage && res.usage.input) calibration.observe(ctxbuf.totalChars(messages, system), res.usage.input);
       emit({ type: 'context', tokens: ctxbuf.estimateTokens(messages, system, calibration.cpt), budget, compacted: !!conversation.summary });
     } catch (err) {
       if (signal && signal.aborted) return { stopped: true };
+      // Some servers reject the tools field outright: embedded calls for the
+      // rest of the session, and this step again.
+      if (!compatMode() && setting !== 'native' && defs.length && !session.nativeWorked && toolcalls.looksLikeToolsUnsupported(err)) {
+        session.compat = true;
+        emit({ type: 'notice', text: 'The server rejected native tool calls; switching to text tool calls for this model.' });
+        steps--;
+        continue;
+      }
       const message = provider.describeError ? provider.describeError(err) : String(err && err.message || err);
       emit({ type: 'error', message });
       return { error: message, retryable: isRetryable(err) };
     }
+
+    // Normalise what came back: reasoning out of the text, and tool calls the
+    // model wrote as text (any of the formats in toolcalls.js) into calls.
+    const rawText = String(res.text || '');
+    let text = toolcalls.stripThink(rawText);
+    let calls = res.toolCalls || [];
+    if (calls.length) session.nativeWorked = true;
+    if (!calls.length && defs.length) {
+      const parsed = toolcalls.parseEmbeddedCalls(text, defs);
+      if (parsed.calls.length) { calls = parsed.calls; text = parsed.text; }
+    }
+    // A reply cut off inside a tool call is not an answer: ask once for it again.
+    if (!calls.length && !cutOffRetried && toolcalls.openEmbeddedCall(text)) {
+      cutOffRetried = true;
+      ctx.append({ role: 'assistant', content: text });
+      ctx.append({ role: 'user', content: '[Your last tool call was cut off before it closed. Issue it again, complete, with shorter arguments if you can.]' });
+      emit({ type: 'notice', text: 'The model\'s tool call was cut off; asking it to try again.' });
+      continue;
+    }
+    // Nothing at all (no text, no call): usually a model that spent its
+    // output thinking. Nudge once instead of ending silently.
+    if (!calls.length && !text.trim() && !emptyNudged && res.stopReason !== 'refusal') {
+      emptyNudged = true;
+      emit({ type: 'notice', text: res.reasoning ? 'The model only thought and gave no answer; asking it to answer.' : 'The model returned an empty reply; asking it to continue.' });
+      ctx.append({ role: 'user', content: '[Your last reply was empty. Continue the task: call a tool or give your answer now.]' });
+      continue;
+    }
+    res = { ...res, text, toolCalls: calls };
 
     const assistant = { role: 'assistant', content: res.text || '' };
     if (res.toolCalls && res.toolCalls.length) assistant.toolCalls = res.toolCalls;
