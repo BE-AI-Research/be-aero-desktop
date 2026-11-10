@@ -25,6 +25,27 @@ const WIN_CANDIDATES = {
 };
 const PROGID_TO_KEY = { ChromeHTML: 'chrome', MSEdgeHTM: 'msedge', BraveHTML: 'brave', ChromiumHTM: 'chromium' };
 const LINUX_BINS = ['google-chrome', 'google-chrome-stable', 'microsoft-edge', 'brave-browser', 'chromium', 'chromium-browser'];
+// Browsers the user can pick (Settings > AI assistant > Browser). Firefox can
+// open pages but has no DevTools protocol, so the assistant profile (click /
+// type) always runs on a Chromium browser.
+const NAMES = { chrome: 'Google Chrome', msedge: 'Microsoft Edge', brave: 'Brave', chromium: 'Chromium', firefox: 'Firefox' };
+const WIN_FIREFOX = ['C:\\Program Files\\Mozilla Firefox\\firefox.exe', 'C:\\Program Files (x86)\\Mozilla Firefox\\firefox.exe'];
+const LINUX_KEYS = { 'google-chrome': 'chrome', 'google-chrome-stable': 'chrome', 'microsoft-edge': 'msedge', 'brave-browser': 'brave', chromium: 'chromium', 'chromium-browser': 'chromium', firefox: 'firefox' };
+
+// -> [{ key, name, path, cdp }] for the browsers installed here, one per key.
+function listBrowsers() {
+  const out = [];
+  const add = (key, p) => { if (p && !out.some((b) => b.key === key)) out.push({ key, name: NAMES[key] || key, path: p, cdp: key !== 'firefox' }); };
+  if (process.platform === 'win32') {
+    for (const [key, list] of Object.entries(WIN_CANDIDATES)) for (const p of list) if (p && fs.existsSync(p)) { add(key, p); break; }
+    for (const p of WIN_FIREFOX) if (fs.existsSync(p)) { add('firefox', p); break; }
+    return out;
+  }
+  for (const bin of [...LINUX_BINS, 'firefox']) {
+    try { const p = execSync(`command -v ${bin}`, { encoding: 'utf8' }).trim(); if (p) add(LINUX_KEYS[bin], p); } catch { /* not installed */ }
+  }
+  return out;
+}
 
 function defaultBrowserKeyWin() {
   try {
@@ -35,7 +56,14 @@ function defaultBrowserKeyWin() {
   return null;
 }
 
-function detectBrowser() {
+// The Chromium browser for the assistant profile: the user's choice when it
+// is installed and Chromium-based, else the default browser, else the first
+// one found.
+function detectBrowser(preferred) {
+  if (preferred && preferred !== 'firefox') {
+    const b = listBrowsers().find((x) => x.key === preferred && x.cdp);
+    if (b) return { path: b.path, name: b.key, isDefault: false };
+  }
   if (process.platform === 'win32') {
     const preferred = defaultBrowserKeyWin();
     const order = [preferred, 'chrome', 'msedge', 'brave', 'chromium'].filter(Boolean);
@@ -59,15 +87,16 @@ async function fetchJson(url, opts) {
 }
 
 class BrowserController {
-  constructor({ profileDir, resizeImage }) {
+  constructor({ profileDir, resizeImage, preferred }) {
     this.profileDir = profileDir;
+    this.preferred = preferred || (() => '');   // () -> browser key chosen in Settings
     this.resizeImage = resizeImage;     // (pngBuffer) -> { mime, data(base64) }
     this.proc = null;
     this.exe = null;
   }
 
   info() {
-    const b = detectBrowser();
+    const b = detectBrowser(this.preferred());
     return b ? { available: true, browser: b.name, path: b.path, isDefault: b.isDefault, profile: this.profileDir } : { available: false };
   }
 
@@ -77,7 +106,7 @@ class BrowserController {
 
   async ensureRunning() {
     if (await this.isUp()) return true;
-    const b = detectBrowser();
+    const b = detectBrowser(this.preferred());
     if (!b) throw new Error('No Chromium-based browser (Chrome, Edge, Brave) was found on this machine.');
     this.exe = b;
     fs.mkdirSync(this.profileDir, { recursive: true });
@@ -211,4 +240,4 @@ class BrowserController {
   }
 }
 
-module.exports = { BrowserController, detectBrowser, PORT };
+module.exports = { listBrowsers, BrowserController, detectBrowser, PORT };

@@ -89,6 +89,10 @@ the final answer.
   still uses its own profile, because browsers don't allow automating your main one.
   Settings > AI assistant > "When the assistant opens a web page" can restore the old
   behaviour.
+- **Choose the assistant's browser.** Settings > AI assistant > "Browser the assistant uses"
+  lists the browsers installed (Chrome, Edge, Brave, Chromium, Firefox), so the assistant can
+  use a different browser from your default. Firefox opens pages; clicking and typing use a
+  Chromium browser, since Firefox can't be automated this way.
 - **The notification panel is readable on any background.** It had no background at all
   (a broken style), so it disappeared over matching wallpaper; it's now a frosted pane.
 - **Chat:** the edit / resend / delete buttons under messages are visible again.

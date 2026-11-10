@@ -128,6 +128,7 @@ const DEFAULTS = {
     keepAlive: '30m',    // (older setting, replaced by unloadAfter)
     unloadAfter: '1m',   // Ollama: unload the model this long after the last reply ('keep' = server default)
     evictBlocking: 'ask', // another model holding the server while ours waits: ask | auto | never
+    browser: '',          // '' = the default browser; or chrome | msedge | brave | chromium | firefox
     browserMode: 'main',  // browser_open: main = the user's own browser/profile (interaction uses the assistant profile) | assistant = always the assistant profile
     toolCalls: 'auto',   // auto (by model family, with fallback) | native (JSON tools field) | compat (text tool calls)    // local servers (Ollama): keep the model loaded this long after a reply; '0' = don't
     taskMaxRuntimeMin: 30,

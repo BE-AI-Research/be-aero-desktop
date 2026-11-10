@@ -34,6 +34,7 @@ class AiService {
     this.visuals = new (require('./visuals').Visuals)(path.join(deps.userDataDir, 'ai', 'visuals'));
     this.browser = new BrowserController({
       profileDir: path.join(deps.userDataDir, 'ai', 'browser-profile'),
+      preferred: () => String(this.config().browser || ''),
       resizeImage: (png) => {
         const img = nativeImage.createFromBuffer(png);
         const w = img.getSize().width;
@@ -498,7 +499,11 @@ class AiService {
         // act in the page: Chromium refuses DevTools control of the main
         // profile, so clicking and typing need the assistant's profile.
         if ((this.config().browserMode || 'main') === 'main' && !args.interact) {
-          await shell.openExternal(args.url);
+          // The browser chosen in Settings (its normal profile), else the
+          // system default browser.
+          const pick = this.config().browser ? require('./browser').listBrowsers().find((x) => x.key === this.config().browser) : null;
+          if (pick) require('child_process').spawn(pick.path, [args.url], { detached: true, stdio: 'ignore' }).unref();
+          else await shell.openExternal(args.url);
           let page = null;
           try { page = await fetchPage(args.url); } catch { page = null; }
           return {
@@ -851,6 +856,7 @@ class AiService {
       return filePaths.map((p) => { try { return attachments.describe(p); } catch { return null; } }).filter(Boolean);
     });
     ipcMain.handle('ai:stop', (_e, id) => this.stop(id));
+    ipcMain.handle('ai:browsers', () => { try { return require('./browser').listBrowsers().map(({ key, name, cdp }) => ({ key, name, cdp })); } catch { return []; } });
     ipcMain.handle('ai:evict-blocking', (_e, id) => this.evictBlocking(String(id || '')));
     ipcMain.handle('ai:queue', (_e, id) => this.queue(id));
     ipcMain.handle('ai:unqueue', (_e, id, index) => this.unqueue(id, Number(index)));

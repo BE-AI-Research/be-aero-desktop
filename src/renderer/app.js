@@ -381,6 +381,7 @@
     $('set-ai-unload').value = aiCfg.unloadAfter || '1m';
     $('set-ai-evict').value = aiCfg.evictBlocking || 'ask';
     $('set-ai-browser').value = aiCfg.browserMode || 'main';
+    fillBrowsers(aiCfg.browser || '');
     $('set-ai-memory').checked = aiCfg.memoryEnabled !== false;
     const vc = aiCfg.voice || {};
     if (window.__applyVoiceSettings) window.__applyVoiceSettings(vc);
@@ -606,6 +607,22 @@
   $('set-ai-unload').addEventListener('change', (e) => aero.setSettings({ ai: { unloadAfter: e.target.value } }));
   $('set-ai-evict').addEventListener('change', (e) => aero.setSettings({ ai: { evictBlocking: e.target.value } }));
   $('set-ai-browser').addEventListener('change', (e) => aero.setSettings({ ai: { browserMode: e.target.value } }));
+
+  // "Browser the assistant uses": the installed browsers (listed once).
+  let browserList = null;
+  async function fillBrowsers(saved) {
+    const sel = $('set-ai-browser-app');
+    if (browserList === null) { try { browserList = await aero.aiBrowsers(); } catch { browserList = []; } }
+    sel.innerHTML = '';
+    const d = document.createElement('option'); d.value = ''; d.textContent = 'My default browser'; sel.appendChild(d);
+    for (const b of browserList) { const o = document.createElement('option'); o.value = b.key; o.textContent = b.name; sel.appendChild(o); }
+    sel.value = browserList.some((b) => b.key === saved) ? saved : '';
+    const cur = browserList.find((b) => b.key === sel.value);
+    $('ai-browser-hint').textContent = cur && !cur.cdp
+      ? `${cur.name} opens pages; when the assistant has to click or type it uses ${(browserList.find((b) => b.cdp) || { name: 'a Chromium browser' }).name}, because ${cur.name} cannot be automated.`
+      : 'Pages open in this browser with your normal profile. To click or type for you, the assistant uses a separate profile of a Chromium browser (Chrome, Edge, Brave).';
+  }
+  $('set-ai-browser-app').addEventListener('change', async (e) => { await aero.setSettings({ ai: { browser: e.target.value } }); fillBrowsers(e.target.value); });
 
   // "Model for scheduled tasks": the server's models (fetched once per
   // section open), plus whatever is saved even if the list is unavailable.

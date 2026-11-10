@@ -307,3 +307,18 @@ test('Ollama addresses as typed become full server URLs; other providers are lef
   assert.strictEqual(normalizeBaseUrl('custom', 'my-server'), 'my-server');
   assert.strictEqual(normalizeBaseUrl('ollamalan', ''), '');
 });
+
+test('browser choice: a picked Chromium browser drives the assistant profile; Firefox never does', () => {
+  const { listBrowsers, detectBrowser } = require('../src/main/ai/browser');
+  const list = listBrowsers();
+  assert.ok(Array.isArray(list));
+  for (const b of list) assert.strictEqual(b.cdp, b.key !== 'firefox');
+  const chromium = list.filter((b) => b.cdp);
+  if (chromium.length) {
+    const pick = chromium[chromium.length - 1];
+    assert.strictEqual(detectBrowser(pick.key).name, pick.key, 'the chosen browser is used');
+    const fallback = detectBrowser('firefox');
+    assert.ok(fallback && fallback.name !== 'firefox', 'Firefox falls back to a Chromium browser');
+    assert.ok(detectBrowser('not-installed'), 'an unknown choice falls back');
+  }
+});

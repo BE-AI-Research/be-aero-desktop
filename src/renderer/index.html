@@ -202,6 +202,9 @@
           <option value="never">Never unload other models</option>
         </select>
         <div class="hint-text">Ollama servers. Unloading frees the server's memory for other models and programs; whoever uses a model next waits for it to load again.</div>
+        <label class="field-label">Browser the assistant uses</label>
+        <select id="set-ai-browser-app" title="Which installed browser the assistant opens pages in"></select>
+        <div class="hint-text" id="ai-browser-hint"></div>
         <label class="field-label">When the assistant opens a web page</label>
         <select id="set-ai-browser" title="Browsers do not allow automation of your main profile, so clicking and typing for you always uses the assistant's own profile">
           <option value="main">Open it in my own browser (the assistant's profile only when it must click or type)</option>
