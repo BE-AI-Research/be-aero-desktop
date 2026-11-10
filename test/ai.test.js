@@ -273,3 +273,37 @@ test('provider translation carries attachments on user turns only', () => {
   assert.strictEqual(typeof oa[1].content, 'string');
 });
 
+
+test('agent loop: a repeated lookup is not run again, and the step limit ends with an answer, not nothing', async () => {
+  const conv = { messages: [{ role: 'user', content: 'check the weather alerts' }] };
+  let reads = 0;
+  const ctx = { settings: () => ({ dock: 'right', theme: {} }), plugins: () => [], append: (m) => conv.messages.push(m), telemetry: () => { reads++; return { cpu: 5 }; } };
+  const seen = [];
+  const provider = {
+    chat: async ({ messages, tools: defs }) => {
+      seen.push({ tools: (defs || []).length, last: messages[messages.length - 1] });
+      if (!defs || !defs.length) return { text: 'Final: no alerts confirmed.', toolCalls: [], stopReason: 'end_turn' };
+      return { text: '', toolCalls: [{ id: `c${seen.length}`, name: 'read_telemetry', input: {} }], stopReason: 'tool_use' };
+    }
+  };
+  const events = [];
+  const r = await runTurn({ provider, model: 'm', conversation: conv, ctx, emit: (e) => events.push(e), permit: async () => true, maxSteps: 3 });
+  assert.ok(r.done && r.truncated, 'ends done, marked truncated');
+  assert.strictEqual(reads, 1, 'the identical read ran once');
+  assert.ok(String(seen[2].last.results[0].content).startsWith('Already done'), 'the repeat was answered from memory');
+  assert.strictEqual(seen[seen.length - 1].tools, 0, 'the last call had no tools');
+  assert.strictEqual(conv.messages[conv.messages.length - 1].content, 'Final: no alerts confirmed.');
+  assert.ok(events.some((e) => e.type === 'notice' && /limit of 3 tool steps/.test(e.text)));
+  assert.ok(!events.some((e) => e.type === 'error'), 'no "Stopped after" error');
+});
+
+test('Ollama addresses as typed become full server URLs; other providers are left alone', () => {
+  const { normalizeBaseUrl, PRESETS } = require('../src/main/ai/providers');
+  assert.ok(PRESETS.ollamalan && PRESETS.ollamalan.local);
+  assert.strictEqual(normalizeBaseUrl('ollamalan', '192.168.1.20'), 'http://192.168.1.20:11434/v1');
+  assert.strictEqual(normalizeBaseUrl('ollamalan', 'gpu-box:11500'), 'http://gpu-box:11500/v1');
+  assert.strictEqual(normalizeBaseUrl('ollama', 'http://192.168.1.150:11434/v1'), 'http://192.168.1.150:11434/v1');
+  assert.strictEqual(normalizeBaseUrl('ollamalan', 'https://ollama.example.net/v1'), 'https://ollama.example.net/v1');
+  assert.strictEqual(normalizeBaseUrl('custom', 'my-server'), 'my-server');
+  assert.strictEqual(normalizeBaseUrl('ollamalan', ''), '');
+});

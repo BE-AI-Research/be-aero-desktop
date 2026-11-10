@@ -6,7 +6,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { ipcMain, dialog, safeStorage, shell } = require('electron');
 const { Conversations } = require('./conversations');
-const { createProvider, PRESETS } = require('./providers');
+const { createProvider, normalizeBaseUrl, PRESETS } = require('./providers');
 const { runTurn, compactConversation } = require('./agent');
 const ctxbuf = require('./context');
 const { webSearch, fetchPage } = require('./websearch');
@@ -74,11 +74,17 @@ class AiService {
     const permission = task.permission && task.permission !== 'inherit'
       ? task.permission : (globalMode === 'ask' ? 'deny' : globalMode);
     const when = task.when ? ` - ${task.when}` : '';
-    const header = scheduled ? `[Scheduled task "${task.name}"${when}. Nobody is watching: finish the job and keep the summary short.]\n` : '';
+    // Tasks settle: a few lookups, then the answer. Where sources disagree
+    // the model reports both instead of re-checking until the step limit.
+    const settle = 'Use only the lookups you need. If sources disagree, report what each says instead of checking again. End with the answer.';
+    const header = scheduled
+      ? `[Scheduled task "${task.name}"${when}. Nobody is watching: finish the job and keep the summary short. ${settle}]\n`
+      : `[Task "${task.name}". ${settle}]\n`;
+    const taskSteps = Math.max(2, Math.min(100, Number(this.config().taskMaxSteps) || 10));
     // Model: the task's own choice, else the Tasks model in Settings, else
     // the chat model.
     const model = this.taskModel(task);
-    const result = await this.send(convId, header + task.prompt, [], { permission, source: scheduled ? 'schedule' : 'task', signal, model });
+    const result = await this.send(convId, header + task.prompt, [], { permission, source: scheduled ? 'schedule' : 'task', signal, model, endpoint: 'task', maxSteps: taskSteps });
     try {
       const conv = this.conversations.get(convId);
       const last = [...conv.messages].reverse().find((m) => m.role === 'assistant' && m.content);
@@ -104,8 +110,8 @@ class AiService {
     return this.config().enabled !== false;
   }
 
-  apiKey() {
-    const raw = this.config().apiKey || '';
+  apiKey(field = 'apiKey') {
+    const raw = this.config()[field] || '';
     if (!raw) return '';
     if (raw.startsWith('enc:')) {
       try {
@@ -116,39 +122,52 @@ class AiService {
     return raw;
   }
 
-  setApiKey(plain) {
+  setApiKey(plain, field = 'apiKey') {
     let stored = plain || '';
     if (stored && safeStorage.isEncryptionAvailable()) {
       stored = 'enc:' + safeStorage.encryptString(stored).toString('base64');
     }
-    this.d.updateSettings({ ai: { apiKey: stored } });
+    this.d.updateSettings({ ai: { [field]: stored } });
   }
 
-  provider() {
+  // Inference endpoints. 'chat' is Settings > Provider; 'task' is the
+  // provider for scheduled tasks ('' there = the chat provider). Both can be
+  // in use at once: a model on this PC for chat, a LAN server for tasks.
+  endpoint(which = 'chat') {
     const c = this.config();
-    return createProvider({ provider: c.provider || 'anthropic', baseUrl: c.baseUrl || '', apiKey: this.apiKey() });
+    if (which === 'task' && c.taskProvider) {
+      const preset = PRESETS[c.taskProvider] || PRESETS.custom;
+      return { id: 'task', provider: c.taskProvider, preset, baseUrl: normalizeBaseUrl(c.taskProvider, c.taskBaseUrl || preset.baseUrl), keyField: 'taskApiKey' };
+    }
+    const provider = c.provider || 'anthropic';
+    const preset = PRESETS[provider] || PRESETS.custom;
+    return { id: 'chat', provider, preset, baseUrl: normalizeBaseUrl(provider, c.baseUrl || preset.baseUrl), keyField: 'apiKey' };
   }
 
-  preset() {
-    return PRESETS[this.config().provider] || PRESETS.custom;
+  provider(ep = this.endpoint()) {
+    return createProvider({ provider: ep.provider, baseUrl: ep.baseUrl, apiKey: this.apiKey(ep.keyField) });
+  }
+
+  preset(ep = this.endpoint()) {
+    return ep.preset;
   }
 
   // One Backend per server URL, kept for the session (it remembers whether
-  // the server can report model status).
-  backend() {
-    const c = this.config();
-    const p = this.preset();
+  // the server can report model status). Chat and tasks may use different
+  // servers at the same time.
+  backend(ep = this.endpoint()) {
+    const p = ep.preset;
     if (p.kind === 'anthropic' || !p.local) return null;
-    const url = c.baseUrl || p.baseUrl;
-    if (!this.backendObj || this.backendObj.url !== url) {
-      this.backendObj = { url, b: new (require('./backend').Backend)({ baseUrl: url }), evicted: false, window: 0 };
-    }
-    return this.backendObj;
+    const url = ep.baseUrl;
+    if (!url || /^unix:/.test(url)) return null;
+    if (!this.backends) this.backends = new Map();
+    if (!this.backends.has(url)) this.backends.set(url, { url, b: new (require('./backend').Backend)({ baseUrl: url }), evicted: false, window: 0 });
+    return this.backends.get(url);
   }
 
   // Before each model call: report an eviction once, and a window change.
-  async checkBackend(model, emit) {
-    const be = this.backend();
+  async checkBackend(model, emit, ep) {
+    const be = this.backend(ep);
     if (!be) return null;
     const st = await be.b.status(model);
     if (!st) return null;
@@ -166,8 +185,8 @@ class AiService {
 
   // After a reply: extend the model's residency so a pause between
   // messages does not unload it (Ollama keep_alive; default 30 minutes).
-  refreshKeepAlive(model) {
-    const be = this.backend();
+  refreshKeepAlive(model, ep) {
+    const be = this.backend(ep);
     if (!be) return;
     const ka = String(this.config().keepAlive || '30m');
     if (ka === '0') return;
@@ -176,23 +195,23 @@ class AiService {
 
   // Token budget for one request: the user's number, else a default for
   // the provider kind (local servers get a small one).
-  contextBudget() {
+  contextBudget(ep = this.endpoint()) {
     const c = this.config();
-    const p = this.preset();
-    return ctxbuf.budgetFor(c.provider || 'anthropic', p.kind, c.contextTokens, !!p.local);
+    const p = ep.preset;
+    return ctxbuf.budgetFor(ep.provider, p.kind, c.contextTokens, !!p.local);
   }
 
   // Remembered per provider + model for the app session: whether native
   // tool calls worked, or the server rejected them (then text calls).
-  toolSession(model) {
+  toolSession(model, ep = this.endpoint()) {
     if (!this.toolSessions) this.toolSessions = new Map();
-    const key = `${this.config().provider}|${this.config().baseUrl}|${model}`;
+    const key = `${ep.provider}|${ep.baseUrl}|${model}`;
     if (!this.toolSessions.has(key)) this.toolSessions.set(key, {});
     return this.toolSessions.get(key);
   }
 
-  calibration() {
-    const key = `${this.config().provider}|${this.config().model}`;
+  calibration(model = this.config().model, ep = this.endpoint()) {
+    const key = `${ep.provider}|${ep.baseUrl}|${model}`;
     if (!this.calibrations.has(key)) this.calibrations.set(key, new ctxbuf.Calibration());
     return this.calibrations.get(key);
   }
@@ -298,6 +317,8 @@ class AiService {
       systemPrompt: c.systemPrompt || '', pinned: this.pinned,
       local: !!preset.local, noTools: !!preset.noTools, hint: preset.hint || '',
       contextTokens: Number(c.contextTokens) || 0, contextBudget: this.contextBudget(), compactWithModel: c.compactWithModel !== false,
+      taskProvider: c.taskProvider || '', taskBaseUrl: c.taskBaseUrl || '', hasTaskKey: !!this.apiKey('taskApiKey'),
+      taskEndpointUrl: this.endpoint('task').baseUrl, chatEndpointUrl: this.endpoint('chat').baseUrl,
       presets: Object.entries(PRESETS).map(([id, p]) => ({ id, label: p.label, baseUrl: p.baseUrl, model: p.model, needsKey: p.needsKey, local: !!p.local, noTools: !!p.noTools, hint: p.hint || '' }))
     };
   }
@@ -348,7 +369,7 @@ class AiService {
       execCapture: (cmd, timeoutSec) => d.execCapture(cmd, timeoutSec),
       tasks: {
         list: () => this.scheduler.list().map((t) => ({
-          id: t.id, name: t.name, when: t.when, prompt: t.prompt, state: t.state, model: this.taskModel(t), modelSource: t.model ? 'task' : this.config().taskModel ? 'tasks setting' : 'chat model',
+          id: t.id, name: t.name, when: t.when, prompt: t.prompt, state: t.state, model: this.taskModel(t), modelSource: t.model ? 'task' : this.config().taskModel ? 'tasks setting' : 'chat model', provider: this.endpoint('task').preset.label,
           nextRun: t.nextRun ? new Date(t.nextRun).toLocaleString() : null,
           lastOutcome: t.lastOutcome || null, failures: t.failures || 0, permission: t.permission, error: t.whenError || undefined
         })),
@@ -584,12 +605,17 @@ class AiService {
     }
 
     const c = this.config();
-    const preset = PRESETS[c.provider] || PRESETS.custom;
-    if (preset.needsKey && !this.apiKey()) {
-      return { error: `${preset.label} needs an API key - add one in Settings > AI assistant.`, conversationId: conv.id };
+    const ep = this.endpoint(opts.endpoint);
+    const preset = ep.preset;
+    const forTasks = ep.id === 'task' ? ' (scheduled tasks)' : '';
+    if (preset.needsKey && !this.apiKey(ep.keyField)) {
+      return { error: `${preset.label}${forTasks} needs an API key - add one in Settings > AI assistant.`, conversationId: conv.id };
     }
-    const model = opts.model || c.model || preset.model;
-    if (!model) return { error: 'Choose a model in Settings > AI assistant.', conversationId: conv.id };
+    if (ep.id === 'task' && !ep.baseUrl && preset.kind !== 'anthropic') {
+      return { error: `${preset.label} (scheduled tasks) needs a server address - add one in Settings > AI assistant.`, conversationId: conv.id };
+    }
+    const model = opts.model || (ep.id === 'task' ? preset.model : (c.model || preset.model));
+    if (!model) return { error: `Choose a model${ep.id === 'task' ? ' for scheduled tasks' : ''} in Settings > AI assistant.`, conversationId: conv.id };
 
     this.conversations.append(conv.id, { role: 'user', content, ...(files.length ? { attachments: files } : {}) });
     this.emit(conv.id, { type: 'user', content, attachments: files, title: conv.title, index: this.conversations.get(conv.id).messages.length - 1 });
@@ -601,12 +627,15 @@ class AiService {
   // The model a scheduled task runs on (see runTask).
   taskModel(task) {
     const c = this.config();
-    return String((task && task.model) || c.taskModel || c.model || this.preset().model || '').trim();
+    const ep = this.endpoint('task');
+    const fallback = ep.id === 'task' ? ep.preset.model : (c.model || ep.preset.model);
+    return String((task && task.model) || c.taskModel || fallback || '').trim();
   }
 
   async runConversation(conv, opts = {}) {
     const c = this.config();
-    const preset = this.preset();
+    const ep = this.endpoint(opts.endpoint);
+    const preset = ep.preset;
     const model = String(opts.model || c.model || preset.model || '').trim();
     const controller = new AbortController();
     if (opts.signal) {
@@ -616,19 +645,19 @@ class AiService {
     this.runs.set(conv.id, controller);
     const emit = (ev) => this.emit(conv.id, ev);
     try {
-      const provider = this.provider();
+      const provider = this.provider(ep);
       const result = await runTurn({
         provider, model, conversation: conv, ctx: this.toolContext(conv.id),
         permit: (call) => this.permit(call, opts.permission), emit, signal: controller.signal,
-        maxSteps: Math.max(1, Math.min(500, Number(c.maxSteps) || 12)),
+        maxSteps: Math.max(1, Math.min(500, Number(opts.maxSteps) || Number(c.maxSteps) || 12)),
         context: {
           toolMode: c.toolCalls || 'auto',
-          session: this.toolSession(model),
-          budget: this.contextBudget(), calibration: this.calibration(), compactWithModel: c.compactWithModel !== false,
-          checkBackend: () => this.checkBackend(model, emit)
+          session: this.toolSession(model, ep),
+          budget: this.contextBudget(ep), calibration: this.calibration(model, ep), compactWithModel: c.compactWithModel !== false,
+          checkBackend: () => this.checkBackend(model, emit, ep)
         }
       });
-      if (result && !result.error && !result.stopped) this.refreshKeepAlive(model);
+      if (result && !result.error && !result.stopped) this.refreshKeepAlive(model, ep);
       // A server that went away mid-task: the renderer polls and resumes.
       if (result && result.error && result.retryable) emit({ type: 'offline', message: result.error, local: !!preset.local });
       emit({ type: 'done', ...result });
@@ -704,8 +733,9 @@ class AiService {
   registerIpc() {
     ipcMain.handle('ai:status', () => this.status());
     ipcMain.handle('ai:set-key', (_e, key) => { this.setApiKey(String(key || '')); return this.status(); });
-    ipcMain.handle('ai:models', async () => {
-      const p = this.provider();
+    ipcMain.handle('ai:set-task-key', (_e, key) => { this.setApiKey(String(key || ''), 'taskApiKey'); return this.status(); });
+    ipcMain.handle('ai:models', async (_e, which) => {
+      const p = this.provider(this.endpoint(which === 'task' ? 'task' : 'chat'));
       try { return { models: await p.listModels() }; } catch (err) {
         return { error: p.describeError ? p.describeError(err) : err.message };
       }

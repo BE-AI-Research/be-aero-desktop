@@ -19,6 +19,8 @@ const PRESETS = {
   anthropic: { label: 'Anthropic (Claude)', kind: 'anthropic', baseUrl: '', model: 'claude-opus-5-5', needsKey: true },
   openai: { label: 'OpenAI', kind: 'openai', baseUrl: 'https://api.openai.com/v1', model: '', needsKey: true },
   ollama: { label: 'Ollama (local)', kind: 'openai', baseUrl: 'http://localhost:11434/v1', model: '', needsKey: false, local: true },
+  ollamalan: { label: 'Ollama (LAN server)', kind: 'openai', baseUrl: '', model: '', needsKey: false, local: true,
+    hint: 'A shared Ollama server on your network. Type its address, e.g. 192.168.1.20 - the port (11434) and /v1 are added for you. On the server, Ollama must listen on the network (OLLAMA_HOST=0.0.0.0).' },
   lmstudio: { label: 'LM Studio (local)', kind: 'openai', baseUrl: 'http://localhost:1234/v1', model: '', needsKey: false, local: true },
   llamacpp: { label: 'llama.cpp server (local)', kind: 'openai', baseUrl: 'http://localhost:8080/v1', model: '', needsKey: false, local: true },
   becode: { label: 'BE-Code session (shared inference)', kind: 'openai', baseUrl: `unix://${defaultBeCodeSocket()}`, model: 'default', needsKey: true, local: true, noTools: true,
@@ -317,6 +319,22 @@ class OpenAiCompatProvider {
   }
 }
 
+// Ollama addresses as people type them: "192.168.1.20", "server:11434",
+// "http://server" all become http://host:11434/v1. Other providers' URLs are
+// used as given.
+function normalizeBaseUrl(provider, url) {
+  let u = String(url || '').trim();
+  if (!u || !/^(ollama|ollamalan)$/.test(String(provider || ''))) return u;
+  if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(u)) u = `http://${u}`;
+  try {
+    const x = new URL(u);
+    const hadPort = /^[a-z][a-z0-9+.-]*:\/\/[^/]*:\d+/i.test(u);
+    if (!hadPort && x.protocol === 'http:') x.port = '11434';
+    if (x.pathname === '/' || x.pathname === '') x.pathname = '/v1';
+    return x.toString().replace(/\/$/, '');
+  } catch { return u; }
+}
+
 function createProvider(config) {
   const preset = PRESETS[config.provider] || PRESETS.custom;
   const baseUrl = config.baseUrl || preset.baseUrl;
@@ -325,6 +343,6 @@ function createProvider(config) {
 }
 
 module.exports = {
-  PRESETS, createProvider, AnthropicProvider, OpenAiCompatProvider,
+  PRESETS, createProvider, normalizeBaseUrl, AnthropicProvider, OpenAiCompatProvider,
   toAnthropicMessages, toAnthropicTools, toOpenAiMessages, toOpenAiTools, applyOpenAiDelta, finishOpenAiState
 };

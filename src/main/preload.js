@@ -40,7 +40,8 @@ contextBridge.exposeInMainWorld('aero', {
   // AI assistant
   aiStatus: () => ipcRenderer.invoke('ai:status'),
   aiSetKey: (key) => ipcRenderer.invoke('ai:set-key', key),
-  aiModels: () => ipcRenderer.invoke('ai:models'),
+  aiModels: (which) => ipcRenderer.invoke('ai:models', which),
+  aiSetTaskKey: (key) => ipcRenderer.invoke('ai:set-task-key', key),
   aiConversations: () => ipcRenderer.invoke('ai:conversations'),
   aiConversation: (id) => ipcRenderer.invoke('ai:conversation', id),
   aiConversationView: (id, limit, before) => ipcRenderer.invoke('ai:conversation-view', id, limit, before),

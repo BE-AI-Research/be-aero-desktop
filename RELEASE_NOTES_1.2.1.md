@@ -20,6 +20,13 @@ Tasks now use the same scheduling model as BE-Code.
 - **Choose the model tasks run on.** Settings > AI assistant > "Model for scheduled tasks",
   and each task can pick its own. Using the model another program on the same server
   already has loaded avoids swapping models in and out.
+- **Tasks can use their own provider.** Settings > AI assistant > "Provider for scheduled
+  tasks" lets tasks run on a different server from chat, both at once: for example chat on
+  a model on this PC and tasks on a shared server on your network.
+- **Tasks finish with an answer.** A run that reaches its tool-step limit (10 for tasks)
+  now gets a final answer from what it found instead of stopping with nothing. A lookup
+  repeated within one run (same page, same search) isn't fetched again, and when sources
+  disagree the model reports both rather than re-checking over and over.
 - **Read the result aloud.** A task can say its result on your speakers when it finishes,
   handy for a morning briefing. Turn it on in the task's form; the assistant can set it too.
 - **Easier for the assistant.** Small local models now create tasks reliably, and the
@@ -53,6 +60,8 @@ the final answer.
   after a long think, gets one automatic retry.
 
 ## Local models (Ollama, LM Studio)
+- **Ollama (LAN server)** is a new provider for a shared Ollama server on your network. Type
+  just the address (e.g. `192.168.1.20`); the port and `/v1` are added for you.
 - **Evicted models are noticed.** Before each request BE-Aero checks whether the model is
   still loaded. If another model or idle expiry unloaded it, the chat says the reply will
   take longer while it reloads.

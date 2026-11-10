@@ -808,10 +808,14 @@
       // Fill the model list from the server (kept for the session).
       const modelSel = form.querySelector('[name=model]');
       (async () => {
-        if (!window.__aeroModels) { try { const r = await aero.aiModels(); window.__aeroModels = (r && r.models) || []; } catch { window.__aeroModels = []; } }
+        // Fresh each time the form opens: the task provider may have changed.
+        let models = [];
+        try { const r = await aero.aiModels('task'); models = (r && r.models) || []; } catch { /* offline */ }
+        window.__aeroModels = models;
         const cur = modelSel.dataset.current;
         const st = await aero.getSettings();
-        const def = (st.ai && (st.ai.taskModel || st.ai.model)) || '';
+        const ai = st.ai || {};
+        const def = ai.taskModel || (ai.taskProvider ? '' : ai.model) || '';
         modelSel.options[0].textContent = `Model: default for tasks${def ? ` (${def})` : ''}`;
         for (const m of window.__aeroModels) { if (m === cur) continue; const o = document.createElement('option'); o.value = m; o.textContent = `Model: ${m}`; modelSel.appendChild(o); }
         modelSel.value = cur;

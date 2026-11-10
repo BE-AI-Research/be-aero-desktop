@@ -581,8 +581,9 @@
     const preset = aiPresets.find((p) => p.id === st.provider) || {};
     if (document.activeElement !== $('set-ai-url')) $('set-ai-url').value = st.baseUrl || '';
     $('set-ai-url').disabled = st.provider === 'anthropic';
-    $('set-ai-url').placeholder = st.provider === 'anthropic' ? 'Default Anthropic endpoint' : st.provider === 'becode' ? 'unix://~/.be-code/api/api.sock' : 'Server URL (e.g. http://localhost:11434/v1)';
+    $('set-ai-url').placeholder = st.provider === 'anthropic' ? 'Default Anthropic endpoint' : st.provider === 'becode' ? 'unix://~/.be-code/api/api.sock' : st.provider === 'ollamalan' ? 'Server address (e.g. 192.168.1.20)' : 'Server URL (e.g. http://localhost:11434/v1)';
     if (document.activeElement !== $('set-ai-model')) $('set-ai-model').value = st.model || '';
+    fillTaskProvider(st);
     fillTaskModel(st.model || '');
     $('set-ai-key').placeholder = st.hasKey ? 'API key saved (enter a new one to replace)' : (preset.needsKey ? 'API key (required)' : 'API key (optional)');
     const line = !st.enabled ? 'AI assistant is disabled.'
@@ -600,20 +601,65 @@
   // "Model for scheduled tasks": the server's models (fetched once per
   // section open), plus whatever is saved even if the list is unavailable.
   let serverModels = null;
+  let taskProviderSet = false;
   async function fillTaskModel(chatModel) {
     const sel = $('set-ai-task-model');
     const saved = ((await aero.getSettings()).ai || {}).taskModel || '';
+    let err = '';
     if (serverModels === null) {
       serverModels = [];
-      try { const r = await aero.aiModels(); if (r && Array.isArray(r.models)) serverModels = r.models; } catch { /* offline */ }
+      try { const r = await aero.aiModels('task'); if (r && Array.isArray(r.models)) serverModels = r.models; else if (r && r.error) err = r.error; } catch { /* offline */ }
     }
     const list = [...new Set([...serverModels, ...(saved ? [saved] : [])])];
     sel.innerHTML = '';
-    const d = document.createElement('option'); d.value = ''; d.textContent = `Same as the chat model${chatModel ? ` (${chatModel})` : ''}`; sel.appendChild(d);
+    const d = document.createElement('option'); d.value = '';
+    d.textContent = taskProviderSet ? (list.length ? 'Choose a model' : `No models listed${err ? ` (${err})` : ''}`) : `Same as the chat model${chatModel ? ` (${chatModel})` : ''}`;
+    sel.appendChild(d);
     for (const m of list) { const o = document.createElement('option'); o.value = m; o.textContent = m; sel.appendChild(o); }
     sel.value = saved;
   }
   $('set-ai-task-model').addEventListener('change', (e) => aero.setSettings({ ai: { taskModel: e.target.value } }));
+
+  // "Provider for scheduled tasks": '' = the chat provider; otherwise its own
+  // address and key, so chat and tasks can use different servers at once.
+  function fillTaskProvider(st) {
+    const sel = $('set-ai-task-provider');
+    const chatLabel = (aiPresets.find((p) => p.id === st.provider) || {}).label || st.provider;
+    sel.innerHTML = '';
+    const d = document.createElement('option'); d.value = ''; d.textContent = `Same as chat (${chatLabel})`; sel.appendChild(d);
+    for (const p of aiPresets) { if (p.id === 'becode') continue; const o = document.createElement('option'); o.value = p.id; o.textContent = p.label; sel.appendChild(o); }
+    sel.value = st.taskProvider || '';
+    taskProviderSet = !!st.taskProvider;
+    const preset = aiPresets.find((p) => p.id === st.taskProvider) || {};
+    const url = $('set-ai-task-url');
+    url.classList.toggle('hidden', !st.taskProvider || st.taskProvider === 'anthropic');
+    if (document.activeElement !== url) url.value = st.taskBaseUrl || '';
+    url.placeholder = st.taskProvider === 'ollamalan' ? 'Server address (e.g. 192.168.1.20)' : (preset.baseUrl || 'Server URL');
+    url.title = st.taskEndpointUrl ? `Tasks connect to ${st.taskEndpointUrl}` : '';
+    $('ai-task-key-row').classList.toggle('hidden', !st.taskProvider || !preset.needsKey);
+    $('set-ai-task-key').placeholder = st.hasTaskKey ? 'API key saved (enter a new one to replace)' : 'API key for tasks (required)';
+    $('ai-task-hint').textContent = st.taskProvider
+      ? `Tasks run on ${preset.label}${st.taskEndpointUrl ? ` at ${st.taskEndpointUrl}` : ''}, separately from chat (${chatLabel}). A task can still pick its own model.`
+      : 'Tasks run on this model unless a task picks its own. Using the same model as another program on the same server avoids swapping models in and out.';
+  }
+  $('set-ai-task-provider').addEventListener('change', async (e) => {
+    const preset = aiPresets.find((p) => p.id === e.target.value) || {};
+    // A model id from another provider would not exist on this one.
+    await aero.setSettings({ ai: { taskProvider: e.target.value, taskBaseUrl: e.target.value ? (preset.baseUrl || '') : '', taskModel: '' } });
+    serverModels = null;
+    refreshAiStatus();
+  });
+  $('set-ai-task-url').addEventListener('change', async (e) => {
+    await aero.setSettings({ ai: { taskBaseUrl: e.target.value.trim(), taskModel: '' } });
+    serverModels = null;
+    refreshAiStatus();
+  });
+  $('btn-ai-task-key').addEventListener('click', async () => {
+    await aero.aiSetTaskKey($('set-ai-task-key').value);
+    $('set-ai-task-key').value = '';
+    serverModels = null;
+    refreshAiStatus();
+  });
   $('btn-ai-models').addEventListener('click', () => { serverModels = null; setTimeout(() => fillTaskModel($('set-ai-model').value), 1200); });
   $('set-ai-enabled').addEventListener('change', (e) => aero.setSettings({ ai: { enabled: e.target.checked } }));
   let personaTimer = null;

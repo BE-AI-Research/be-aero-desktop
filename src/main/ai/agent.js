@@ -81,10 +81,16 @@ async function runTurn({ provider, model, conversation, ctx, permit, emit, signa
   const session = context.session || {};
   const setting = context.toolMode || 'auto';
   const compatMode = () => defs.length > 0 && setting !== 'native' && (setting === 'compat' || profile.compat === 'always' || !!session.compat);
-  const systemFor = () => (compatMode() ? `${baseSystem}\n\n${toolcalls.compatInstructions(defs)}` : baseSystem);
+  // finalOnly: the step limit was reached - one last call without tools, so
+  // the request ends with an answer from what was found, not with nothing.
+  let finalOnly = false;
+  const systemFor = () => (compatMode() && !finalOnly ? `${baseSystem}\n\n${toolcalls.compatInstructions(defs)}` : baseSystem);
   let system = systemFor();
   let cutOffRetried = false;
   let emptyNudged = false;
+  // Read-only calls already made in this request (name + input): a repeat
+  // is answered from memory instead of fetching the same page again.
+  const seen = new Map();
   const baseBudget = Number(context.budget) > 0 ? Number(context.budget) : ctxbuf.DEFAULT_BUDGETS.local;
   let budget = baseBudget;
   const calibration = context.calibration || new ctxbuf.Calibration();
@@ -126,7 +132,7 @@ async function runTurn({ provider, model, conversation, ctx, permit, emit, signa
       const onReasoning = () => { stall.onText(''); if (!thinkingShown) { thinkingShown = true; emit({ type: 'thinking' }); } };
       try {
         res = await chatWithRetry(provider, {
-          model, system, tools: compatMode() ? [] : defs, compat: compatMode(), signal, messages,
+          model, system, tools: compatMode() || finalOnly ? [] : defs, compat: compatMode() && !finalOnly, signal, messages,
           onText: stall.onText, onReasoning
         }, { emit, signal });
         const tail = think.flush();
@@ -154,9 +160,9 @@ async function runTurn({ provider, model, conversation, ctx, permit, emit, signa
     // model wrote as text (any of the formats in toolcalls.js) into calls.
     const rawText = String(res.text || '');
     let text = toolcalls.stripThink(rawText);
-    let calls = res.toolCalls || [];
+    let calls = finalOnly ? [] : (res.toolCalls || []);
     if (calls.length) session.nativeWorked = true;
-    if (!calls.length && defs.length) {
+    if (!calls.length && defs.length && !finalOnly) {
       const parsed = toolcalls.parseEmbeddedCalls(text, defs);
       if (parsed.calls.length) { calls = parsed.calls; text = parsed.text; }
     }
@@ -187,10 +193,15 @@ async function runTurn({ provider, model, conversation, ctx, permit, emit, signa
       emit({ type: 'error', message: 'The model declined this request.' });
       return { refusal: true };
     }
-    if (!res.toolCalls || !res.toolCalls.length) return { done: true, usage: res.usage };
+    if (!res.toolCalls || !res.toolCalls.length) return { done: true, usage: res.usage, ...(finalOnly ? { truncated: true } : {}) };
     if (steps >= maxSteps) {
-      emit({ type: 'error', message: `Stopped after ${maxSteps} tool steps.` });
-      return { done: true, truncated: true };
+      // Out of tool steps: these calls are not run, and the model answers
+      // from what it has (one call, no tools).
+      ctx.append({ role: 'tool', results: res.toolCalls.map((c) => ({ id: c.id, name: c.name, content: 'Not run: the tool-step limit for this request was reached.', isError: true })) });
+      ctx.append({ role: 'user', content: '[Tool-step limit reached. No more tool calls. Give your final answer now from what you have already found, and say plainly what you could not confirm.]' });
+      emit({ type: 'notice', text: `Reached the limit of ${maxSteps} tool steps; asking for a final answer from what was found.` });
+      finalOnly = true;
+      continue;
     }
 
     const results = [];
@@ -200,7 +211,12 @@ async function runTurn({ provider, model, conversation, ctx, permit, emit, signa
       let isError = false;
       let images = null;
       const invalid = tools.validateInput(call.name, call.input);
-      if (invalid) {
+      let callKey = '';
+      try { callKey = `${call.name}|${JSON.stringify(call.input || {})}`; } catch { callKey = ''; }
+      const repeat = !invalid && callKey && tools.categoryOf(call.name) === 'read' && seen.has(callKey);
+      if (repeat) {
+        content = `Already done earlier in this request (step ${seen.get(callKey)}); its result is above. Do not repeat it: use what you have, or give your answer.`;
+      } else if (invalid) {
         content = `Invalid input: ${invalid}`;
         isError = true;
       } else {
@@ -225,6 +241,7 @@ async function runTurn({ provider, model, conversation, ctx, permit, emit, signa
           }
         }
       }
+      if (callKey && !repeat && !invalid) seen.set(callKey, steps);
       results.push({ id: call.id, name: call.name, content, isError, ...(images ? { images } : {}) });
       emit({ type: 'tool', id: call.id, name: call.name, input: call.input, ok: !isError, result: content.slice(0, 2000), image: images ? `data:${images[0].mime};base64,${images[0].data}` : null });
     }

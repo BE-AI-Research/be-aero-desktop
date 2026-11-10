@@ -176,9 +176,16 @@
           <button class="btn" id="btn-ai-models">Fetch models</button>
         </div>
         <input id="set-ai-model" type="text" spellcheck="false" placeholder="Model id (or pick one above after fetching)">
+        <label class="field-label">Provider for scheduled tasks</label>
+        <select id="set-ai-task-provider" title="Where scheduled tasks run: the chat provider, or another one (for example a shared server on your network while chat uses this PC)"></select>
+        <input id="set-ai-task-url" class="hidden" type="text" spellcheck="false" placeholder="Server address (e.g. 192.168.1.20)">
+        <div class="row hidden" id="ai-task-key-row">
+          <input id="set-ai-task-key" type="password" spellcheck="false" autocomplete="off" placeholder="API key for tasks">
+          <button class="btn" id="btn-ai-task-key">Save key</button>
+        </div>
         <label class="field-label">Model for scheduled tasks</label>
         <select id="set-ai-task-model" title="Model scheduled tasks run on (a task can choose its own)"></select>
-        <div class="hint-text">Tasks run on this model unless a task picks its own. Using the same model as another program on the same server avoids swapping models in and out.</div>
+        <div class="hint-text" id="ai-task-hint">Tasks run on this model unless a task picks its own. Using the same model as another program on the same server avoids swapping models in and out.</div>
         <div class="hint-text" id="ai-provider-hint"></div>
         <label class="field-label">Tool call format</label>
         <select id="set-ai-toolcalls">

@@ -128,6 +128,10 @@ const DEFAULTS = {
     toolCalls: 'auto',   // auto (by model family, with fallback) | native (JSON tools field) | compat (text tool calls)    // local servers (Ollama): keep the model loaded this long after a reply; '0' = don't
     taskMaxRuntimeMin: 30,
     taskModel: '',       // model for scheduled tasks; '' = the chat model (a task can override)
+    taskMaxSteps: 10,    // tool steps per task run; then a final answer from what was found
+    taskProvider: '',    // provider for scheduled tasks; '' = the chat provider
+    taskBaseUrl: '',
+    taskApiKey: '',      // encrypted like apiKey
     compactWithModel: true,
     voice: {
       engine: 'auto',        // auto (Whisper when installed) | whisper | system
