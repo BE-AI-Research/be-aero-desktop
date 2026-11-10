@@ -292,11 +292,27 @@
     sayingEl = b;
     if (b) { b.classList.add('saying'); const x = b.querySelector('.ai-say'); if (x) x.title = 'Stop reading'; }
   }
+  // "Showing <title>." ahead of a reply that came with visuals, so speech
+  // names what is on screen instead of reading it.
+  function withVisuals(titles, text) {
+    const t = (titles || []).filter(Boolean);
+    if (!t.length) return text;
+    return `Showing ${t.length === 1 ? t[0] : `${t.slice(0, -1).join(', ')} and ${t[t.length - 1]}`}.\n\n${text}`;
+  }
+  // The visual cards between this reply and the question before it.
+  function visualsBefore(b) {
+    const out = [];
+    for (let n = b.previousElementSibling; n && !n.classList.contains('ai-user'); n = n.previousElementSibling) {
+      if (n.classList.contains('visual-card')) out.unshift((n.querySelector('.visual-title') || {}).textContent || 'a visual');
+    }
+    return out;
+  }
+
   async function sayBubble(b) {
     if (sayingEl === b) { stopSpeaking(); setSaying(null); b.classList.remove('saying'); return; }
     stopSpeaking();
     setSaying(b);
-    await speak(b.dataset.raw || b.textContent, true);
+    await speak(withVisuals(visualsBefore(b), b.dataset.raw || b.textContent), true);
     if (sayingEl === b) { b.classList.remove('saying'); const x = b.querySelector('.ai-say'); if (x) x.title = 'Read aloud'; sayingEl = null; }
   }
 
@@ -619,12 +635,13 @@
           if (lv.streamEl) { lv.streamEl.innerHTML = md(ev.content || lv.streamText); replyActions(finishReply(lv.streamEl, ev.content || lv.streamText), Number.isInteger(lv.turn) ? lv.turn : -1); }
           else if (ev.content) replyActions(finishReply(bubble('assistant', md(ev.content)), ev.content), Number.isInteger(lv.turn) ? lv.turn : -1);
         }
-        if (ev.content && (!ev.toolCalls || !ev.toolCalls.length)) speak(ev.content);
+        if (ev.content && (!ev.toolCalls || !ev.toolCalls.length)) { speak(withVisuals(lv.visuals, ev.content)); lv.visuals = []; }
         lv.streamEl = null; lv.streamText = '';
         if (!isActive) tab.unread = true;
         break;
       case 'tool':
         if (isActive) toolRow(ev.name, ev.ok, ev.input, ev.result, ev.image);
+        { const v = visualFromResult(ev.name, ev.ok, ev.result); if (v) (lv.visuals = lv.visuals || []).push(v.title || 'a visual'); }
         break;
       case 'queue':
         lv.queued = Array.isArray(ev.items) ? ev.items : [];
@@ -1226,6 +1243,6 @@
     return peak;
   }
 
-  window.AeroAi = { init, md, setVoice, speakable, speak: (t) => speak(t, true), stopSpeaking, audioDevices, micTest, startMic, stopMic, onVoice };
+  window.AeroAi = { spokenFor: (b) => speakable(withVisuals(visualsBefore(b), b.dataset.raw || b.textContent)), init, md, setVoice, speakable, speak: (t) => speak(t, true), stopSpeaking, audioDevices, micTest, startMic, stopMic, onVoice };
 
 })();

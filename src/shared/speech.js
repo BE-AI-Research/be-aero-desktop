@@ -54,6 +54,8 @@
   function structure(md) {
     let s = String(md || '').replace(/\r\n?/g, '\n');
     s = s.replace(/```[\s\S]*?(```|$)/g, '\nThere is a code example here.\n');
+    s = s.replace(/<(script|style)\b[\s\S]*?(<\/\1>|$)/gi, ' ');      // never read page code
+    s = s.replace(/<!doctype[\s\S]*?<\/html>/gi, '\nThere is a web page here.\n');
     s = s.replace(/<[^>\n]{1,200}>/g, ' ');                       // html tags
     s = s.replace(/!\[([^\]]*)\]\([^)]*\)/g, (_m, alt) => (alt ? ` image: ${alt}. ` : ' '));
     s = s.replace(/\[([^\]]+)\]\(([^)]*)\)/g, '$1');               // [text](url) -> text

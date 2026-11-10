@@ -37,3 +37,8 @@ test('rates after a slash read as "per"', () => {
   assert.match(toSpeech('Driving at 60 km/h, downloading 10 MB/s.'), /60 kilometers per hour, downloading 10 megabytes per second/);
   assert.match(toSpeech('on/off'), /on or off/);
 });
+
+test('page code is never read: script/style bodies and whole documents are dropped', () => {
+  assert.strictEqual(toSpeech('Here it is <style>.a{color:red}</style><script>var x = 1 < 2;</script> done.'), 'Here it is done.');
+  assert.strictEqual(toSpeech('<!doctype html><html><body><h1>x</h1></body></html>\nSales grew.'), 'There is a web page here. Sales grew.');
+});

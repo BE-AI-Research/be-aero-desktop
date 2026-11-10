@@ -33,6 +33,8 @@ Ask for a comparison, a trend, a schedule or a summary and the assistant can ans
   "22°C", "1-3 days", "&", "->"); units after numbers ("16 GB", "200 ms", "60 km/h");
   technical acronyms are spelled ("A P I", "C P U"); file names, emails and links read
   cleanly; lists, headings and tables get proper pauses; code blocks and emoji are skipped.
+- When a reply comes with a visual, speech says what is on screen ("Showing Quarterly
+  sales.") and the assistant describes it in plain words; page code is never read aloud.
 
 ### Layering
 - The settings panel and the toolbar with the main menu always stay on top of widgets,
