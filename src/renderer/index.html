@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta http-equiv="Content-Security-Policy"
-        content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https: http:; connect-src https://api.open-meteo.com https://geocoding-api.open-meteo.com; frame-src aero-plugin: https: http:">
+        content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https: http:; media-src 'self' data: blob:; connect-src https://api.open-meteo.com https://geocoding-api.open-meteo.com; frame-src aero-plugin: https: http:">
   <title>BE-Aero Desktop</title>
   <link rel="stylesheet" href="styles.css">
 </head>
@@ -192,12 +192,25 @@
         <div class="hint-text">Reading (settings, telemetry, search, web pages) never asks. Changing settings, launching apps, operating web widgets and closing windows is gated by this.</div>
         <label class="field-label">Voice</label>
         <div class="hint-text" id="ai-voice-info">Checking speech recognition...</div>
-        <label class="check"><input id="set-ai-voice-autosend" type="checkbox"> Send each dictated sentence as soon as it is recognized</label>
-        <label class="check"><input id="set-ai-voice-speak" type="checkbox"> Read the assistant's replies aloud</label>
+        <label class="field-label">Microphone</label>
+        <div class="row">
+          <select id="set-ai-mic" title="Microphone used for dictation"></select>
+          <button class="btn" id="btn-ai-mic-test" title="Listen for 5 seconds and show the input level">Test</button>
+        </div>
+        <div class="voice-meter" id="ai-mic-meter"><div class="voice-meter-bar"></div></div>
+        <label class="field-label">Speaker</label>
+        <div class="row">
+          <select id="set-ai-speaker" title="Output device for spoken replies"></select>
+          <button class="btn" id="btn-ai-speaker-test" title="Say a test sentence">Test</button>
+          <button class="btn" id="btn-ai-devices" title="Re-read the audio devices">Refresh</button>
+        </div>
+        <label class="field-label">Voice and rate</label>
         <div class="row">
           <select id="set-ai-voice-name" title="Voice"></select>
           <input id="set-ai-voice-rate" type="range" min="0.6" max="1.6" step="0.1" title="Speaking rate">
         </div>
+        <label class="check"><input id="set-ai-voice-autosend" type="checkbox"> Send each dictated sentence as soon as it is recognized</label>
+        <label class="check"><input id="set-ai-voice-speak" type="checkbox"> Read the assistant's replies aloud</label>
         <label class="field-label">Memory</label>
         <label class="check"><input id="set-ai-memory" type="checkbox"> Let the assistant remember facts about me and my work across conversations</label>
         <div id="ai-memory-list" class="plugin-list"></div>

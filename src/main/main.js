@@ -1744,6 +1744,9 @@ app.whenReady().then(() => {
   ipcMain.handle('ai:voice-available', () => voice.available());
   ipcMain.handle('ai:voice-start', () => voice.start());
   ipcMain.handle('ai:voice-stop', () => voice.stop());
+  ipcMain.on('ai:voice-feed', (_e, bytes) => { if (bytes && bytes.byteLength) voice.feed(Buffer.from(bytes.buffer || bytes, bytes.byteOffset || 0, bytes.byteLength)); });
+  ipcMain.handle('ai:voice-voices', () => voice.voices());
+  ipcMain.handle('ai:voice-speak', (_e, text, opts) => voice.speak(String(text || ''), opts || {}));
 
   aiService = new (require('./ai').AiService)({
     userDataDir: app.getPath('userData'),

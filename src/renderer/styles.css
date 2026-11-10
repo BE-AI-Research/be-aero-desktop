@@ -1099,3 +1099,8 @@ webview.plugin-frame { background: #fff; }
 .ai-mic.on { color: #f87171; animation: aero-pulse 1.2s ease-in-out infinite; }
 .ai-mic.off { opacity: .4; }
 @keyframes aero-pulse { 0%, 100% { text-shadow: 0 0 0 rgba(248,113,113,0); } 50% { text-shadow: 0 0 10px rgba(248,113,113,.9); } }
+
+/* Voice: mic level glow + settings meter */
+.ai-mic.on { color: #f87171; box-shadow: 0 0 calc(2px + 14px * var(--level, 0)) rgba(248,113,113, calc(.25 + .7 * var(--level, 0))); animation: none; }
+.voice-meter { height: 6px; border-radius: 3px; background: rgba(255,255,255,.1); overflow: hidden; margin: 4px 0 6px; }
+.voice-meter-bar { height: 100%; width: 0; background: var(--accent); transition: width 60ms linear; }
