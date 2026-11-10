@@ -167,6 +167,44 @@ class AiService {
     } finally { this.runs.delete(conv.id); }
   }
 
+  // ---- Message actions from the chat bubbles. All refuse while a turn runs.
+  // Delete a whole exchange (user message + its reply) or just the reply.
+  deleteMessage(conversationId, index, which = 'turn') {
+    let conv;
+    try { conv = this.conversations.get(conversationId); } catch { return { error: 'no such conversation' }; }
+    if (this.runs.has(conv.id)) return { error: 'busy - stop the current reply first' };
+    try {
+      const r = this.conversations.turnRange(conv.id, index);
+      if (which === 'reply') this.conversations.removeRange(conv.id, r.start + 1, r.end);
+      else this.conversations.removeRange(conv.id, r.start, r.end);
+      return { ok: true };
+    } catch (err) { return { error: err.message }; }
+  }
+
+  // Ask again from user message `index`: everything after it is dropped and
+  // the model answers it afresh. With `text`, the message is edited first
+  // (attachments are kept).
+  async resendFrom(conversationId, index, text) {
+    let conv;
+    try { conv = this.conversations.get(conversationId); } catch { return { error: 'no such conversation' }; }
+    if (this.runs.has(conv.id)) return { error: 'busy - stop the current reply first' };
+    let r;
+    try { r = this.conversations.turnRange(conv.id, index); } catch (err) { return { error: err.message }; }
+    const original = conv.messages[r.start];
+    if (typeof text === 'string') {
+      const t = text.trim();
+      if (!t && !(original.attachments || []).length) return { error: 'empty message' };
+      this.conversations.removeRange(conv.id, r.start, conv.messages.length);
+      this.conversations.append(conv.id, { role: 'user', content: t, ...(original.attachments ? { attachments: original.attachments } : {}) });
+    } else {
+      this.conversations.removeRange(conv.id, r.start + 1, conv.messages.length);
+    }
+    const fresh = this.conversations.get(conv.id);
+    const last = fresh.messages[fresh.messages.length - 1];
+    this.emit(conv.id, { type: 'user', content: last.content, attachments: last.attachments || [], title: fresh.title, index: fresh.messages.length - 1, replay: true });
+    return this.runConversation(fresh, {});
+  }
+
   // Re-run the pending turn of a conversation whose last turn failed (the
   // server was away); the user's message is already on disk.
   async resume(conversationId) {
@@ -434,7 +472,7 @@ class AiService {
     if (!model) return { error: 'Choose a model in Settings > AI assistant.', conversationId: conv.id };
 
     this.conversations.append(conv.id, { role: 'user', content, ...(files.length ? { attachments: files } : {}) });
-    this.emit(conv.id, { type: 'user', content, attachments: files, title: conv.title });
+    this.emit(conv.id, { type: 'user', content, attachments: files, title: conv.title, index: this.conversations.get(conv.id).messages.length - 1 });
     return this.runConversation(conv, opts);
   }
 
@@ -565,6 +603,8 @@ class AiService {
     ipcMain.handle('ai:unqueue', (_e, id, index) => this.unqueue(id, Number(index)));
     ipcMain.handle('ai:pin', (_e, on) => this.setPinned(on));
     ipcMain.handle('ai:probe', () => this.probe());
+    ipcMain.handle('ai:delete-message', (_e, id, index, which) => this.deleteMessage(String(id || ''), Number(index), which === 'reply' ? 'reply' : 'turn'));
+    ipcMain.handle('ai:resend', (_e, id, index, text) => this.resendFrom(String(id || ''), Number(index), typeof text === 'string' ? text : undefined));
     ipcMain.handle('ai:resume', (_e, id) => this.resume(String(id || '')));
     ipcMain.handle('ai:compact', (_e, id) => this.compact(String(id || '')));
     ipcMain.handle('ai:context', (_e, id) => {

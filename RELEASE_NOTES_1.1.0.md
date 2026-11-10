@@ -23,6 +23,9 @@ Installed Windows copies update automatically.
   on request (`speak_text`), and every reply has a speaker button in its top right to
   read it aloud (click again to stop). Microphone picker with a level test. Nothing
   leaves the machine.
+- **Edit, resend and delete chat messages.** Hover one of your messages to edit it in
+  place and resend, resend it as is, or delete it with its reply; replies have their own
+  delete. A message you stopped (or that failed) keeps a Resend button.
 - **Context buffer.** Conversations stay inside a token budget the way BE-Code keeps small
   local models honest: old tool output is trimmed first, then the older conversation is
   summarized by the model and carried forward, and the chat history itself is never
