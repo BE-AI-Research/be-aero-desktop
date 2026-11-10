@@ -5,10 +5,10 @@
 (function () {
   'use strict';
 
-  const DEFAULT_H = { toolbar: 30, search: 48, clock: 304, weather: 144, telemetry: 220, tasks: 64, media: 132, scratchpad: 224 };
+  const DEFAULT_H = { toolbar: 30, search: 48, clock: 304, weather: 144, telemetry: 220, tasks: 64, media: 160, scratchpad: 224 };
   const MIN = {
     toolbar: [180, 30], search: [200, 44], clock: [150, 150], weather: [220, 110],
-    telemetry: [200, 130], tasks: [140, 54], media: [220, 100], scratchpad: [200, 120]
+    telemetry: [200, 130], tasks: [140, 54], media: [200, 110], scratchpad: [200, 120]
   };
   // Web widgets that have never been placed open in the MIDDLE of the home
   // display (cascaded), not in the sidebar column: they are content panes.

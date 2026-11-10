@@ -451,7 +451,7 @@
   // widgets have their own buttons; the dock itself stays).
   for (const el of document.querySelectorAll('#sidebar > .widget[data-widget]')) {
     const wid = el.dataset.widget;
-    if (wid === 'ai' || wid === 'tasks' || !WIDGET_GLYPH[wid]) continue;
+    if (wid === 'ai' || wid === 'tasks' || wid === 'media' || !WIDGET_GLYPH[wid]) continue;
     const b = document.createElement('button');
     b.className = 'icon-btn widget-min';
     b.title = 'Minimize to the dock';
