@@ -100,6 +100,8 @@ contextBridge.exposeInMainWorld('aero', {
   onNotificationsChanged: (cb) => subscribe('notifications:changed', cb),
   onNotificationOpen: (cb) => subscribe('notifications:open', cb),
   dockHotkey: () => ipcRenderer.invoke('dock:hotkey'),
+  voiceHotkey: () => ipcRenderer.invoke('voice:hotkey'),
+  onVoiceHotkey: (cb) => subscribe('ai:voice-hotkey', cb),
   onDockSummon: (cb) => subscribe('dock:summon', cb),
 
   // --- Extensions: plugin widgets and app panes ---

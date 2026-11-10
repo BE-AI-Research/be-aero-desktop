@@ -252,6 +252,7 @@
     scrollToEnd();
   }
 
+  let voiceOffHint = false;   // shown in the status line after a one-shot dictation
   function contextLine(lv) {
     if (!lv || !lv.context || !lv.context.budget) return '';
     const pct = Math.min(999, Math.round((lv.context.tokens / lv.context.budget) * 100));
@@ -267,6 +268,7 @@
     sendBtn.title = on ? 'Queue this message for after the current turn' : 'Send (Enter)';
     if (lv && lv.offline) statusEl.textContent = lv.offlineText || 'Server offline - will resume when it is back.';
     else if (on) statusEl.textContent = lv.retryText || 'Thinking…';
+    else if (voiceOffHint && !listening) statusEl.textContent = 'Voice off - click the microphone or press the voice hotkey to dictate again.';
     else statusEl.textContent = contextLine(lv);
   }
 
@@ -324,6 +326,7 @@
     inputEl.value = ''; inputEl.style.height = '';
     pending = []; renderPending();
     clearTimeout(autoTimer); clearInterval(autoTick); autoTimer = null; autoTick = null;
+    voiceOffHint = false;
     if (window.speechSynthesis) speechSynthesis.cancel();
     if (msgsEl.querySelector('.ai-hint')) msgsEl.innerHTML = '';
     const lv = t.convId ? liveFor(t.convId) : null;
@@ -577,6 +580,13 @@
     if (autoBtn) { autoBtn.addEventListener('click', toggleAutoSend); syncAutoBtn(); }
     inputEl.addEventListener('keydown', () => { if (autoTimer) armAutoSend(); });
     if (aero.onAiSpeak) aero.onAiSpeak((text) => speak(text, true));
+    if (aero.onVoiceHotkey) aero.onVoiceHotkey(() => {
+      // Dictation lands in the active conversation (a fresh tab when the
+      // Tasks tab is in front).
+      const t = activeTab();
+      if (!listening && (!t || t.key === TASKS_KEY)) newTab(null, null, true);
+      toggleMic();
+    });
     micBtn = root.querySelector('.ai-mic');
     if (micBtn) {
       micBtn.addEventListener('click', toggleMic);
@@ -773,7 +783,31 @@
     try { c.ctx.close(); } catch { /* fine */ }
   }
 
+  // Short confirmation tones (rising = listening, falling = off), so the
+  // hotkey gives feedback even when the chat is out of sight.
+  let cueCtx = null;
+  function cue(on) {
+    try {
+      if (!cueCtx) cueCtx = new AudioContext();
+      const t0 = cueCtx.currentTime;
+      const notes = on ? [660, 990] : [880, 520];
+      notes.forEach((f, i) => {
+        const o = cueCtx.createOscillator();
+        const g = cueCtx.createGain();
+        o.type = 'sine';
+        o.frequency.value = f;
+        const s = t0 + i * 0.09;
+        g.gain.setValueAtTime(0.0001, s);
+        g.gain.exponentialRampToValueAtTime(0.18, s + 0.015);
+        g.gain.exponentialRampToValueAtTime(0.0001, s + 0.085);
+        o.connect(g); g.connect(cueCtx.destination);
+        o.start(s); o.stop(s + 0.09);
+      });
+    } catch { /* no audio output */ }
+  }
+
   function setListening(on) {
+    if (on !== listening) cue(on);
     listening = on;
     if (micBtn) {
       micBtn.classList.toggle('on', on);
@@ -791,8 +825,12 @@
       const cur = inputEl.value;
       inputEl.value = (cur ? cur.replace(/\s*$/, ' ') : '') + ev.text;
       inputEl.dispatchEvent(new Event('input'));
+      // One phrase per activation unless the user asked to keep listening:
+      // the mic turns itself off and must be re-activated.
+      const offHint = () => { voiceOffHint = true; if (!autoTimer) syncBusy(); };
       if (voiceCfg.autoSend) armAutoSend();
-      else if (listening) statusEl.textContent = 'Listening…';
+      if (!voiceCfg.continuous && listening) stopMic().then(offHint);
+      else if (listening && !autoTimer) statusEl.textContent = 'Listening…';
       return;
     }
     if (ev.type === 'error') bubble('error', esc(ev.text || 'Voice input failed.'));
@@ -801,6 +839,7 @@
 
   async function startMic() {
     if (listening) return;
+    voiceOffHint = false;
     if (voiceCfg.interrupt !== false) stopSpeaking();
     statusEl.textContent = 'Starting the microphone…';
     try {

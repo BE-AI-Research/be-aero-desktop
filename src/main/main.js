@@ -586,6 +586,32 @@ function applyDockHotkey(accel) {
 
 ipcMain.handle('dock:hotkey', () => dockHotkey);
 
+// Voice hotkey: toggles dictation in the AI chat from anywhere. The sidebar
+// is shown (without taking focus) so the result is visible.
+let voiceHotkey = null;
+function onVoiceHotkey() {
+  if (!win || win.isDestroyed()) return;
+  if (aiService && !aiService.enabled()) return;
+  if (!win.isVisible()) win.showInactive();
+  win.webContents.send('ai:voice-hotkey');
+}
+function applyVoiceHotkey(accel) {
+  const { isValid, normalize } = require('../shared/hotkey');
+  if (voiceHotkey) { try { globalShortcut.unregister(voiceHotkey); } catch { /* gone */ } }
+  voiceHotkey = null;
+  if (accel === '') { rebuildTrayMenu(); return null; }   // turned off
+  const wanted = isValid(accel) ? normalize(accel) : null;
+  const candidates = [...new Set([wanted, 'Control+Alt+M', 'Control+Alt+Shift+M', 'Alt+Shift+M'].filter(Boolean))];
+  for (const c of candidates) {
+    if (c === dockHotkey) continue;
+    try { if (globalShortcut.register(c, onVoiceHotkey)) { voiceHotkey = c; break; } } catch (err) { console.warn('Invalid voice hotkey', c, err.message); }
+  }
+  if (!voiceHotkey) console.warn('Could not register any voice hotkey');
+  else if (voiceHotkey !== wanted) console.warn(`Voice hotkey ${accel} is taken; using ${voiceHotkey}`);
+  return voiceHotkey;
+}
+ipcMain.handle('voice:hotkey', () => voiceHotkey);
+
 function toggleWindow() {
   if (!win) return;
   if (win.isVisible()) win.hide(); else win.showInactive();
@@ -636,6 +662,9 @@ function updateSettings(patch) {
   if (patch.spellcheck) applySpellcheck();
   if (patch.appDock && typeof patch.appDock === 'object' && 'hotkey' in patch.appDock) {
     applyDockHotkey(s.appDock.hotkey);
+  }
+  if (patch.ai && patch.ai.voice && typeof patch.ai.voice === 'object' && 'hotkey' in patch.ai.voice) {
+    applyVoiceHotkey(((s.ai || {}).voice || {}).hotkey);
   }
   if (spotlight && patch.search) {
     if ('hotkey' in patch.search) spotlight.applyHotkey(s.search.hotkey);
@@ -1693,6 +1722,7 @@ app.whenReady().then(() => {
   spotlight = new Spotlight({ store, root: ROOT });
   spotlight.init();
   applyDockHotkey((store.get('appDock') || {}).hotkey);
+  { const vh = ((store.get('ai') || {}).voice || {}).hotkey; applyVoiceHotkey(vh === undefined ? 'Control+Alt+M' : vh); }
 
   PLUGINS_DIR = path.join(app.getPath('userData'), 'plugins');
   require('fs').mkdirSync(PLUGINS_DIR, { recursive: true });

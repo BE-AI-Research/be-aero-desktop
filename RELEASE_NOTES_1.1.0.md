@@ -13,7 +13,7 @@ Installed Windows copies update automatically.
 - **Voice mode for the assistant.** A microphone button dictates into the message box.
   Transcription uses **Whisper** (whisper.cpp), downloaded once from Settings > Voice input
   in three sizes, checked against pinned checksums and run on your computer; Windows
-  Speech Recognition is the basic fallback. **Auto send** sends the dictated message after
+  Speech Recognition is the basic fallback. Each activation takes one phrase, then the microphone turns itself off (a setting keeps it listening). A **voice hotkey** (Ctrl+Alt+M, changeable) toggles dictation from anywhere with a short tone. **Auto send** sends the dictated message after
   a silence you choose (1-30 s), with an on/off button right on the chat widget. A new
   **Text to speech** section reads replies aloud on the speaker you pick, with voice,
   rate, volume, pitch and a test line. **Piper** neural voices are built in: 180 voices

@@ -289,6 +289,7 @@
   const panel = $('settings');
   let recordingHotkey = false;
   let recordingDockHotkey = false;   // declared early: applySettings reads it
+  let recordingVoiceHotkey = false;
   const weatherKey = (w) => JSON.stringify([w.latitude, w.longitude, w.unit]);
 
   function applySettings(s) {
@@ -669,6 +670,8 @@
   function applyVoiceSettings(vc) {
     if (document.activeElement !== $('set-ai-autosend-delay')) $('set-ai-autosend-delay').value = Number(vc.autoSendDelay) || 3;
     $('set-ai-autosend').checked = !!vc.autoSend;
+    $('set-ai-continuous').checked = !!vc.continuous;
+    if (!recordingVoiceHotkey) aero.voiceHotkey().then((hk) => { $('set-voice-hotkey').value = hk ? AeroHotkey.pretty(hk) : (vc.hotkey === '' ? 'Off' : ''); });
     $('set-ai-engine').value = vc.engine || 'auto';
     $('set-ai-voice-speak').checked = !!vc.speak;
     $('set-ai-tts-interrupt').checked = vc.interrupt !== false;
@@ -871,6 +874,54 @@
     bar.style.width = '0%'; btn.disabled = false; btn.textContent = 'Test';
   });
   $('set-ai-autosend').addEventListener('change', (e) => voiceSet({ autoSend: e.target.checked }));
+  $('set-ai-continuous').addEventListener('change', (e) => voiceSet({ continuous: e.target.checked }));
+
+  // Voice hotkey recorder (same behaviour as the dock's).
+  const vhInput = $('set-voice-hotkey');
+  const vhStatus = $('voice-hotkey-status');
+  const VH_IDLE = 'Starts and stops voice input from anywhere, with a short tone. Works while other apps have focus.';
+  async function saveVoiceHotkey(accel) {
+    await voiceSet({ hotkey: accel });
+    const actual = await aero.voiceHotkey();
+    vhInput.value = actual ? AeroHotkey.pretty(actual) : 'Off';
+    if (accel === '') vhStatus.textContent = 'No voice hotkey. Use the microphone button in the chat.';
+    else if (!actual) vhStatus.textContent = `Could not register ${AeroHotkey.pretty(accel)} - try another combination.`;
+    else if (AeroHotkey.normalize(actual) !== AeroHotkey.normalize(accel)) vhStatus.textContent = `${AeroHotkey.pretty(accel)} is already taken - using ${AeroHotkey.pretty(actual)} instead.`;
+    else vhStatus.textContent = `Voice input toggles with ${AeroHotkey.pretty(actual)}.`;
+  }
+  const startVhRecording = () => {
+    if (recordingVoiceHotkey) return;
+    recordingVoiceHotkey = true;
+    vhInput.classList.add('recording');
+    vhStatus.textContent = 'Listening - press a combination, or Esc to cancel.';
+  };
+  vhInput.addEventListener('focus', startVhRecording);
+  vhInput.addEventListener('click', () => { vhInput.focus(); startVhRecording(); });
+  vhInput.addEventListener('blur', () => {
+    if (!recordingVoiceHotkey) return;
+    recordingVoiceHotkey = false;
+    vhInput.classList.remove('recording');
+    aero.voiceHotkey().then((hk) => { vhInput.value = hk ? AeroHotkey.pretty(hk) : 'Off'; });
+    if (vhStatus.textContent.startsWith('Listening')) vhStatus.textContent = VH_IDLE;
+  });
+  vhInput.addEventListener('keydown', async (e) => {
+    if (!recordingVoiceHotkey) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.key === 'Escape') { vhInput.blur(); return; }
+    if (AeroHotkey.isModifierCode(e.code)) {
+      const held = [e.ctrlKey && 'Ctrl', e.altKey && 'Alt', e.shiftKey && 'Shift', e.metaKey && 'Win'].filter(Boolean).join(' + ');
+      vhInput.value = held ? `${held} + ...` : '';
+      return;
+    }
+    const accel = AeroHotkey.fromEvent(e);
+    if (!accel) { vhStatus.textContent = 'That needs at least one modifier (Ctrl, Alt, Shift or Win).'; return; }
+    recordingVoiceHotkey = false;
+    vhInput.blur();
+    await saveVoiceHotkey(accel);
+  });
+  $('btn-voice-hotkey-reset').addEventListener('click', () => saveVoiceHotkey('Control+Alt+M'));
+  $('btn-voice-hotkey-off').addEventListener('click', () => saveVoiceHotkey(''));
   $('set-ai-autosend-delay').addEventListener('change', (e) => voiceSet({ autoSendDelay: Math.max(1, Math.min(30, Number(e.target.value) || 3)) }));
   $('set-ai-voice-speak').addEventListener('change', (e) => voiceSet({ speak: e.target.checked }));
   $('set-ai-tts-interrupt').addEventListener('change', (e) => voiceSet({ interrupt: e.target.checked }));

@@ -129,6 +129,8 @@ const DEFAULTS = {
       engine: 'auto',        // auto (Whisper when installed) | whisper | system
       whisperModel: 'base.en',
       micId: '', speakerId: '',
+      continuous: false,     // false = the mic turns itself off after one transcribed phrase
+      hotkey: 'Control+Alt+M',  // global toggle for voice input; falls back if taken
       autoSend: false,       // send the dictated message after autoSendDelay seconds of quiet
       autoSendDelay: 3,
       speak: false, voiceName: '', rate: 1, volume: 100, pitch: 0,
