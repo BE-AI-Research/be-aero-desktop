@@ -1135,3 +1135,13 @@ webview.plugin-frame { background: #fff; }
 .dock-tile.dragging { z-index: 5; opacity: .85; transition: none; cursor: grabbing; pointer-events: none; }
 .dock-tile.dragging:hover { transform: none; }
 .dock-drop-marker { width: 3px; height: 40px; align-self: center; margin: 0 -2px; border-radius: 2px; background: var(--accent); box-shadow: 0 0 8px var(--accent); }
+
+/* Read-aloud button in the top right of an assistant reply */
+.ai-msg.has-say { position: relative; padding-right: 30px; }
+.ai-say { position: absolute; top: 4px; right: 4px; width: 22px; height: 22px; padding: 3px; border: none; border-radius: 6px;
+  background: transparent; color: rgba(var(--text-rgb), .45); cursor: pointer; opacity: .55; transition: opacity .12s, background .12s, color .12s; }
+.ai-say svg { width: 16px; height: 16px; display: block; }
+.ai-msg.has-say:hover .ai-say { opacity: 1; }
+.ai-say:hover { background: rgba(255,255,255,.1); color: rgba(var(--text-rgb), .9); }
+.ai-msg.saying .ai-say { opacity: 1; color: var(--accent); animation: aero-say 1s ease-in-out infinite; }
+@keyframes aero-say { 0%, 100% { filter: drop-shadow(0 0 0 transparent); } 50% { filter: drop-shadow(0 0 5px var(--accent)); } }

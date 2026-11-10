@@ -123,6 +123,37 @@
     return b;
   }
 
+  // Speaker button on a finished assistant reply: reads that reply aloud
+  // with the Text to speech settings; a second click stops it.
+  const SAY_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9h4l5-4v14l-5-4H4z" fill="currentColor"/><path d="M16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>';
+  let sayingEl = null;
+  function finishReply(b, raw) {
+    if (!b || !raw || !String(raw).trim()) return b;
+    b.dataset.raw = String(raw);
+    let btn = b.querySelector(':scope > .ai-say');
+    if (!btn) {
+      btn = document.createElement('button');
+      btn.className = 'ai-say';
+      btn.title = 'Read aloud';
+      btn.innerHTML = SAY_SVG;
+      b.prepend(btn);
+    }
+    b.classList.add('has-say');
+    return b;
+  }
+  function setSaying(b) {
+    if (sayingEl && sayingEl !== b) { sayingEl.classList.remove('saying'); const x = sayingEl.querySelector('.ai-say'); if (x) x.title = 'Read aloud'; }
+    sayingEl = b;
+    if (b) { b.classList.add('saying'); const x = b.querySelector('.ai-say'); if (x) x.title = 'Stop reading'; }
+  }
+  async function sayBubble(b) {
+    if (sayingEl === b) { stopSpeaking(); setSaying(null); b.classList.remove('saying'); return; }
+    stopSpeaking();
+    setSaying(b);
+    await speak(b.dataset.raw || b.textContent, true);
+    if (sayingEl === b) { b.classList.remove('saying'); const x = b.querySelector('.ai-say'); if (x) x.title = 'Read aloud'; sayingEl = null; }
+  }
+
   function toolRow(name, ok, input, result, image) {
     const row = el('details', `ai-tool ${ok ? 'ok' : 'err'}`, msgsEl);
     const sum = el('summary', '', row);
@@ -230,7 +261,7 @@
     titleEl.textContent = tab.title;
     for (const m of conv.messages || []) {
       if (m.role === 'user') bubble('user', chipsBlock(m.attachments) + inline(m.content).replace(/\n/g, '<br>'));
-      else if (m.role === 'assistant') { if (m.content) bubble('assistant', md(m.content)); }
+      else if (m.role === 'assistant') { if (m.content) finishReply(bubble('assistant', md(m.content)), m.content); }
       else if (m.role === 'tool') for (const r of m.results || []) toolRow(r.name, !r.isError, null, String(r.content || '').slice(0, 400), r.images && r.images[0] ? `data:${r.images[0].mime};base64,${r.images[0].data}` : null);
     }
     if (!(conv.messages || []).length) hint();
@@ -373,8 +404,8 @@
         break;
       case 'assistant':
         if (isActive) {
-          if (lv.streamEl) lv.streamEl.innerHTML = md(ev.content || lv.streamText);
-          else if (ev.content) bubble('assistant', md(ev.content));
+          if (lv.streamEl) { lv.streamEl.innerHTML = md(ev.content || lv.streamText); finishReply(lv.streamEl, ev.content || lv.streamText); }
+          else if (ev.content) finishReply(bubble('assistant', md(ev.content)), ev.content);
         }
         if (ev.content && (!ev.toolCalls || !ev.toolCalls.length)) speak(ev.content);
         lv.streamEl = null; lv.streamText = '';
@@ -646,6 +677,8 @@
     msgsEl.addEventListener('click', async (e) => {
       const a = e.target.closest('a[data-ext]');
       if (a) { e.preventDefault(); aero.openExternal(a.href); return; }
+      const say = e.target.closest('.ai-say');
+      if (say) { e.stopPropagation(); sayBubble(say.closest('.ai-msg')); return; }
       const c = e.target.closest('.ai-copy');
       if (c) { const code = c.closest('.ai-code').querySelector('code').textContent; c.textContent = (await copyText(code)) ? 'Copied' : 'Failed'; setTimeout(() => { c.textContent = 'Copy'; }, 1200); }
     });
@@ -887,6 +920,7 @@
   function stopSpeaking() {
     speakQueue = Promise.resolve();
     speakGen++;
+    if (sayingEl) { sayingEl.classList.remove('saying'); const x = sayingEl.querySelector('.ai-say'); if (x) x.title = 'Read aloud'; sayingEl = null; }
     if (player) { try { player.pause(); } catch { /* fine */ } player = null; }
     if (window.speechSynthesis) speechSynthesis.cancel();
   }

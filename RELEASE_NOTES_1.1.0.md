@@ -20,7 +20,8 @@ Installed Windows copies update automatically.
   in 58 languages (multi-speaker voices included), downloaded from Settings and checked
   against checksums shipped with the app, with expressiveness, rhythm and sentence-pause
   controls; long replies start playing after the first sentence. The assistant can speak
-  on request (`speak_text`). Microphone picker with a level test. Nothing
+  on request (`speak_text`), and every reply has a speaker button in its top right to
+  read it aloud (click again to stop). Microphone picker with a level test. Nothing
   leaves the machine.
 - **Context buffer.** Conversations stay inside a token budget the way BE-Code keeps small
   local models honest: old tool output is trimmed first, then the older conversation is
