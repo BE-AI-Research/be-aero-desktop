@@ -47,6 +47,8 @@ trust this source. All downloads are also on the [releases page](https://github.
 - **Media controller** - what is playing anywhere on the machine (any app with a media session: Spotify, a browser tab, a player) with cover art, progress, play/pause, previous/next and volume up/down/mute. Windows reads the system media session; Linux uses `playerctl` (MPRIS) and `wpctl`/`pactl` for volume.
 - **Scratchpad** - notes saved to disk automatically (they survive restarts), with a Save button to write the note out as a .md or .txt file.
 
+A **power button** sits at the far end of the dock (left or right, or off): Lock, Switch user, Log off, Sleep, Restart and Shut down, with a confirmation for the last three.
+
 Every widget can be **minimized to the dock** (hover for the button; it parks as a glyph tile and a click brings it back). In free-form mode widgets **stack**: clicking or dragging one raises it and the order is remembered; new web widgets open in the middle of the display. Text fields and web widgets have **spell checking and a right-click menu** (suggestions, add to dictionary, cut/copy/paste, link and image actions, back/forward/reload for web pages) - toggle it in Settings.
 
 ## AI assistant

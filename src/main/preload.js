@@ -134,6 +134,7 @@ contextBridge.exposeInMainWorld('aero', {
 
   listTasks: () => ipcRenderer.invoke('tasks:list'),
   taskAction: (name, hwnd) => ipcRenderer.invoke('tasks:action', name, hwnd),
+  powerAction: (action) => ipcRenderer.invoke('power:action', action),
   taskSource: () => ipcRenderer.invoke('tasks:source'),
   installDockHelper: () => ipcRenderer.invoke('tasks:install-helper'),
   taskIcon: (exe) => ipcRenderer.invoke('tasks:icon', exe),
