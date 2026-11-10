@@ -43,6 +43,7 @@ Installed Windows copies update automatically.
 - **Power menu in the dock.** A power button at the far left or right end of the dock,
   apart from the app icons, opens Lock, Switch user, Log off, Sleep, Restart and Shut down;
   Log off, Restart and Shut down ask first. Switch it off or move it in Settings > Widgets.
+- **Drag to reorder pinned dock icons.** The new order is saved.
 - **Minimize any widget to the dock.** Hover a widget for its minimize button; it parks in
   the dock as a glyph tile and comes back with a click (web widgets and the AI chat already
   did this).

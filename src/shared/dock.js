@@ -112,10 +112,23 @@
     return [...list, { exe, name: name || appNameFromExe(exe) }].slice(0, 24);
   }
 
+  // Move one pinned app to a new position (pure; returns the new list).
+  // toIndex is the slot in the list WITHOUT the moved app, clamped.
+  function reorderPinned(pinned, exe, toIndex) {
+    const list = Array.isArray(pinned) ? pinned : [];
+    const key = exeKey(exe);
+    const from = list.findIndex((p) => exeKey(p && p.exe) === key);
+    if (from < 0) return list;
+    const rest = list.filter((_, i) => i !== from);
+    const at = Math.max(0, Math.min(rest.length, Math.floor(Number(toIndex) || 0)));
+    rest.splice(at, 0, list[from]);
+    return rest;
+  }
+
   function isPinned(pinned, exe) {
     const key = exeKey(exe);
     return (Array.isArray(pinned) ? pinned : []).some((p) => exeKey(p && p.exe) === key);
   }
 
-  return { buildDock, clickTarget, togglePinned, isPinned, appNameFromExe, exeKey };
+  return { buildDock, clickTarget, togglePinned, reorderPinned, isPinned, appNameFromExe, exeKey };
 });
