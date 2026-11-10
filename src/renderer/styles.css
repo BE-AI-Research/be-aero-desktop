@@ -1191,6 +1191,12 @@ webview.plugin-frame { background: #fff; }
 
 /* Chat performance: skip layout/paint of bubbles scrolled far out of view */
 .ai-messages > .ai-msg { content-visibility: auto; contain-intrinsic-size: auto 64px; }
+/* content-visibility clips whatever lies outside the bubble and keeps its
+   z-index inside it, which hid the action row (edit / resend / delete) that
+   hangs below the bubble. The bubble being used is drawn normally, above its
+   neighbours. */
+.ai-messages > .ai-msg:hover, .ai-messages > .ai-msg:focus-within,
+.ai-messages > .ai-msg.unanswered, .ai-messages > .ai-msg.editing { content-visibility: visible; z-index: 4; }
 .ai-earlier { align-self: center; margin: 4px 0 8px; padding: 4px 12px; border: 1px solid rgba(255,255,255,.15); border-radius: 999px;
   background: rgba(255,255,255,.06); color: inherit; font: inherit; font-size: 11px; cursor: pointer; opacity: .8; }
 .ai-earlier:hover { opacity: 1; background: rgba(255,255,255,.12); }
