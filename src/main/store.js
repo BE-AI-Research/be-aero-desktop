@@ -130,6 +130,9 @@ const DEFAULTS = {
       autoSend: false,       // send the dictated message after autoSendDelay seconds of quiet
       autoSendDelay: 3,
       speak: false, voiceName: '', rate: 1, volume: 100, pitch: 0,
+      ttsEngine: 'system',   // system (Windows voices / espeak) | piper (neural, local)
+      piperVoice: 'en_US-lessac-medium', piperSpeaker: 0,
+      piperNoise: 0.667, piperNoiseW: 0.8, piperSentenceSilence: 0.2,
       interrupt: true        // stop speaking when the microphone starts
     }
   },

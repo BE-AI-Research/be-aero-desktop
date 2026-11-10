@@ -576,6 +576,7 @@
     autoBtn = root.querySelector('.ai-autosend');
     if (autoBtn) { autoBtn.addEventListener('click', toggleAutoSend); syncAutoBtn(); }
     inputEl.addEventListener('keydown', () => { if (autoTimer) armAutoSend(); });
+    if (aero.onAiSpeak) aero.onAiSpeak((text) => speak(text, true));
     micBtn = root.querySelector('.ai-mic');
     if (micBtn) {
       micBtn.addEventListener('click', toggleMic);
@@ -851,23 +852,54 @@
     if (window.speechSynthesis) speechSynthesis.cancel();
   }
 
-  // Play a rendered WAV on the configured speaker; fall back to the
-  // browser's own synthesis when main has no engine.
+  // Split for speech: sentences, merged up to ~240 characters, so the first
+  // words play while the rest is still being synthesized.
+  function speechChunks(t) {
+    const parts = String(t).match(/[^.!?;:\n]+[.!?;:]*\s*|\n+/g) || [t];
+    const out = [];
+    let cur = '';
+    for (const p of parts) {
+      if ((cur + p).length > 240 && cur) { out.push(cur.trim()); cur = ''; }
+      cur += p;
+    }
+    if (cur.trim()) out.push(cur.trim());
+    return out.filter(Boolean);
+  }
+  const synthOpts = () => ({ voice: voiceCfg.voiceName || '', rate: Number(voiceCfg.rate) || 1, pitch: Number(voiceCfg.pitch) || 0 });
+  let ttsErrorShown = '';
+
+  // Play rendered WAVs on the configured speaker, synthesizing the next
+  // chunk while the current one plays; fall back to the browser's own
+  // synthesis when main has no engine.
   async function speakNow(text) {
     const t = speakable(text);
     if (!t) return;
-    let wav = null;
-    try { wav = await aero.aiVoiceSpeak(t, { voice: voiceCfg.voiceName || '', rate: Number(voiceCfg.rate) || 1, pitch: Number(voiceCfg.pitch) || 0 }); } catch { wav = null; }
+    const gen = speakGen;
     const vol = voiceCfg.volume == null ? 1 : Math.max(0, Math.min(1, Number(voiceCfg.volume) / 100));
-    if (wav) {
+    const chunks = speechChunks(t);
+    const render = (c) => aero.aiVoiceSpeak(c, synthOpts()).catch((err) => ({ error: String(err && err.message || err) }));
+    let next = render(chunks[0]);
+    let usedEngine = false;
+    for (let i = 0; i < chunks.length; i++) {
+      const wav = await next;
+      if (gen !== speakGen) return;
+      if (i + 1 < chunks.length) next = render(chunks[i + 1]);
+      if (wav && wav.error) {
+        if (ttsErrorShown !== wav.error) { ttsErrorShown = wav.error; bubble('error', esc(`Text to speech: ${wav.error}`)); }
+        if (usedEngine) return;
+        break;                         // fall back to the browser voice below
+      }
+      if (!wav) break;
+      usedEngine = true;
       const a = new Audio(`data:audio/wav;base64,${wav}`);
       a.volume = vol;
       player = a;
       if (voiceCfg.speakerId && typeof a.setSinkId === 'function') { try { await a.setSinkId(voiceCfg.speakerId); } catch { /* default device */ } }
       await new Promise((res) => { a.onended = res; a.onerror = res; a.play().catch(res); });
       if (player === a) player = null;
-      return;
+      if (gen !== speakGen) return;
     }
+    if (usedEngine) return;
     if (!window.speechSynthesis) return;
     await new Promise((res) => {
       const u = new SpeechSynthesisUtterance(t);

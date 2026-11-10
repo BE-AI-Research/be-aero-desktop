@@ -159,6 +159,15 @@ const TOOLS = [
     }
   },
   {
+    name: 'speak_text', category: 'control',
+    description: 'Say something out loud on the user\'s speakers with the configured text-to-speech voice (Piper or the system voice). Use when the user asks you to read something aloud or to announce a result.',
+    input_schema: obj({ text: str('What to say (plain text, up to about 4000 characters)') }, ['text']),
+    run: async (input, ctx) => {
+      if (!ctx.speak) return { error: 'text to speech is not available' };
+      return { ok: !!ctx.speak(String(input.text || '').slice(0, 4000)) };
+    }
+  },
+  {
     name: 'set_settings', category: 'control',
     description: 'Change settings. Pass a partial object that is merged in, e.g. {"theme":{"preset":"midnight"}}, {"weather":{"city":"Berlin"}}, {"dock":"left"}, {"use24h":true}, {"locked":true}. Allowed sections: theme, dock, widgets, weather, use24h, locked, alwaysOnTop, clock, telemetry, opacity, width, search, webWidgets, scratchpad.',
     input_schema: obj({ patch: { type: 'object', description: 'Partial settings object to merge' } }, ['patch']),

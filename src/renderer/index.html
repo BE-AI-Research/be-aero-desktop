@@ -243,14 +243,52 @@
         <label class="check"><input id="set-ai-tts-interrupt" type="checkbox"> Stop reading when I start dictating</label>
         <label class="field-label">Speaker</label>
         <select id="set-ai-speaker" title="Output device for spoken replies"></select>
-        <label class="field-label">Voice</label>
-        <select id="set-ai-voice-name" title="Voice"></select>
+        <label class="field-label">Speech engine</label>
+        <select id="set-ai-tts-engine">
+          <option value="system">System voices</option>
+          <option value="piper">Piper (natural neural voices, offline)</option>
+        </select>
+        <div id="tts-system-block">
+          <label class="field-label">Voice</label>
+          <select id="set-ai-voice-name" title="Voice"></select>
+        </div>
+        <div id="tts-piper-block" class="hidden">
+          <div class="hint-text" id="piper-info">Checking Piper...</div>
+          <div class="row">
+            <select id="piper-lang" title="Language"></select>
+            <select id="piper-quality" title="Quality">
+              <option value="">Any quality</option>
+              <option value="x_low">Extra low</option>
+              <option value="low">Low</option>
+              <option value="medium">Medium</option>
+              <option value="high">High</option>
+            </select>
+          </div>
+          <div class="row">
+            <select id="set-ai-piper-voice" title="Piper voice"></select>
+            <button class="btn" id="btn-piper-install">Download</button>
+            <button class="btn btn-danger" id="btn-piper-remove" title="Delete this voice from disk">Remove</button>
+          </div>
+          <div class="voice-meter hidden" id="piper-progress"><div class="voice-meter-bar"></div></div>
+          <div id="piper-speaker-row" class="hidden">
+            <label class="field-label">Speaker in this voice</label>
+            <select id="set-ai-piper-speaker"></select>
+          </div>
+          <label class="field-label">Expressiveness <span id="piper-noise-val" class="hint-text"></span></label>
+          <input id="set-ai-piper-noise" type="range" min="0" max="1.2" step="0.05" title="Variation in intonation (noise scale)">
+          <label class="field-label">Rhythm variation <span id="piper-noisew-val" class="hint-text"></span></label>
+          <input id="set-ai-piper-noisew" type="range" min="0" max="1.2" step="0.05" title="Variation in phoneme timing (noise w)">
+          <label class="field-label">Pause between sentences <span id="piper-silence-val" class="hint-text"></span></label>
+          <input id="set-ai-piper-silence" type="range" min="0" max="1.5" step="0.05" title="Seconds of silence after each sentence">
+        </div>
         <label class="field-label">Rate <span id="tts-rate-val" class="hint-text"></span></label>
         <input id="set-ai-voice-rate" type="range" min="0.6" max="1.8" step="0.1" title="Speaking rate">
         <label class="field-label">Volume <span id="tts-volume-val" class="hint-text"></span></label>
         <input id="set-ai-tts-volume" type="range" min="0" max="100" step="5" title="Volume">
-        <label class="field-label">Pitch <span id="tts-pitch-val" class="hint-text"></span></label>
-        <input id="set-ai-tts-pitch" type="range" min="-30" max="30" step="5" title="Pitch">
+        <div id="tts-pitch-block">
+          <label class="field-label">Pitch <span id="tts-pitch-val" class="hint-text"></span></label>
+          <input id="set-ai-tts-pitch" type="range" min="-30" max="30" step="5" title="Pitch">
+        </div>
         <div class="row">
           <input id="tts-test-text" type="text" spellcheck="true" value="This is the BE-Aero assistant speaking on the selected device.">
           <button class="btn" id="btn-ai-speaker-test">Test</button>

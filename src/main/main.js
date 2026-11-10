@@ -41,6 +41,7 @@ let linuxTasks = null;
 let mediaCtl = null;
 let voice = null;
 let whisper = null;
+let piper = null;
 let aiService = null;
 let notifyCenter = null;
 let dockHotkey = null;       // the accelerator actually registered for the dock
@@ -1740,9 +1741,11 @@ app.whenReady().then(() => {
   ipcMain.handle('media:info', () => mediaCtl.info());
   ipcMain.handle('media:action', (_e, name) => mediaCtl.action(String(name || '')));
   whisper = new (require('./whisper').Whisper)({ dir: path.join(app.getPath('userData'), 'whisper') });
+  piper = new (require('./piper').Piper)({ dir: path.join(app.getPath('userData'), 'piper') });
   voice = new (require('./voice').Voice)({
     emit: (ev) => { if (win && !win.isDestroyed()) win.webContents.send('ai:voice', ev); },
     whisper,
+    piper,
     settings: () => ((store.get('ai') || {}).voice || {})
   });
   ipcMain.handle('ai:whisper-status', () => whisper.status());
@@ -1752,12 +1755,22 @@ app.whenReady().then(() => {
     } catch (err) { return { error: err.message }; }
   });
   ipcMain.handle('ai:whisper-remove', (_e, model) => whisper.removeModel(String(model || '')));
+  ipcMain.handle('ai:piper-status', () => piper.status());
+  ipcMain.handle('ai:piper-catalog', () => piper.catalog());
+  ipcMain.handle('ai:piper-install', async (_e, key) => {
+    try {
+      return await piper.install(key ? String(key) : null, (p) => { if (win && !win.isDestroyed()) win.webContents.send('ai:piper-progress', p); });
+    } catch (err) { return { error: err.message }; }
+  });
+  ipcMain.handle('ai:piper-remove', (_e, key) => piper.removeVoice(String(key || '')));
   ipcMain.handle('ai:voice-available', () => voice.available());
   ipcMain.handle('ai:voice-start', () => voice.start());
   ipcMain.handle('ai:voice-stop', () => voice.stop());
   ipcMain.on('ai:voice-feed', (_e, bytes) => { if (bytes && bytes.byteLength) voice.feed(Buffer.from(bytes.buffer || bytes, bytes.byteOffset || 0, bytes.byteLength)); });
   ipcMain.handle('ai:voice-voices', () => voice.voices());
-  ipcMain.handle('ai:voice-speak', (_e, text, opts) => voice.speak(String(text || ''), opts || {}));
+  ipcMain.handle('ai:voice-speak', async (_e, text, opts) => {
+    try { return await voice.speak(String(text || ''), opts || {}); } catch (err) { return { error: err.message }; }
+  });
 
   aiService = new (require('./ai').AiService)({
     userDataDir: app.getPath('userData'),
@@ -1768,6 +1781,7 @@ app.whenReady().then(() => {
     plugins: () => pluginList,
     telemetry: () => telemetry.sample(telemetryOpts()),
     media: { info: () => mediaCtl.info(), action: (name) => mediaCtl.action(name) },
+    speak: (text) => { if (win && !win.isDestroyed()) { win.webContents.send('ai:speak', String(text || '')); return true; } return false; },
     tasks: {
       list: () => (taskWindows ? taskWindows.list() : linuxTasks ? linuxTasks.list() : Promise.resolve([])),
       action: (name, id) => (taskWindows ? taskWindows.action(name, id) : linuxTasks ? linuxTasks.action(name, id) : false)
@@ -1868,6 +1882,7 @@ app.on('before-quit', () => {
   if (mediaCtl) mediaCtl.destroy();
   if (voice) voice.stop();
   if (whisper) whisper.shutdown();
+  if (piper) piper.shutdown();
   clearInterval(telemetryTimer);
   clearInterval(updateTimer);
   if (apiServer) apiServer.stop();
