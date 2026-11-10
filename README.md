@@ -6,7 +6,7 @@ A modern take on an old concept. Fully modular, widget and applet based desktop 
 
 A Windows 11 "Aero-Mica" desktop platform - widget sidebar, application dock, Spotlight-style search, web widgets, a sandboxed plugin SDK and a local app API. Built with Electron from the original `aero-widgets.html` prototype; runs on Linux too.
 
-<img width="1919" height="1079" alt="aero-v108" src="https://github.com/user-attachments/assets/64e62369-7f5b-4c8a-b660-8439a0d0455e" />
+<img width="1919" height="1079" alt="aero-v115" src="https://github.com/user-attachments/assets/80f45781-6137-4f4e-87c9-d81eb899048f" />
 
 ## Install
 
