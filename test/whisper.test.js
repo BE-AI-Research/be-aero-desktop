@@ -130,3 +130,36 @@ test('soname repair covers Whisper libraries (libggml-base.so.0 style names)', (
     assert.deepStrictEqual(repairSonames(dir, 'linux'), []);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('transcribe survives a dropped connection and a crashed server, and says why when it cannot', async () => {
+  const { describeFailure } = require('../src/main/whisper');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aero-whisper-t-'));
+  try {
+    const w = new Whisper({ dir });
+    let starts = 0;
+    let calls = 0;
+    const mk = () => ({ port: 1, proc: { exitCode: null, signalCode: null }, log: '' });
+    w.ensureServer = async () => { starts++; w.server = w.server || mk(); return w.server; };
+    w.touch = () => {};
+    w.post = async (srv) => {
+      calls++;
+      if (calls === 1) { srv.proc.signalCode = 'SIGSEGV'; srv.exit = { code: null, signal: 'SIGSEGV' }; throw Object.assign(new TypeError('fetch failed'), { cause: { code: 'UND_ERR_SOCKET' } }); }
+      return 'hello there';
+    };
+    assert.strictEqual(await w.transcribe(Buffer.alloc(10), {}), 'hello there');
+    assert.strictEqual(calls, 2, 'retried once');
+    assert.strictEqual(starts, 2, 'on a restarted server');
+
+    calls = 0;
+    w.server = null;
+    w.post = async (srv) => { calls++; srv.log = 'ggml_cpu: loading\nwhisper_full: failed to encode'; srv.proc.exitCode = 1; srv.exit = { code: 1, signal: null }; throw Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNRESET' } }); };
+    await assert.rejects(w.transcribe(Buffer.alloc(10), {}), (err) => /fetch failed \(ECONNRESET\)/.test(err.message) && /exit code 1/.test(err.message) && /failed to encode/.test(err.message));
+    assert.strictEqual(calls, 2);
+
+    calls = 0;
+    w.post = async () => { calls++; throw new Error('HTTP 400: bad audio'); };
+    await assert.rejects(w.transcribe(Buffer.alloc(10), {}), /HTTP 400/);
+    assert.strictEqual(calls, 1, 'a plain HTTP error is not retried');
+    assert.match(describeFailure(new Error('x'), mk(), false), /^x$/);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});

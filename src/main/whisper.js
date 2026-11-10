@@ -41,6 +41,29 @@ function cleanTranscript(text) {
   return t;
 }
 
+function tail(log, n = 3) {
+  return String(log || '').split(/\r?\n/).map((l) => l.trim()).filter(Boolean).slice(-n).join(' | ');
+}
+
+function isNetworkError(err) {
+  const code = err && err.cause && err.cause.code;
+  return /fetch failed|socket|other side closed|ECONNRESET|ECONNREFUSED|EPIPE|UND_ERR/i.test(`${err && err.message} ${code || ''}`);
+}
+
+// "fetch failed" says nothing; name the socket error and, if the server
+// died, how (signal / exit code) and its last log lines.
+function describeFailure(err, srv, died) {
+  const cause = err && err.cause ? (err.cause.code || err.cause.message || '') : '';
+  const parts = [`${err && err.message ? err.message : err}${cause ? ` (${cause})` : ''}`];
+  if (died) {
+    const ex = srv.exit || { code: srv.proc.exitCode, signal: srv.proc.signalCode };
+    parts.push(`server stopped (${ex.signal ? `signal ${ex.signal}` : `exit code ${ex.code}`})`);
+    const t = tail(srv.log);
+    if (t) parts.push(t);
+  }
+  return parts.join(' - ');
+}
+
 function sha256File(file) {
   return new Promise((resolve, reject) => {
     const h = crypto.createHash('sha256');
@@ -184,17 +207,27 @@ class Whisper {
     if (process.platform === 'linux') env.LD_LIBRARY_PATH = [this.binDir, env.LD_LIBRARY_PATH].filter(Boolean).join(':');
     const proc = spawn(this.serverPath(), ['-m', this.modelPath(id), '--host', '127.0.0.1', '--port', String(port), '-t', threads, '-l', 'en', '-nt'],
       { cwd: this.binDir, windowsHide: true, env, stdio: ['ignore', 'pipe', 'pipe'] });
-    let log = '';
-    proc.stdout.on('data', (d) => { log = (log + d).slice(-4000); });
-    proc.stderr.on('data', (d) => { log = (log + d).slice(-4000); });
-    const srv = { proc, port, model: id, ready: false, starting: null };
+    const srv = { proc, port, model: id, ready: false, starting: null, log: '' };
+    let logFile = null;
+    try { logFile = fs.createWriteStream(path.join(this.dir, 'server.log'), { flags: 'w' }); } catch { /* fine */ }
+    const onOut = (d) => { srv.log = (srv.log + d).slice(-6000); if (logFile) logFile.write(d); };
+    proc.stdout.on('data', onOut);
+    proc.stderr.on('data', onOut);
     this.server = srv;
-    proc.on('exit', () => { if (this.server === srv) this.server = null; });
+    proc.on('exit', (code, signal) => {
+      srv.exit = { code, signal };
+      if (logFile) { logFile.end(`\n[exited code=${code} signal=${signal}]\n`); logFile = null; }
+      if (this.server === srv) this.server = null;
+    });
     srv.starting = (async () => {
       const deadline = Date.now() + 60000;
       while (Date.now() < deadline) {
-        if (proc.exitCode !== null) throw new Error(`Whisper server exited: ${log.split(/\r?\n/).map((l) => l.trim()).filter(Boolean).slice(-3).join(' | ') || `code ${proc.exitCode}`}`);
-        try { const r = await fetch(`http://127.0.0.1:${port}/`); if (r.status) { srv.ready = true; return srv; } } catch { /* not yet */ }
+        if (proc.exitCode !== null || proc.signalCode) throw new Error(`Whisper server exited: ${tail(srv.log) || `code ${proc.exitCode} ${proc.signalCode || ''}`.trim()}`);
+        try {
+          const r = await fetch(`http://127.0.0.1:${port}/`, { headers: { Connection: 'close' } });
+          try { await r.arrayBuffer(); } catch { /* drained */ }
+          if (r.status) { srv.ready = true; return srv; }
+        } catch { /* not yet */ }
         await new Promise((r) => setTimeout(r, 250));
       }
       this.shutdown();
@@ -209,18 +242,40 @@ class Whisper {
   }
 
   // 16 kHz mono 16-bit WAV buffer -> text ('' for non-speech).
-  async transcribe(wav, { model, prompt } = {}) {
-    const srv = await this.ensureServer(model);
-    this.touch();
+  // One request per connection: the server closes idle keep-alive sockets
+  // after a few seconds, and reusing one surfaces as a bare "fetch failed".
+  async post(srv, wav, prompt) {
     const fd = new FormData();
     fd.append('file', new Blob([wav], { type: 'audio/wav' }), 'speech.wav');
     fd.append('response_format', 'json');
     fd.append('temperature', '0');
     if (prompt) fd.append('prompt', String(prompt).slice(0, 400));
-    const res = await fetch(`http://127.0.0.1:${srv.port}/inference`, { method: 'POST', body: fd });
-    if (!res.ok) throw new Error(`Whisper: HTTP ${res.status}`);
+    const res = await fetch(`http://127.0.0.1:${srv.port}/inference`, { method: 'POST', body: fd, headers: { Connection: 'close' } });
+    if (!res.ok) throw new Error(`HTTP ${res.status}: ${(await res.text().catch(() => '')).slice(0, 200)}`);
     const j = await res.json();
     return cleanTranscript(j && j.text);
+  }
+
+  // 16 kHz mono 16-bit WAV buffer -> text ('' for non-speech). A request that
+  // dies on the wire is retried once, on a restarted server if it crashed.
+  async transcribe(wav, { model, prompt } = {}) {
+    let lastErr = null;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const srv = await this.ensureServer(model);
+      this.touch();
+      try {
+        return await this.post(srv, wav, prompt);
+      } catch (err) {
+        lastErr = err;
+        // Give a crashing process a moment to be reaped, so we can say why.
+        await new Promise((r) => setTimeout(r, 300));
+        const died = !!(srv.exit || srv.proc.exitCode !== null || srv.proc.signalCode);
+        if (died && this.server === srv) this.server = null;
+        lastErr = new Error(describeFailure(err, srv, died));
+        if (!(died || isNetworkError(err))) break;
+      }
+    }
+    throw lastErr;
   }
 
   shutdown() {
@@ -229,4 +284,4 @@ class Whisper {
   }
 }
 
-module.exports = { Whisper, MODELS, BINARIES, cleanTranscript, sha256File };
+module.exports = { Whisper, MODELS, BINARIES, cleanTranscript, sha256File, describeFailure, isNetworkError };
