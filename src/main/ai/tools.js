@@ -491,6 +491,33 @@ const TOOLS = [
   },
   // ------------------------------------------------------- memory
   {
+    name: 'show_visual', category: 'read',
+    description: 'Show information visually: write a small self-contained HTML page (a chart, table, dashboard, comparison, timeline, diagram, cards) and display it as a card in the chat (where: "chat", default) or as a widget on the desktop (where: "desktop"). Inline your CSS and JS and embed the data - the page cannot make network requests. Libraries may be loaded only from cdn.jsdelivr.net, cdnjs.cloudflare.com or unpkg.com (e.g. Chart.js). The page has a dark transparent background and light text by default, and the title is already shown above it (do not repeat it as a heading); keep it compact - chat cards are about 400 px wide. Pass id to replace an earlier visual instead of making a new one. Returns the visual id.',
+    input_schema: obj({
+      title: str('Short title shown above the visual'),
+      html: str('The page: an HTML fragment or a full document'),
+      where: { type: 'string', enum: ['chat', 'desktop'], description: 'chat (inline card, default) or desktop (its own widget)' },
+      id: str('Optional: id of an existing visual to update')
+    }, ['title', 'html']),
+    run: async (input, ctx) => {
+      if (!ctx.visuals) return { error: 'visuals are not available' };
+      const rec = ctx.visuals.show({ id: input.id, title: input.title, html: input.html, where: input.where || 'chat' });
+      return { ok: true, visual: rec.id, where: rec.where, title: rec.title };
+    }
+  },
+  {
+    name: 'close_visual', category: 'read',
+    description: 'Remove a visual made with show_visual (from the chat card store or the desktop).',
+    input_schema: obj({ id: str('Visual id') }, ['id']),
+    run: async (input, ctx) => ({ ok: !!(ctx.visuals && ctx.visuals.close(input.id)) })
+  },
+  {
+    name: 'list_visuals', category: 'read',
+    description: 'List the visuals made with show_visual (id, title, where, last update).',
+    input_schema: obj({}),
+    run: async (_in, ctx) => ({ visuals: ctx.visuals ? ctx.visuals.list().slice(0, 50).map((v) => ({ id: v.id, title: v.title, where: v.where, updatedAt: new Date(v.updatedAt).toISOString() })) : [] })
+  },
+  {
     name: 'memory_remember', category: 'read',
     description: "Save a lasting fact to your global memory - about the user (name, role, preferences, how they like things done), their work, or the machine. Memory persists across all conversations and is shown to you at the start of each one. Don't store transient details.",
     input_schema: obj({ text: str('The fact, in one or two sentences'), tags: { type: 'array', items: { type: 'string' }, description: 'Optional tags, e.g. ["preference"], ["project"]' } }, ['text']),

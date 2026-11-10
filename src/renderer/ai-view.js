@@ -114,7 +114,22 @@
     if (parent) parent.appendChild(e);
     return e;
   }
-  const scrollToEnd = () => { msgsEl.scrollTop = msgsEl.scrollHeight; };
+  // One scroll per frame, however many bubbles were added; `soft` scrolls
+  // only when the reader is already near the bottom (streaming text must not
+  // yank someone reading earlier messages).
+  let scrollRaf = 0;
+  let scrollHard = false;
+  const nearBottom = () => msgsEl.scrollHeight - msgsEl.scrollTop - msgsEl.clientHeight < 120;
+  const scrollToEnd = (soft) => {
+    if (!soft) scrollHard = true;
+    if (scrollRaf) return;
+    const wasNear = nearBottom();
+    scrollRaf = requestAnimationFrame(() => {
+      scrollRaf = 0;
+      if (scrollHard || wasNear) msgsEl.scrollTop = msgsEl.scrollHeight;
+      scrollHard = false;
+    });
+  };
 
   function bubble(role, html) {
     const b = el('div', `ai-msg ai-${role}`, msgsEl);
@@ -236,6 +251,24 @@
     msgsEl.scrollTop = top;
   }
 
+  // ---- Streaming render: coalesce chunks to one Markdown render per frame.
+  const streamQueue = new Set();
+  let streamRaf = 0;
+  function paintStream(lv) {
+    if (!lv.streamEl || !lv.streamEl.isConnected) return;
+    lv.streamEl.innerHTML = md(lv.streamText);
+  }
+  function scheduleStream(lv) {
+    streamQueue.add(lv);
+    if (streamRaf) return;
+    streamRaf = requestAnimationFrame(() => {
+      streamRaf = 0;
+      for (const x of streamQueue) paintStream(x);
+      streamQueue.clear();
+      scrollToEnd(true);
+    });
+  }
+
   // Speaker button on a finished assistant reply: reads that reply aloud
   // with the Text to speech settings; a second click stops it.
   const SAY_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9h4l5-4v14l-5-4H4z" fill="currentColor"/><path d="M16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>';
@@ -267,7 +300,22 @@
     if (sayingEl === b) { b.classList.remove('saying'); const x = b.querySelector('.ai-say'); if (x) x.title = 'Read aloud'; sayingEl = null; }
   }
 
+  // A visual made with show_visual renders as a card instead of a tool row.
+  function visualFromResult(name, ok, result) {
+    if (name !== 'show_visual' || !ok) return null;
+    try { const r = JSON.parse(String(result || '')); return r && r.visual ? r : null; } catch { return null; }
+  }
+  function visualCard(v) {
+    if (!window.AeroVisuals) return null;
+    const card = AeroVisuals.card(v, aero);
+    msgsEl.appendChild(card);
+    scrollToEnd();
+    return card;
+  }
+
   function toolRow(name, ok, input, result, image) {
+    const v = visualFromResult(name, ok, result);
+    if (v) { visualCard(v); return; }
     const row = el('details', `ai-tool ${ok ? 'ok' : 'err'}`, msgsEl);
     const sum = el('summary', '', row);
     sum.textContent = `${ok ? '⚙' : '⚠'} ${name}`;
@@ -363,29 +411,62 @@
     } catch { /* fine */ }
   }
 
+  const HISTORY_PAGE = 80;
+
+  // Draw messages[] whose first element is message number `offset`.
+  function renderMessages(messages, offset, state) {
+    messages.forEach((m, j) => {
+      const i = offset + j;
+      if (m.role === 'user') {
+        state.turn = i;
+        state.lastUser = userBubble(m.content, m.attachments, i);
+        state.answered = false;
+      } else if (m.role === 'assistant') {
+        if (m.content) { replyActions(finishReply(bubble('assistant', md(m.content)), m.content), state.turn); state.answered = true; }
+      } else if (m.role === 'tool') {
+        for (const r of m.results || []) toolRow(r.name, !r.isError, null, String(r.content || '').slice(0, 400), r.images && r.images[0] ? `data:${r.images[0].mime};base64,${r.images[0].data}` : null);
+      }
+    });
+  }
+
+  // "Show earlier messages": load the previous page above, keeping the
+  // reader's place.
+  function earlierButton(tab, before) {
+    const b = document.createElement('button');
+    b.className = 'ai-earlier';
+    b.textContent = `Show earlier messages (${before})`;
+    msgsEl.prepend(b);
+    b.addEventListener('click', async () => {
+      const page = await aero.aiConversationView(tab.convId, HISTORY_PAGE, before);
+      if (!page) return;
+      const keep = msgsEl.scrollHeight - msgsEl.scrollTop;
+      // Render into a detached holder, then move the nodes above the current first message.
+      const holder = document.createElement('div');
+      const realMsgs = msgsEl;
+      msgsEl = holder;
+      try { renderMessages(page.messages, page.start, { turn: -1, lastUser: null, answered: false }); } finally { msgsEl = realMsgs; }
+      const first = b.nextSibling;
+      for (const n of [...holder.childNodes]) msgsEl.insertBefore(n, first);
+      b.remove();
+      if (page.start > 0) earlierButton(tab, page.start);
+      msgsEl.scrollTop = msgsEl.scrollHeight - keep;
+    });
+  }
+
   async function renderConversation(tab) {
     msgsEl.innerHTML = '';
     if (!tab) return;
-    const conv = tab.convId ? await aero.aiConversation(tab.convId) : null;
+    const conv = tab.convId ? await aero.aiConversationView(tab.convId, HISTORY_PAGE) : null;
     if (tab.convId && !conv) { tab.convId = null; tab.title = 'New chat'; }
     const hint = () => bubble('hint', 'Ask anything - or ask it to change a theme, open an app, read a web widget, search the web, or take notes. Attach files with 📎.');
     if (!conv) { hint(); renderTabs(); return; }
     tab.title = conv.title || 'Conversation';
     titleEl.textContent = tab.title;
-    let turn = -1;
-    let lastUser = null;
-    let answered = false;
-    (conv.messages || []).forEach((m, i) => {
-      if (m.role === 'user') {
-        turn = i;
-        lastUser = userBubble(m.content, m.attachments, i);
-        answered = false;
-      } else if (m.role === 'assistant') {
-        if (m.content) { replyActions(finishReply(bubble('assistant', md(m.content)), m.content), turn); answered = true; }
-      } else if (m.role === 'tool') {
-        for (const r of m.results || []) toolRow(r.name, !r.isError, null, String(r.content || '').slice(0, 400), r.images && r.images[0] ? `data:${r.images[0].mime};base64,${r.images[0].data}` : null);
-      }
-    });
+    if (conv.start > 0) earlierButton(tab, conv.start);
+    const state = { turn: -1, lastUser: null, answered: false };
+    renderMessages(conv.messages || [], conv.start || 0, state);
+    const lastUser = state.lastUser;
+    const answered = state.answered;
     // A question with no answer (stopped, failed, server away): offer Resend.
     if (lastUser && !answered && !(liveFor(tab.convId) || {}).busy) lastUser.classList.add('unanswered');
     if (!(conv.messages || []).length) hint();
@@ -530,8 +611,7 @@
         lv.streamText += ev.text || '';
         if (isActive) {
           if (!lv.streamEl) lv.streamEl = bubble('assistant', '');
-          lv.streamEl.innerHTML = md(lv.streamText);
-          scrollToEnd();
+          scheduleStream(lv);
         }
         break;
       case 'assistant':
@@ -574,9 +654,14 @@
         watchOffline(convId);
         break;
       case 'done':
+        if (lv.streamEl && lv.streamText) paintStream(lv);
         lv.busy = false; lv.streamEl = null; lv.streamText = ''; lv.retryText = '';
         if (!isActive) tab.unread = true;
-        else if (!lv.queued || !lv.queued.length) renderConversation(tab).then(scrollToEnd);
+        else if (ev.stopped || ev.error) {
+          // A question that got no answer keeps a Resend button.
+          const lastUser = [...msgsEl.querySelectorAll('.ai-msg.ai-user[data-idx]')].pop();
+          if (lastUser && !(lastUser.nextElementSibling && lastUser.parentElement.querySelector('.ai-msg.ai-assistant[data-turn="' + lastUser.dataset.idx + '"]'))) lastUser.classList.add('unanswered');
+        }
         refreshList();
         break;
       default: break;

@@ -76,6 +76,9 @@ Pin the widget (📌) to keep the sidebar above other windows while an agentic t
   Settings). Nothing leaves the machine. The −/+ buttons scale the chat text.
 - **Media:** `media_status` / `media_control` play, pause, skip and set volume on whatever is
   playing.
+- **Visuals:** `show_visual` lets the assistant answer with a chart, table or dashboard drawn
+  in a sandboxed frame inside the chat (no network, no access to the app); pin one to keep
+  it on the desktop as a widget.
 - **Web access:** `web_search` returns results (no key or browser needed) and `fetch_url` reads
   a page as text; `open_web_search` hands a query to your default browser and engine.
 - **Driving apps and web frames:** focus/minimize/maximize/restore/close windows, send

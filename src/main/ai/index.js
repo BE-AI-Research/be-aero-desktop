@@ -30,6 +30,7 @@ class AiService {
     this.pinned = false;
     this.calibrations = new Map();  // provider|model -> chars-per-token learned from usage
     this.memory = new Memory(path.join(deps.userDataDir, 'ai', 'memory.json'));
+    this.visuals = new (require('./visuals').Visuals)(path.join(deps.userDataDir, 'ai', 'visuals'));
     this.browser = new BrowserController({
       profileDir: path.join(deps.userDataDir, 'ai', 'browser-profile'),
       resizeImage: (png) => {
@@ -259,6 +260,11 @@ class AiService {
       webOpen: (url, name) => this.webOpen(url, name),
       browser: (op, args) => this.browserOp(op, args),
       memory: this.memory,
+      visuals: {
+        show: (args) => { const rec = this.visuals.save({ ...args, conversationId }); this.visualsChanged(); return rec; },
+        close: (id) => { const ok = this.visuals.remove(id); this.visualsChanged(); return ok; },
+        list: () => this.visuals.list()
+      },
       noTools: !!this.preset().noTools,
       compact: (summary, at) => this.conversations.setSummary(conversationId, summary, at),
       memorySummary: () => (this.config().memoryEnabled === false ? '' : this.memory.summary()),
@@ -439,9 +445,47 @@ class AiService {
   }
 
   // ---------------------------------------------------------- running
+  // Streamed text arrives in tiny chunks (often 1-4 characters); coalesce
+  // them per conversation into one IPC message every ~30 ms. Any other event
+  // flushes the pending text first, so order is preserved.
   emit(conversationId, event) {
     const win = this.d.getWindow();
-    if (win && !win.isDestroyed()) win.webContents.send('ai:event', { conversationId, ...event });
+    if (!win || win.isDestroyed()) return;
+    if (!this.deltaBuf) this.deltaBuf = new Map();
+    if (event.type === 'delta') {
+      const b = this.deltaBuf.get(conversationId);
+      if (b) { b.text += event.text || ''; return; }
+      const nb = { text: event.text || '', timer: setTimeout(() => this.flushDelta(conversationId), 30) };
+      this.deltaBuf.set(conversationId, nb);
+      return;
+    }
+    this.flushDelta(conversationId);
+    win.webContents.send('ai:event', { conversationId, ...event });
+  }
+
+  flushDelta(conversationId) {
+    const b = this.deltaBuf && this.deltaBuf.get(conversationId);
+    if (!b) return;
+    clearTimeout(b.timer);
+    this.deltaBuf.delete(conversationId);
+    const win = this.d.getWindow();
+    if (b.text && win && !win.isDestroyed()) win.webContents.send('ai:event', { conversationId, type: 'delta', text: b.text });
+  }
+
+  // The newest `limit` messages for display (optionally those before
+  // `before`), starting on a user message so every exchange is whole. Tool
+  // screenshots are reduced to a thumbnail-sized first image.
+  conversationView(id, limit = 80, before) {
+    let c;
+    try { c = this.conversations.get(id); } catch { return null; }
+    const all = c.messages || [];
+    const end = Math.max(0, Math.min(all.length, Number.isInteger(before) ? before : all.length));
+    let start = Math.max(0, end - Math.max(10, Math.min(500, Number(limit) || 80)));
+    while (start > 0 && all[start].role !== 'user') start--;
+    const messages = all.slice(start, end).map((m) => (m.role === 'tool' && m.results
+      ? { ...m, results: m.results.map((r) => ({ ...r, content: String(r.content || '').slice(0, 400), images: r.images && r.images[0] ? [r.images[0]] : undefined })) }
+      : m));
+    return { id: c.id, title: c.title, total: all.length, start, end, messages };
   }
 
   async send(conversationId, text, atts, opts = {}) {
@@ -559,6 +603,11 @@ class AiService {
 
   isPinned() { return this.pinned; }
 
+  visualsChanged() {
+    const win = this.d.getWindow();
+    if (win && !win.isDestroyed()) win.webContents.send('ai:visuals', this.visuals.list().filter((v) => v.where === 'desktop'));
+  }
+
   // ---------------------------------------------------------- IPC
   registerIpc() {
     ipcMain.handle('ai:status', () => this.status());
@@ -571,6 +620,7 @@ class AiService {
     });
     ipcMain.handle('ai:conversations', () => this.conversations.list());
     ipcMain.handle('ai:conversation', (_e, id) => { try { return this.conversations.get(id); } catch { return null; } });
+    ipcMain.handle('ai:conversation-view', (_e, id, limit, before) => this.conversationView(String(id || ''), Number(limit) || 80, before == null ? undefined : Number(before)));
     ipcMain.handle('ai:new', () => this.conversations.create());
     ipcMain.handle('ai:rename', (_e, id, title) => this.conversations.rename(id, title));
     ipcMain.handle('ai:delete', (_e, id) => { this.stop(id); this.conversations.remove(id); return true; });
@@ -603,6 +653,17 @@ class AiService {
     ipcMain.handle('ai:unqueue', (_e, id, index) => this.unqueue(id, Number(index)));
     ipcMain.handle('ai:pin', (_e, on) => this.setPinned(on));
     ipcMain.handle('ai:probe', () => this.probe());
+    ipcMain.handle('ai:visuals', () => this.visuals.list().filter((v) => v.where === 'desktop'));
+    ipcMain.handle('ai:visual-delete', (_e, id) => { const ok = this.visuals.remove(String(id || '')); this.visualsChanged(); return ok; });
+    ipcMain.handle('ai:visual-where', (_e, id, where) => {
+      const v = this.visuals.get(String(id || ''));
+      if (!v) return false;
+      v.where = where === 'desktop' ? 'desktop' : 'chat';
+      v.updatedAt = Date.now();
+      this.visuals.saveIndex();
+      this.visualsChanged();
+      return true;
+    });
     ipcMain.handle('ai:delete-message', (_e, id, index, which) => this.deleteMessage(String(id || ''), Number(index), which === 'reply' ? 'reply' : 'turn'));
     ipcMain.handle('ai:resend', (_e, id, index, text) => this.resendFrom(String(id || ''), Number(index), typeof text === 'string' ? text : undefined));
     ipcMain.handle('ai:resume', (_e, id) => this.resume(String(id || '')));

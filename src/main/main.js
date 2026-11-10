@@ -80,6 +80,10 @@ if (process.platform === 'linux') {
 protocol.registerSchemesAsPrivileged([{
   scheme: 'aero-plugin',
   privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true }
+}, {
+  // Assistant-made visuals (charts, tables, dashboards); see ai/visuals.js.
+  scheme: 'aero-visual',
+  privileges: { standard: true, secure: true }
 }]);
 
 // Only one sidebar at a time: a second launch just shows the existing one.
@@ -1741,6 +1745,14 @@ app.whenReady().then(() => {
     onLog: (msg) => console.log(`[api] ${msg}`)
   });
   registerPluginProtocol();
+  // aero-visual://<id>/ - an assistant visual, with its locked-down CSP.
+  protocol.handle('aero-visual', (request) => {
+    const id = new URL(request.url).hostname;
+    const page = aiService && aiService.visuals ? aiService.visuals.page(id) : null;
+    if (!page) return new Response('no such visual', { status: 404 });
+    const { VISUAL_CSP } = require('./ai/visuals');
+    return new Response(page, { headers: { 'content-type': 'text/html; charset=utf-8', 'content-security-policy': VISUAL_CSP, 'cache-control': 'no-store' } });
+  });
   refreshPlugins();
   startApi();
 

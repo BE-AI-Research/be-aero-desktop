@@ -122,7 +122,7 @@ class Conversations {
 
   save(c) {
     const tmp = this.file(c.id) + '.tmp';
-    fs.writeFileSync(tmp, JSON.stringify(c, null, 2), 'utf8');
+    fs.writeFileSync(tmp, JSON.stringify(c), 'utf8');   // compact: these grow with every message
     fs.renameSync(tmp, this.file(c.id));
   }
 }

@@ -71,7 +71,7 @@
     for (const el of items()) {
       if (el.classList.contains('hidden')) continue;
       const k = keyOf(el);
-      if (k.startsWith('web:')) {
+      if (k.startsWith('web:') || k.startsWith('visual:')) {
         const w = Math.min(WEB_W, Math.max(320, Math.floor(home.w * 0.45)));
         const h = Math.min(WEB_H, Math.max(240, Math.floor(home.h * 0.45)));
         out[k] = { x: Math.round(home.x + (home.w - w) / 2 + cascade * 28), y: Math.round(home.y + (home.h - h) / 2 + cascade * 28), w, h };
@@ -92,17 +92,23 @@
     const saved = layoutOf('free');
     return Array.isArray(saved._z) ? saved._z.slice() : [];
   }
+  // Layers (see styles.css): widgets stack among themselves in 10..900; the
+  // toolbar (1000), the settings panel (2000) and popups (100000) always sit
+  // above every widget, however often widgets are raised.
+  const Z_WIDGET_BASE = 10;
+  const Z_WIDGET_MAX = 900;
   function applyZ() {
     if (!isFree()) { for (const el of items()) el.style.zIndex = ''; return; }
-    const order = zOrder();
+    const order = zOrder().filter((k) => k !== 'toolbar');
     for (const el of items()) {
       const k = keyOf(el);
+      if (k === 'toolbar') { el.style.zIndex = ''; continue; }
       const i = order.indexOf(k);
-      el.style.zIndex = String(10 + (i < 0 ? 0 : i + 1));
+      el.style.zIndex = String(Math.min(Z_WIDGET_MAX, Z_WIDGET_BASE + (i < 0 ? 0 : i + 1)));
     }
   }
   function bringToFront(el) {
-    if (!isFree()) return;
+    if (!isFree() || keyOf(el) === 'toolbar') return;
     const k = keyOf(el);
     const order = zOrder().filter((x) => x !== k);
     order.push(k);

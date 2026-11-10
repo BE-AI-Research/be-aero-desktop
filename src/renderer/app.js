@@ -101,6 +101,7 @@
     aero,
     onWidgetAdded(section) { AeroLayout.adopt(section); }
   });
+  if (window.AeroVisuals) AeroVisuals.init({ aero, onWidgetAdded(section) { AeroLayout.adopt(section); } });
 
   // ---------------------------------------------------------------
   // Clock (faces live in clock.js) and telemetry (telemetry-view.js)
