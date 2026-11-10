@@ -4,5 +4,7 @@ release/
 examples/HorusSearch-master/
 quick-resume-code
 
-# Reference material dropped in by the user (BE-Code source etc.), not part of the app
-examples/
+# Reference material dropped in by the user (BE-Code source), not part of the app.
+# The rest of examples/ (sample plugin and client) is tracked.
+examples/be-code/
+examples/be-code-main.zip
