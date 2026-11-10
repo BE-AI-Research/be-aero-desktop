@@ -215,6 +215,14 @@
           <button class="btn" id="btn-ai-devices" title="Re-read the audio devices">Refresh</button>
         </div>
         <div class="voice-meter" id="ai-mic-meter"><div class="voice-meter-bar"></div></div>
+        <label class="check"><input id="set-ai-continuous" type="checkbox"> Keep listening after each phrase (otherwise the microphone turns off once it has transcribed what you said)</label>
+        <label class="field-label">Voice hotkey</label>
+        <div class="row">
+          <input id="set-voice-hotkey" class="hotkey-input" readonly spellcheck="false" placeholder="Click, then press a combination">
+          <button class="btn" id="btn-voice-hotkey-reset" title="Back to Ctrl + Alt + M">Reset</button>
+          <button class="btn" id="btn-voice-hotkey-off" title="No voice hotkey">Off</button>
+        </div>
+        <div class="hint-text" id="voice-hotkey-status">Starts and stops voice input from anywhere, with a short tone. Works while other apps have focus.</div>
         <label class="field-label">Speech recognition engine</label>
         <select id="set-ai-engine">
           <option value="auto">Automatic (Whisper when installed)</option>
