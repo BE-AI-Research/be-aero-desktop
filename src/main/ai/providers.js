@@ -9,13 +9,22 @@
 // what makes "local providers" a configuration rather than a feature.
 
 const attachments = require('./attachments');
+const { parseUnixBase, defaultBeCodeSocket, socketFetch } = require('./transport');
 
+// local: a server on this machine or LAN (small windows, may restart - the
+// context buffer and reconnection are tuned for it). noTools: the endpoint
+// serves inference only, so the assistant answers without acting.
 const PRESETS = {
   anthropic: { label: 'Anthropic (Claude)', kind: 'anthropic', baseUrl: '', model: 'claude-opus-5-5', needsKey: true },
   openai: { label: 'OpenAI', kind: 'openai', baseUrl: 'https://api.openai.com/v1', model: '', needsKey: true },
-  ollama: { label: 'Ollama (local)', kind: 'openai', baseUrl: 'http://localhost:11434/v1', model: '', needsKey: false },
-  lmstudio: { label: 'LM Studio (local)', kind: 'openai', baseUrl: 'http://localhost:1234/v1', model: '', needsKey: false },
-  custom: { label: 'Custom OpenAI-compatible server', kind: 'openai', baseUrl: '', model: '', needsKey: false }
+  ollama: { label: 'Ollama (local)', kind: 'openai', baseUrl: 'http://localhost:11434/v1', model: '', needsKey: false, local: true },
+  lmstudio: { label: 'LM Studio (local)', kind: 'openai', baseUrl: 'http://localhost:1234/v1', model: '', needsKey: false, local: true },
+  llamacpp: { label: 'llama.cpp server (local)', kind: 'openai', baseUrl: 'http://localhost:8080/v1', model: '', needsKey: false, local: true },
+  becode: { label: 'BE-Code session (shared inference)', kind: 'openai', baseUrl: `unix://${defaultBeCodeSocket()}`, model: 'default', needsKey: true, local: true, noTools: true,
+    hint: 'A running BE-Code session with api.enabled serves ~/.be-code/api/api.sock. Register this app once (be-code apps add be-aero --tiers completions) and paste the key it prints. Inference only: the assistant answers but does not use tools.'
+      + (process.platform === 'win32' ? ' On Windows this socket cannot be reached from the app yet (Node has no AF_UNIX client here); use it on Linux or macOS, or point a local provider at the BE-Code TCP endpoint when one exists.' : '') },
+  beaiengine: { label: 'BE AI Engine fabric', kind: 'openai', baseUrl: 'http://localhost:9800/v1', model: '', needsKey: true, local: true },
+  custom: { label: 'Custom OpenAI-compatible server', kind: 'openai', baseUrl: '', model: '', needsKey: false, local: true }
 };
 
 // ------------------------------------------------------------ translation
@@ -186,7 +195,24 @@ class OpenAiCompatProvider {
   constructor({ apiKey, baseUrl, fetchImpl }) {
     this.apiKey = apiKey || '';
     this.baseUrl = String(baseUrl || '').replace(/\/+$/, '');
-    this.fetch = fetchImpl || ((...a) => fetch(...a));
+    // unix://<socket> serves the API at /v1 on that socket (BE-Code).
+    this.socketPath = parseUnixBase(this.baseUrl);
+    if (this.socketPath) this.baseUrl = '/v1';
+    this.fetch = fetchImpl || (this.socketPath
+      ? (p, opts) => socketFetch(this.socketPath, p, opts)
+      : (...a) => fetch(...a));
+  }
+
+  // An HTTP failure carries its status (and Retry-After) so the retry loop
+  // can tell a rate limit from a rejected key without parsing text.
+  async httpError(res, what) {
+    let detail = '';
+    try { detail = (await res.text()).slice(0, 400); } catch { /* ignore */ }
+    const err = new Error(`${res.status} from ${what}: ${detail || res.statusText}`);
+    err.status = res.status;
+    const ra = Number(res.headers && res.headers.get && res.headers.get('retry-after'));
+    if (ra > 0) err.retryAfter = ra;
+    return err;
   }
 
   headers() {
@@ -206,11 +232,7 @@ class OpenAiCompatProvider {
     const res = await this.fetch(`${this.baseUrl}/chat/completions`, {
       method: 'POST', headers: this.headers(), body: JSON.stringify(body), signal
     });
-    if (!res.ok) {
-      let detail = '';
-      try { detail = (await res.text()).slice(0, 400); } catch { /* ignore */ }
-      throw new Error(`${res.status} from ${this.baseUrl}: ${detail || res.statusText}`);
-    }
+    if (!res.ok) throw await this.httpError(res, this.socketPath || this.baseUrl);
     const state = { text: '', calls: [], finish: null };
     const ctype = res.headers.get('content-type') || '';
     if (!/text\/event-stream/i.test(ctype)) {
@@ -249,17 +271,24 @@ class OpenAiCompatProvider {
     return { ...finishOpenAiState(state), usage };
   }
 
-  async listModels() {
+  async listModels({ signal } = {}) {
     if (!this.baseUrl) throw new Error('No server URL configured.');
-    const res = await this.fetch(`${this.baseUrl}/models`, { headers: this.headers() });
-    if (!res.ok) throw new Error(`${res.status} from ${this.baseUrl}/models`);
+    const res = await this.fetch(`${this.baseUrl}/models`, { headers: this.headers(), signal });
+    if (!res.ok) {
+      // BE-Code's API has no model list; its session model is "default".
+      if (this.socketPath && res.status === 404) return ['default'];
+      throw await this.httpError(res, `${this.socketPath || this.baseUrl}/models`);
+    }
     const json = await res.json();
     return (json.data || []).map((m) => m.id).filter(Boolean).sort();
   }
 
   describeError(err) {
-    if (err && /ECONNREFUSED|fetch failed/i.test(String(err.message))) {
-      return `Could not reach ${this.baseUrl} - is the server running?`;
+    const where = this.socketPath || this.baseUrl;
+    if (err && /ECONNREFUSED|ENOENT|fetch failed|socket hang up/i.test(String(err.message))) {
+      return this.socketPath
+        ? `No BE-Code session is serving at ${where} - start one with api.enabled (or /api on).`
+        : `Could not reach ${where} - is the server running?`;
     }
     return err && err.message ? err.message : String(err);
   }

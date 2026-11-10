@@ -63,6 +63,9 @@
       <div class="telemetry-foot" id="telemetry-foot"></div>
     </section>
 
+    <!-- Widget: Media controller (rendered by media-view.js) -->
+    <section class="widget widget-hit media-widget" data-widget="media"></section>
+
     <!-- Widget: Application dock (rendered by tasks-view.js) -->
     <section class="widget widget-hit tasks-widget" data-widget="tasks">
       <div id="task-list" class="dock-bar"></div>
@@ -87,10 +90,13 @@
     <section class="widget widget-hit ai-widget" data-widget="ai">
       <div class="ai-head">
         <h3 class="widget-title">AI</h3>
+        <span class="ai-conn" title="Server connection - click to check"></span>
         <select class="ai-list" title="Conversations"></select>
         <button class="icon-btn ai-label" title="Label this conversation">&#9998;</button>
         <button class="icon-btn ai-new" title="New chat tab">&#65291;</button>
         <button class="icon-btn ai-delete" title="Delete this conversation">&#128465;</button>
+        <button class="icon-btn ai-zoom-out" title="Smaller text">&#8722;</button>
+        <button class="icon-btn ai-zoom-in" title="Larger text">&#43;</button>
         <button class="icon-btn ai-tasks-btn" title="Scheduled tasks">&#9201;</button>
         <button class="icon-btn ai-min" title="Minimize to the dock">&#8212;</button>
         <button class="icon-btn ai-pin" title="Keep above other windows while the assistant works">&#128204;</button>
@@ -102,6 +108,7 @@
       <div class="ai-attachments"></div>
       <div class="ai-compose">
         <button class="btn ai-attach" title="Attach files (images, PDFs, text)">&#128206;</button>
+        <button class="btn ai-mic" title="Voice input (offline speech recognition)">&#127908;</button>
         <textarea class="ai-input" rows="1" spellcheck="true" placeholder="Ask, or tell it what to do..."></textarea>
         <button class="btn ai-send" title="Send (Enter)">&#10148;</button>
         <button class="btn ai-stop" hidden title="Stop">&#9632;</button>
@@ -134,6 +141,7 @@
         <p class="hint">Drag the corner grip of any widget to resize it. In free-form mode drag a widget by its body to move it - onto any monitor.</p>
         <label class="check"><input id="set-snap" type="checkbox"> Snap to grid while moving</label>
         <label class="check"><input id="set-locked" type="checkbox"> Lock widgets in place (no drag or resize)</label>
+        <label class="check"><input id="set-spellcheck" type="checkbox"> Spell-check text fields and web widgets (right-click for suggestions)</label>
         <label class="check"><input id="set-top" type="checkbox"> Float above all windows (otherwise widgets sit on the desktop, behind apps)</label>
         <label class="field-label">Opacity <span id="opacity-val"></span></label>
         <input id="set-opacity" type="range" min="30" max="100" step="5">
@@ -167,9 +175,14 @@
           <button class="btn" id="btn-ai-models">Fetch models</button>
         </div>
         <input id="set-ai-model" type="text" spellcheck="false" placeholder="Model id (or pick one above after fetching)">
+        <div class="hint-text" id="ai-provider-hint"></div>
         <label class="field-label">Tool-call limit per message</label>
         <input id="set-ai-steps" type="number" min="1" max="500" step="1" title="How many tool steps one message may take before the assistant is stopped">
         <div class="hint-text">Each tool use counts as a step; long autonomous jobs need more. Default 12.</div>
+        <label class="field-label">Context budget (tokens per request)</label>
+        <input id="set-ai-context" type="number" min="0" max="2000000" step="1000" placeholder="0 = automatic">
+        <label class="check"><input id="set-ai-compact" type="checkbox"> Summarize older turns with the model when the budget is exceeded</label>
+        <div class="hint-text" id="ai-context-hint">Old tool output is trimmed first, then the older conversation is summarized and carried forward; the chat history itself is never deleted. Type /compact in a chat to do it now.</div>
         <label class="field-label">When the assistant wants to change something</label>
         <select id="set-ai-permission">
           <option value="ask">Ask me each time</option>
@@ -177,6 +190,14 @@
           <option value="deny">Never - read-only assistant</option>
         </select>
         <div class="hint-text">Reading (settings, telemetry, search, web pages) never asks. Changing settings, launching apps, operating web widgets and closing windows is gated by this.</div>
+        <label class="field-label">Voice</label>
+        <div class="hint-text" id="ai-voice-info">Checking speech recognition...</div>
+        <label class="check"><input id="set-ai-voice-autosend" type="checkbox"> Send each dictated sentence as soon as it is recognized</label>
+        <label class="check"><input id="set-ai-voice-speak" type="checkbox"> Read the assistant's replies aloud</label>
+        <div class="row">
+          <select id="set-ai-voice-name" title="Voice"></select>
+          <input id="set-ai-voice-rate" type="range" min="0.6" max="1.6" step="0.1" title="Speaking rate">
+        </div>
         <label class="field-label">Memory</label>
         <label class="check"><input id="set-ai-memory" type="checkbox"> Let the assistant remember facts about me and my work across conversations</label>
         <div id="ai-memory-list" class="plugin-list"></div>
@@ -249,7 +270,7 @@
           <label class="check"><input type="checkbox" data-metric="battery"> Battery</label><input type="color" data-metric-color="battery">
         </div>
         <label class="field-label">Disk drive</label>
-        <input id="set-tel-drive" type="text" maxlength="2" placeholder="C:">
+        <input id="set-tel-drive" type="text" maxlength="128" placeholder="C:">
         <label class="check"><input id="set-tel-cores" type="checkbox"> Per-core CPU heatmap</label>
         <label class="check"><input id="set-tel-values" type="checkbox"> Show values</label>
         <label class="check"><input id="set-tel-footer" type="checkbox"> Show details footer</label>
@@ -323,6 +344,11 @@
         <label class="check"><input type="checkbox" data-toggle="weather"> Weather</label>
         <label class="check"><input type="checkbox" data-toggle="telemetry"> System telemetry</label>
         <label class="check"><input type="checkbox" data-toggle="tasks"> Application dock</label>
+        <label class="check"><input type="checkbox" data-toggle="media"> Media controller (what is playing, play/pause, volume)</label>
+        <div id="dock-helper-row" class="hidden">
+          <div id="dock-helper-status" class="hint"></div>
+          <button id="btn-dock-helper" class="btn-small">Install GNOME dock helper</button>
+        </div>
         <label class="field-label">Dock icon alignment</label>
         <select id="set-dock-align">
           <option value="left">Left</option>
@@ -375,6 +401,7 @@
   <script src="../shared/dock.js"></script>
   <script src="clock.js"></script>
   <script src="telemetry-view.js"></script>
+  <script src="media-view.js"></script>
   <script src="extensions.js"></script>
   <script src="tasks-view.js"></script>
   <script src="../shared/pagescripts.js"></script>

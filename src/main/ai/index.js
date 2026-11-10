@@ -7,7 +7,8 @@ const crypto = require('crypto');
 const { ipcMain, dialog, safeStorage, shell } = require('electron');
 const { Conversations } = require('./conversations');
 const { createProvider, PRESETS } = require('./providers');
-const { runTurn } = require('./agent');
+const { runTurn, compactConversation } = require('./agent');
+const ctxbuf = require('./context');
 const { webSearch, fetchPage } = require('./websearch');
 const attachments = require('./attachments');
 const { TaskScheduler } = require('./scheduler');
@@ -27,6 +28,7 @@ class AiService {
     this.queues = new Map();        // conversationId -> [text] waiting for the current turn
     this.pendingWebOps = new Map(); // opId -> { resolve, timer }
     this.pinned = false;
+    this.calibrations = new Map();  // provider|model -> chars-per-token learned from usage
     this.memory = new Memory(path.join(deps.userDataDir, 'ai', 'memory.json'));
     this.browser = new BrowserController({
       profileDir: path.join(deps.userDataDir, 'ai', 'browser-profile'),
@@ -105,6 +107,77 @@ class AiService {
     return createProvider({ provider: c.provider || 'anthropic', baseUrl: c.baseUrl || '', apiKey: this.apiKey() });
   }
 
+  preset() {
+    return PRESETS[this.config().provider] || PRESETS.custom;
+  }
+
+  // Token budget for one request: the user's number, else a default for
+  // the provider kind (local servers get a small one).
+  contextBudget() {
+    const c = this.config();
+    const p = this.preset();
+    return ctxbuf.budgetFor(c.provider || 'anthropic', p.kind, c.contextTokens, !!p.local);
+  }
+
+  calibration() {
+    const key = `${this.config().provider}|${this.config().model}`;
+    if (!this.calibrations.has(key)) this.calibrations.set(key, new ctxbuf.Calibration());
+    return this.calibrations.get(key);
+  }
+
+  // Is the configured server answering? Cheap (model list), bounded.
+  async probe() {
+    const started = Date.now();
+    const p = this.preset();
+    if (p.needsKey && !this.apiKey()) return { ok: false, error: 'no API key', needsKey: true };
+    const ac = new AbortController();
+    const t = setTimeout(() => ac.abort(), 5000);
+    try {
+      const models = await this.provider().listModels({ signal: ac.signal });
+      return { ok: true, latencyMs: Date.now() - started, models: (models || []).length, local: !!p.local };
+    } catch (err) {
+      const prov = this.provider();
+      return { ok: false, latencyMs: Date.now() - started, error: prov.describeError ? prov.describeError(err) : String(err && err.message || err), local: !!p.local };
+    } finally { clearTimeout(t); }
+  }
+
+  // Force a compaction of one conversation now.
+  async compact(conversationId) {
+    let conv;
+    try { conv = this.conversations.get(conversationId); } catch { return { error: 'no such conversation' }; }
+    if (this.runs.has(conv.id)) return { error: 'busy - wait for the current turn' };
+    const c = this.config();
+    const model = c.model || this.preset().model;
+    if (!model) return { error: 'no model configured' };
+    const controller = new AbortController();
+    this.runs.set(conv.id, controller);
+    const emit = (ev) => this.emit(conv.id, ev);
+    try {
+      const before = ctxbuf.estimateTokens(ctxbuf.prepare(conv, { budget: this.contextBudget(), cpt: this.calibration().cpt }).messages, '', this.calibration().cpt);
+      const ok = await compactConversation({ provider: this.provider(), model, conversation: conv, ctx: this.toolContext(conv.id), emit, signal: controller.signal });
+      const after = ctxbuf.estimateTokens(ctxbuf.prepare(conv, { budget: this.contextBudget(), cpt: this.calibration().cpt }).messages, '', this.calibration().cpt);
+      emit({ type: 'notice', text: ok ? `Compacted: about ${before.toLocaleString()} to ${after.toLocaleString()} tokens.` : 'Nothing to compact yet.' });
+      emit({ type: 'context', tokens: after, budget: this.contextBudget(), compacted: !!conv.summary });
+      emit({ type: 'done', compacted: ok });
+      return { ok, before, after };
+    } catch (err) {
+      emit({ type: 'error', message: err.message });
+      emit({ type: 'done', error: err.message });
+      return { error: err.message };
+    } finally { this.runs.delete(conv.id); }
+  }
+
+  // Re-run the pending turn of a conversation whose last turn failed (the
+  // server was away); the user's message is already on disk.
+  async resume(conversationId) {
+    let conv;
+    try { conv = this.conversations.get(conversationId); } catch { return { error: 'no such conversation' }; }
+    if (this.runs.has(conv.id)) return { error: 'busy' };
+    const last = conv.messages[conv.messages.length - 1];
+    if (!last || (last.role !== 'user' && last.role !== 'tool')) return { error: 'nothing to resume' };
+    return this.runConversation(conv, {});
+  }
+
   status() {
     const c = this.config();
     const preset = PRESETS[c.provider] || PRESETS.custom;
@@ -113,7 +186,9 @@ class AiService {
       baseUrl: c.baseUrl || preset.baseUrl, model: c.model || preset.model,
       hasKey: !!this.apiKey(), needsKey: preset.needsKey, permission: c.permission || 'ask',
       systemPrompt: c.systemPrompt || '', pinned: this.pinned,
-      presets: Object.entries(PRESETS).map(([id, p]) => ({ id, label: p.label, baseUrl: p.baseUrl, model: p.model, needsKey: p.needsKey }))
+      local: !!preset.local, noTools: !!preset.noTools, hint: preset.hint || '',
+      contextTokens: Number(c.contextTokens) || 0, contextBudget: this.contextBudget(), compactWithModel: c.compactWithModel !== false,
+      presets: Object.entries(PRESETS).map(([id, p]) => ({ id, label: p.label, baseUrl: p.baseUrl, model: p.model, needsKey: p.needsKey, local: !!p.local, noTools: !!p.noTools, hint: p.hint || '' }))
     };
   }
 
@@ -130,10 +205,11 @@ class AiService {
       reindex: () => (d.spotlight ? d.spotlight.reindex() : Promise.resolve()),
       openExternal: (url) => shell.openExternal(url),
       notify: (title, body) => d.notify(title, body),
-      tasks: {
+      windows: {
         list: () => d.tasks.list(),
         action: (name, id) => d.tasks.action(name, id)
       },
+      media: d.media,
       createWebWidget: (url, name) => {
         const id = 'w' + crypto.randomBytes(4).toString('hex');
         const list = [...(d.store.get('webWidgets') || []), { id, url, name: name || new URL(url).hostname }];
@@ -144,6 +220,8 @@ class AiService {
       webOpen: (url, name) => this.webOpen(url, name),
       browser: (op, args) => this.browserOp(op, args),
       memory: this.memory,
+      noTools: !!this.preset().noTools,
+      compact: (summary, at) => this.conversations.setSummary(conversationId, summary, at),
       memorySummary: () => (this.config().memoryEnabled === false ? '' : this.memory.summary()),
       webSearch: (q, count) => webSearch(q, { count }),
       fetchPage: (url) => fetchPage(url),
@@ -356,7 +434,15 @@ class AiService {
 
     this.conversations.append(conv.id, { role: 'user', content, ...(files.length ? { attachments: files } : {}) });
     this.emit(conv.id, { type: 'user', content, attachments: files, title: conv.title });
+    return this.runConversation(conv, opts);
+  }
 
+  // One agent turn over the conversation as it stands on disk (the user's
+  // message already appended). Shared by send() and resume().
+  async runConversation(conv, opts = {}) {
+    const c = this.config();
+    const preset = this.preset();
+    const model = c.model || preset.model;
     const controller = new AbortController();
     this.runs.set(conv.id, controller);
     const emit = (ev) => this.emit(conv.id, ev);
@@ -365,8 +451,11 @@ class AiService {
       const result = await runTurn({
         provider, model, conversation: conv, ctx: this.toolContext(conv.id),
         permit: (call) => this.permit(call, opts.permission), emit, signal: controller.signal,
-        maxSteps: Math.max(1, Math.min(500, Number(c.maxSteps) || 12))
+        maxSteps: Math.max(1, Math.min(500, Number(c.maxSteps) || 12)),
+        context: { budget: this.contextBudget(), calibration: this.calibration(), compactWithModel: c.compactWithModel !== false }
       });
+      // A server that went away mid-task: the renderer polls and resumes.
+      if (result && result.error && result.retryable) emit({ type: 'offline', message: result.error, local: !!preset.local });
       emit({ type: 'done', ...result });
       return { conversationId: conv.id, ...result };
     } catch (err) {
@@ -474,6 +563,16 @@ class AiService {
     ipcMain.handle('ai:queue', (_e, id) => this.queue(id));
     ipcMain.handle('ai:unqueue', (_e, id, index) => this.unqueue(id, Number(index)));
     ipcMain.handle('ai:pin', (_e, on) => this.setPinned(on));
+    ipcMain.handle('ai:probe', () => this.probe());
+    ipcMain.handle('ai:resume', (_e, id) => this.resume(String(id || '')));
+    ipcMain.handle('ai:compact', (_e, id) => this.compact(String(id || '')));
+    ipcMain.handle('ai:context', (_e, id) => {
+      try {
+        const conv = this.conversations.get(String(id || ''));
+        const prep = ctxbuf.prepare(conv, { budget: this.contextBudget(), cpt: this.calibration().cpt });
+        return { tokens: prep.tokens, budget: this.contextBudget(), compacted: !!conv.summary, compactions: conv.compactions || 0 };
+      } catch { return null; }
+    });
     ipcMain.on('ai:web-op:result', (_e, { opId, result }) => {
       const p = this.pendingWebOps.get(opId);
       if (!p) return;

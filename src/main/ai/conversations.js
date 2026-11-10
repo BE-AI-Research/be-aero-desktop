@@ -69,6 +69,18 @@ class Conversations {
     return c;
   }
 
+  // Record a compaction: `summary` stands in for messages[0..compactedAt).
+  // The messages stay on disk and in the UI; only the request shrinks.
+  setSummary(id, summary, compactedAt) {
+    const c = this.get(id);
+    c.summary = String(summary || '');
+    c.compactedAt = Math.max(0, Math.min(c.messages.length, Number(compactedAt) || 0));
+    c.compactions = (c.compactions || 0) + 1;
+    c.updatedAt = Date.now();
+    this.save(c);
+    return c;
+  }
+
   rename(id, title) {
     const c = this.get(id);
     c.title = titleFrom(title);

@@ -54,6 +54,16 @@
       return;
     }
     const AeroDockM = window.AeroDock;
+    // Taskbar semantics: one window that is already in front -> minimize it;
+    // minimized -> restore; otherwise bring it forward (and cycle when the
+    // app has several windows).
+    if (tile.windows.length === 1) {
+      const w = tile.windows[0];
+      if (w.fg && !w.min) { await aero.taskAction('minimize', w.hwnd); setTimeout(() => { lastKey = ''; refresh(); }, 250); return; }
+      await aero.taskAction('activate', w.hwnd);
+      setTimeout(() => { lastKey = ''; refresh(); }, 250);
+      return;
+    }
     const idx = cycle.get(tile.key) || 0;
     const target = AeroDockM.clickTarget(tile, idx);
     cycle.set(tile.key, idx + 1);
@@ -66,7 +76,7 @@
     const tiles = window.AeroDock.buildDock(windows, pinnedApps);
 
     const key = JSON.stringify([
-      tiles.map((t) => [t.key, t.pinned, t.running, t.windows.map((w) => [w.hwnd, w.min])]),
+      tiles.map((t) => [t.key, t.pinned, t.running, t.windows.map((w) => [w.hwnd, w.min, w.fg])]),
       minimizedWidgets.map((w) => [w.id, w.name, w.favicon])
     ]);
     if (key === lastKey) return;

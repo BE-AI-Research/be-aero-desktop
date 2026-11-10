@@ -306,10 +306,19 @@
     });
     // The AI chat parks in the dock too, under a sparkle.
     if (aiMinimized) parked.push({ id: '__ai__', name: 'AI assistant', url: '', favicon: null, glyph: '\u2728' });
+    // Built-in widgets the user minimized.
+    for (const p of parkedBuiltins) parked.push({ id: `__w:${p.id}`, name: p.name, url: '', favicon: null, glyph: p.glyph });
     window.AeroTasks.setMinimizedWidgets(parked);
   }
   let lastWebWidgets = [];
   let aiMinimized = false;
+  let parkedBuiltins = [];
+  function setParkedWidgets(list) {
+    const next = Array.isArray(list) ? list : [];
+    if (JSON.stringify(next) === JSON.stringify(parkedBuiltins)) return;
+    parkedBuiltins = next;
+    pushMinimizedToDock();
+  }
   function setAiMinimized(on) {
     if (aiMinimized === !!on) return;
     aiMinimized = !!on;
@@ -513,6 +522,7 @@
   window.AeroExtensions = {
     focusWebWidget,
     setAiMinimized,
+    setParkedWidgets,
     init, renderPlugins, renderPanes, renderWebWidgets, onTelemetry, onTheme,
     plugins: () => plugins,
     panes: () => panes

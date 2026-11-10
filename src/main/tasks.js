@@ -37,6 +37,7 @@ public class WinEnum {
   [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
   [DllImport("user32.dll")] public static extern int GetWindowLong(IntPtr h, int idx);
   [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr h);
+  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
   [DllImport("dwmapi.dll")] public static extern int DwmGetWindowAttribute(IntPtr h, int attr, out int v, int size);
   [DllImport("user32.dll")] public static extern bool ShowWindowAsync(IntPtr h, int cmd);
   [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
@@ -76,6 +77,7 @@ while ($true) {
       $null = $list.Add([PSCustomObject]@{
         hwnd = [int64]$h; title = $title; pid = $wpid
         exe = $proc.Path; min = [WinEnum]::IsIconic($h)
+        fg = ($h -eq [WinEnum]::GetForegroundWindow())
       })
       $true
     }
@@ -186,7 +188,8 @@ class TaskWindows {
         title: String(r.title).slice(0, 120),
         pid: Number(r.pid) || 0,
         exe: typeof r.exe === 'string' ? r.exe : null,
-        min: !!r.min
+        min: !!r.min,
+        fg: !!r.fg
       }));
   }
 

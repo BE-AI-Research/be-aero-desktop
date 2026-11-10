@@ -213,7 +213,7 @@ test('round-2 tools validate and route through the context', async () => {
   assert.strictEqual(tools.categoryOf('exec_capture'), 'control');
   const calls = [];
   const ctx = {
-    tasks: { action: async (n, id) => { calls.push([n, id]); return true; } },
+    windows: { action: async (n, id) => { calls.push([n, id]); return true; } },
     sendKeys: async (a) => { calls.push(['keys', a]); return { ok: true }; },
     clipboard: { read: () => 'clip', write: (t) => calls.push(['clip', t]) },
     webOp: async (id, op, args) => ({ ok: true, id, op, args })

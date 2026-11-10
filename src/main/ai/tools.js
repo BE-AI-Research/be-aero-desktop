@@ -69,6 +69,17 @@ const TOOLS = [
     run: async (_in, ctx) => ctx.telemetry()
   },
   {
+    name: 'media_status', category: 'read',
+    description: 'What is playing on this machine right now (any media app): title, artist, album, app, playback status, position, volume when known.',
+    input_schema: obj({}),
+    run: async (_in, ctx) => {
+      if (!ctx.media) return { error: 'media control is not available' };
+      const info = await ctx.media.info();
+      if (info && info.thumb) { const { thumb: _omit, ...rest } = info; return rest; }
+      return info;
+    }
+  },
+  {
     name: 'search', category: 'read',
     description: 'Search the desktop index (installed apps, files, folders, settings pages) the way the Aero Search launcher does. Returns matching items with the exact "path" to pass to launch().',
     input_schema: obj({ query: str('What to search for'), limit: num('Max results (default 12)') }, ['query']),
@@ -85,7 +96,7 @@ const TOOLS = [
     description: 'Applications currently running (what the dock shows), with the ids needed to focus or close them.',
     input_schema: obj({}),
     run: async (_in, ctx) => {
-      const list = await ctx.tasks.list();
+      const list = await ctx.windows.list();
       const byApp = new Map();
       for (const w of list) {
         const key = (w.exe || '').toLowerCase();
@@ -138,6 +149,15 @@ const TOOLS = [
     run: async (input, ctx) => ctx.webOp(input.id, 'screenshot', {})
   },
   // ------------------------------------------------------------- control
+  {
+    name: 'media_control', category: 'control',
+    description: 'Control media playback on this machine: play, pause, toggle (play/pause), next, prev, stop, volup, voldown, mute. Works on whatever app is playing (Spotify, a browser, a player).',
+    input_schema: obj({ action: { type: 'string', enum: ['play', 'pause', 'toggle', 'next', 'prev', 'stop', 'volup', 'voldown', 'mute'], description: 'The transport or volume action' } }, ['action']),
+    run: async (input, ctx) => {
+      if (!ctx.media) return { error: 'media control is not available' };
+      return { ok: !!(await ctx.media.action(input.action)) };
+    }
+  },
   {
     name: 'set_settings', category: 'control',
     description: 'Change settings. Pass a partial object that is merged in, e.g. {"theme":{"preset":"midnight"}}, {"weather":{"city":"Berlin"}}, {"dock":"left"}, {"use24h":true}, {"locked":true}. Allowed sections: theme, dock, widgets, weather, use24h, locked, alwaysOnTop, clock, telemetry, opacity, width, search, webWidgets, scratchpad.',
@@ -194,13 +214,13 @@ const TOOLS = [
     name: 'focus_app', category: 'control',
     description: 'Bring a running application window to the front (id from list_running_apps).',
     input_schema: obj({ id: num('Window id') }, ['id']),
-    run: async (input, ctx) => ({ ok: !!(await ctx.tasks.action('focus', input.id)) })
+    run: async (input, ctx) => ({ ok: !!(await ctx.windows.action('focus', input.id)) })
   },
   {
     name: 'close_app', category: 'control',
     description: 'Ask a running application window to close (id from list_running_apps).',
     input_schema: obj({ id: num('Window id') }, ['id']),
-    run: async (input, ctx) => ({ ok: !!(await ctx.tasks.action('close', input.id)) })
+    run: async (input, ctx) => ({ ok: !!(await ctx.windows.action('close', input.id)) })
   },
   {
     name: 'create_web_widget', category: 'control',
@@ -274,19 +294,19 @@ const TOOLS = [
     name: 'minimize_app', category: 'control',
     description: 'Minimize a running application window (id from list_running_apps).',
     input_schema: obj({ id: num('Window id') }, ['id']),
-    run: async (input, ctx) => ({ ok: !!(await ctx.tasks.action('minimize', input.id)) })
+    run: async (input, ctx) => ({ ok: !!(await ctx.windows.action('minimize', input.id)) })
   },
   {
     name: 'maximize_app', category: 'control',
     description: 'Maximize a running application window (id from list_running_apps).',
     input_schema: obj({ id: num('Window id') }, ['id']),
-    run: async (input, ctx) => ({ ok: !!(await ctx.tasks.action('maximize', input.id)) })
+    run: async (input, ctx) => ({ ok: !!(await ctx.windows.action('maximize', input.id)) })
   },
   {
     name: 'restore_app', category: 'control',
     description: 'Restore a minimized or maximized application window to normal (id from list_running_apps).',
     input_schema: obj({ id: num('Window id') }, ['id']),
-    run: async (input, ctx) => ({ ok: !!(await ctx.tasks.action('restore', input.id)) })
+    run: async (input, ctx) => ({ ok: !!(await ctx.windows.action('restore', input.id)) })
   },
   {
     name: 'send_keys', category: 'control',

@@ -5,11 +5,15 @@
 (function () {
   'use strict';
 
-  const DEFAULT_H = { toolbar: 30, search: 48, clock: 304, weather: 144, telemetry: 220, tasks: 64, scratchpad: 224 };
+  const DEFAULT_H = { toolbar: 30, search: 48, clock: 304, weather: 144, telemetry: 220, tasks: 64, media: 132, scratchpad: 224 };
   const MIN = {
     toolbar: [180, 30], search: [200, 44], clock: [150, 150], weather: [220, 110],
-    telemetry: [200, 130], tasks: [140, 54], scratchpad: [200, 120]
+    telemetry: [200, 130], tasks: [140, 54], media: [220, 100], scratchpad: [200, 120]
   };
+  // Web widgets that have never been placed open in the MIDDLE of the home
+  // display (cascaded), not in the sidebar column: they are content panes.
+  const WEB_W = 560;
+  const WEB_H = 380;
   const MAX_H = 1200;
   const GAP = 18;
   const COL_W = 304;
@@ -63,15 +67,49 @@
     const home = (settings && settings.homeRect) || { x: 0, y: 0, w: window.innerWidth, h: window.innerHeight };
     const x = settings.freeFrom === 'left' ? home.x + GAP : home.x + home.w - COL_W - GAP;
     let y = home.y + 16;
+    let cascade = 0;
     for (const el of items()) {
       if (el.classList.contains('hidden')) continue;
       const k = keyOf(el);
+      if (k.startsWith('web:')) {
+        const w = Math.min(WEB_W, Math.max(320, Math.floor(home.w * 0.45)));
+        const h = Math.min(WEB_H, Math.max(240, Math.floor(home.h * 0.45)));
+        out[k] = { x: Math.round(home.x + (home.w - w) / 2 + cascade * 28), y: Math.round(home.y + (home.h - h) / 2 + cascade * 28), w, h };
+        cascade++;
+        continue;
+      }
       const docked = (layoutOf('docked')[k] || {}).h;
       const h = docked || DEFAULT_H[k] || 200;
       out[k] = { x, y, w: COL_W, h };
       y += h + GAP;
     }
     return out;
+  }
+
+  // Free-form stacking: the most recently touched widget is on top. Order
+  // is saved with the layout ('_z'), so it survives restarts.
+  function zOrder() {
+    const saved = layoutOf('free');
+    return Array.isArray(saved._z) ? saved._z.slice() : [];
+  }
+  function applyZ() {
+    if (!isFree()) { for (const el of items()) el.style.zIndex = ''; return; }
+    const order = zOrder();
+    for (const el of items()) {
+      const k = keyOf(el);
+      const i = order.indexOf(k);
+      el.style.zIndex = String(10 + (i < 0 ? 0 : i + 1));
+    }
+  }
+  function bringToFront(el) {
+    if (!isFree()) return;
+    const k = keyOf(el);
+    const order = zOrder().filter((x) => x !== k);
+    order.push(k);
+    pending.free._z = order;
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(flushSave, 120);
+    applyZ();
   }
 
   function apply() {
@@ -101,6 +139,7 @@
         Object.assign(el.style, { left: '', top: '', width: '', height: h && k !== 'toolbar' ? `${clamp(h, minH, MAX_H)}px` : '' });
       }
     }
+    applyZ();
     positionSettings();
     if (hooks.onResize) hooks.onResize();
   }
@@ -163,6 +202,7 @@
   const snap = (v) => (settings.snapToGrid ? Math.round(v / GRID) * GRID : Math.round(v));
 
   function startMove(e, el) {
+    bringToFront(el);
     if (settings && settings.locked) return;
     const k = keyOf(el);
     const x0 = el.offsetLeft;

@@ -38,6 +38,8 @@ let panes = null;
 let apiServer = null;
 let peerResolver = null;
 let linuxTasks = null;
+let mediaCtl = null;
+let voice = null;
 let aiService = null;
 let notifyCenter = null;
 let dockHotkey = null;       // the accelerator actually registered for the dock
@@ -82,6 +84,11 @@ protocol.registerSchemesAsPrivileged([{
 // `be-aero-desktop --doctor` prints platform diagnostics and exits - the
 // first thing to ask for when a Linux desktop misbehaves. It must run even
 // while the app itself is running, so it skips the single-instance lock.
+// `--user-data-dir=<path>` keeps a second copy (a dev instance beside the
+// installed app) on its own settings, conversations and single-instance lock.
+const USER_DATA_ARG = process.argv.find((a) => a.startsWith('--user-data-dir='));
+if (USER_DATA_ARG) app.setPath('userData', require('path').resolve(USER_DATA_ARG.slice('--user-data-dir='.length)));
+
 const DOCTOR = process.argv.includes('--doctor');
 if (DOCTOR) {
   app.whenReady().then(() => {
@@ -624,6 +631,7 @@ function updateSettings(patch) {
   }
   if (patch.telemetry && ('interval' in patch.telemetry || 'metrics' in patch.telemetry)) startTelemetry();
   if (spotlight && patch.theme) spotlight.applyTheme && spotlight.applyTheme(s.theme);
+  if (patch.spellcheck) applySpellcheck();
   if (patch.appDock && typeof patch.appDock === 'object' && 'hotkey' in patch.appDock) {
     applyDockHotkey(s.appDock.hotkey);
   }
@@ -1215,6 +1223,15 @@ ipcMain.handle('tasks:action', (_e, name, hwnd) => {
   if (linuxTasks) return linuxTasks.action(name, hwnd);
   return false;
 });
+// Linux dock helper (GNOME Shell extension) status and install.
+ipcMain.handle('tasks:source', () => (linuxTasks ? linuxTasks.status() : { source: process.platform === 'win32' ? 'win32' : 'none' }));
+ipcMain.handle('tasks:install-helper', async () => {
+  if (!linuxTasks) return { ok: false, error: 'Linux only' };
+  const from = app.isPackaged
+    ? path.join(process.resourcesPath, 'gnome-extension', require('./tasks-linux').EXT_UUID)
+    : path.join(__dirname, '..', '..', 'linux', 'gnome-extension', require('./tasks-linux').EXT_UUID);
+  return linuxTasks.installHelper(from);
+});
 ipcMain.handle('tasks:icon', async (_e, exe) => {
   if (typeof exe !== 'string' || !exe) return null;
   const key = exe.toLowerCase();
@@ -1520,8 +1537,64 @@ ipcMain.on('shell:open', (_e, url) => {
 // ---------------------------------------------------------------- Lifecycle
 // Links a widget page opens (target=_blank and friends) belong in the real
 // browser, never in a new app window.
+// Right-click menu for any page we host (the sidebar's own inputs and the
+// web widgets): spelling suggestions first, then the usual edit verbs, link
+// and image actions, and navigation for guests.
+function showContextMenu(contents, params, isGuest) {
+  const tpl = [];
+  if (params.misspelledWord) {
+    for (const sgg of (params.dictionarySuggestions || []).slice(0, 6)) {
+      tpl.push({ label: sgg, click: () => contents.replaceMisspelling(sgg) });
+    }
+    if (!params.dictionarySuggestions || !params.dictionarySuggestions.length) tpl.push({ label: 'No suggestions', enabled: false });
+    tpl.push({ label: 'Add to dictionary', click: () => contents.session.addWordToSpellCheckerDictionary(params.misspelledWord) });
+    tpl.push({ type: 'separator' });
+  }
+  if (params.isEditable) {
+    tpl.push({ label: 'Undo', role: 'undo' }, { label: 'Redo', role: 'redo' }, { type: 'separator' },
+      { label: 'Cut', role: 'cut', enabled: params.editFlags.canCut }, { label: 'Copy', role: 'copy', enabled: params.editFlags.canCopy },
+      { label: 'Paste', role: 'paste', enabled: params.editFlags.canPaste }, { label: 'Select all', role: 'selectAll' });
+  } else if (params.selectionText) {
+    tpl.push({ label: 'Copy', role: 'copy' });
+    tpl.push({ label: `Search the web for “${params.selectionText.trim().slice(0, 30)}${params.selectionText.trim().length > 30 ? '…' : ''}”`,
+      click: () => shell.openExternal(require('./spotlight').webSearchUrl((store.get('search') || {}).webEngine, params.selectionText.trim())) });
+  }
+  if (params.linkURL) {
+    if (tpl.length) tpl.push({ type: 'separator' });
+    tpl.push({ label: 'Open link in browser', click: () => shell.openExternal(params.linkURL) });
+    tpl.push({ label: 'Copy link address', click: () => require('electron').clipboard.writeText(params.linkURL) });
+  }
+  if (params.hasImageContents && params.srcURL) {
+    if (tpl.length) tpl.push({ type: 'separator' });
+    tpl.push({ label: 'Copy image address', click: () => require('electron').clipboard.writeText(params.srcURL) });
+    tpl.push({ label: 'Open image in browser', click: () => shell.openExternal(params.srcURL) });
+  }
+  if (isGuest) {
+    if (tpl.length) tpl.push({ type: 'separator' });
+    tpl.push({ label: 'Back', enabled: contents.navigationHistory ? contents.navigationHistory.canGoBack() : contents.canGoBack(), click: () => (contents.navigationHistory ? contents.navigationHistory.goBack() : contents.goBack()) });
+    tpl.push({ label: 'Forward', enabled: contents.navigationHistory ? contents.navigationHistory.canGoForward() : contents.canGoForward(), click: () => (contents.navigationHistory ? contents.navigationHistory.goForward() : contents.goForward()) });
+    tpl.push({ label: 'Reload', click: () => contents.reload() });
+    tpl.push({ label: 'Open page in browser', click: () => shell.openExternal(contents.getURL()) });
+  }
+  if (!tpl.length) return;
+  Menu.buildFromTemplate(tpl).popup({ window: win || undefined });
+}
+
+function applySpellcheck() {
+  const sc = store.get('spellcheck') || {};
+  const langs = Array.isArray(sc.languages) && sc.languages.length ? sc.languages : [app.getLocale() || 'en-US'];
+  for (const ses of [session.defaultSession, session.fromPartition('persist:webwidgets')]) {
+    try {
+      ses.setSpellCheckerEnabled(sc.enabled !== false);
+      if (process.platform !== 'darwin') ses.setSpellCheckerLanguages(langs.filter((l) => ses.availableSpellCheckerLanguages.includes(l)).length ? langs.filter((l) => ses.availableSpellCheckerLanguages.includes(l)) : ['en-US']);
+    } catch (err) { console.warn('spellcheck setup:', err.message); }
+  }
+}
+
 app.on('web-contents-created', (_e, contents) => {
-  if (contents.getType() !== 'webview') return;
+  const isGuest = contents.getType() === 'webview';
+  contents.on('context-menu', (_ev, params) => showContextMenu(contents, params, isGuest));
+  if (!isGuest) return;
   contents.setWindowOpenHandler(({ url }) => {
     if (/^https?:/i.test(url)) shell.openExternal(url);
     return { action: 'deny' };
@@ -1661,6 +1734,17 @@ app.whenReady().then(() => {
     notifyCenter.add({ source: 'web', sourceId: String(id || ''), sourceName: String(name || ''), title, body, icon });
   });
 
+  // OS-wide media controller (widget + AI tools) and offline voice input.
+  mediaCtl = new (require('./media').MediaController)();
+  ipcMain.handle('media:info', () => mediaCtl.info());
+  ipcMain.handle('media:action', (_e, name) => mediaCtl.action(String(name || '')));
+  voice = new (require('./voice').Voice)({
+    emit: (ev) => { if (win && !win.isDestroyed()) win.webContents.send('ai:voice', ev); }
+  });
+  ipcMain.handle('ai:voice-available', () => voice.available());
+  ipcMain.handle('ai:voice-start', () => voice.start());
+  ipcMain.handle('ai:voice-stop', () => voice.stop());
+
   aiService = new (require('./ai').AiService)({
     userDataDir: app.getPath('userData'),
     store,
@@ -1669,6 +1753,7 @@ app.whenReady().then(() => {
     spotlight,
     plugins: () => pluginList,
     telemetry: () => telemetry.sample(telemetryOpts()),
+    media: { info: () => mediaCtl.info(), action: (name) => mediaCtl.action(name) },
     tasks: {
       list: () => (taskWindows ? taskWindows.list() : linuxTasks ? linuxTasks.list() : Promise.resolve([])),
       action: (name, id) => (taskWindows ? taskWindows.action(name, id) : linuxTasks ? linuxTasks.action(name, id) : false)
@@ -1721,6 +1806,7 @@ app.whenReady().then(() => {
   // Downloads started inside web widgets land in the user's Downloads folder
   // under a non-clobbering name, with a notification when they finish. Without
   // this handler they would silently stall in a frameless app.
+  applySpellcheck();
   const widgetSession = session.fromPartition('persist:webwidgets');
   // Guest pages notify through the host's shim (notification center), so the
   // OS-level permission is refused - otherwise every site would toast twice.
@@ -1765,6 +1851,8 @@ app.on('before-quit', () => {
   clearInterval(updateTimer);
   clearInterval(mousePollTimer);
   isQuitting = true;
+  if (mediaCtl) mediaCtl.destroy();
+  if (voice) voice.stop();
   clearInterval(telemetryTimer);
   clearInterval(updateTimer);
   if (apiServer) apiServer.stop();

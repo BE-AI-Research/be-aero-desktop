@@ -30,36 +30,74 @@ function parseNetstat(text) {
   return null;
 }
 
+// Parse /proc/net/dev (Linux): per-interface counters; the loopback device
+// is left out so local traffic does not look like network use.
+function parseProcNetDev(text) {
+  let rx = 0;
+  let tx = 0;
+  let any = false;
+  for (const line of String(text).split(/\r?\n/)) {
+    const m = line.match(/^\s*([^\s:]+):\s*(.*)$/);
+    if (!m || m[1] === 'lo') continue;
+    const cols = m[2].trim().split(/\s+/).map(Number);
+    if (cols.length < 9 || cols.some((n) => Number.isNaN(n))) continue;
+    rx += cols[0];
+    tx += cols[8];
+    any = true;
+  }
+  return any ? { rx, tx } : null;
+}
+
 // Network rate is sampled asynchronously; sample() reports the latest value.
 const net = { last: null, rxRate: 0, txRate: 0, peak: 1, busy: false };
+function ingestCounters(now) {
+  if (!now) return;
+  const t = Date.now();
+  if (net.last) {
+    const dt = Math.max(0.2, (t - net.last.t) / 1000);
+    net.rxRate = Math.max(0, (now.rx - net.last.rx) / dt);
+    net.txRate = Math.max(0, (now.tx - net.last.tx) / dt);
+    // Decaying peak gives the gauge a sensible scale for this connection.
+    net.peak = Math.max(net.rxRate + net.txRate, net.peak * 0.98, 64 * 1024);
+  }
+  net.last = { ...now, t };
+}
 function pollNetwork() {
-  if (net.busy || process.platform !== 'win32') return;
+  if (net.busy) return;
+  if (process.platform === 'linux') {
+    net.busy = true;
+    fs.readFile('/proc/net/dev', 'utf8', (err, text) => {
+      net.busy = false;
+      if (!err) ingestCounters(parseProcNetDev(text));
+    });
+    return;
+  }
+  if (process.platform !== 'win32') return;
   net.busy = true;
   execFile('netstat', ['-e'], { windowsHide: true, timeout: 4000 }, (err, stdout) => {
     net.busy = false;
-    if (err) return;
-    const now = parseNetstat(stdout);
-    if (!now) return;
-    const t = Date.now();
-    if (net.last) {
-      const dt = Math.max(0.2, (t - net.last.t) / 1000);
-      net.rxRate = Math.max(0, (now.rx - net.last.rx) / dt);
-      net.txRate = Math.max(0, (now.tx - net.last.tx) / dt);
-      // Decaying peak gives the gauge a sensible scale for this connection.
-      net.peak = Math.max(net.rxRate + net.txRate, net.peak * 0.98, 64 * 1024);
-    }
-    net.last = { ...now, t };
+    if (!err) ingestCounters(parseNetstat(stdout));
   });
 }
 
+// Disk usage of one volume. Windows takes a drive letter ("C:"); elsewhere
+// an absolute mount point, with "/" standing in for a Windows-style default.
 function diskUsage(drive) {
   try {
-    const root = /^[a-z]:?$/i.test(drive || '') ? `${drive[0]}:\\` : (drive || 'C:\\');
+    let root;
+    let label;
+    if (process.platform === 'win32') {
+      root = /^[a-z]:?$/i.test(drive || '') ? `${drive[0]}:\\` : (drive || 'C:\\');
+      label = root.slice(0, 2).toUpperCase();
+    } else {
+      root = typeof drive === 'string' && drive.startsWith('/') ? drive : '/';
+      label = root;
+    }
     const st = fs.statfsSync(root);
     const total = st.blocks * st.bsize;
     const free = st.bavail * st.bsize;
     if (!total) return null;
-    return { drive: root.slice(0, 2).toUpperCase(), percent: pct(((total - free) / total) * 100),
+    return { drive: label, percent: pct(((total - free) / total) * 100),
       usedGB: (total - free) / 1024 ** 3, totalGB: total / 1024 ** 3 };
   } catch {
     return null;
@@ -98,4 +136,4 @@ function sample(opts = {}) {
   return out;
 }
 
-module.exports = { sample, parseNetstat, diskUsage };
+module.exports = { sample, parseNetstat, parseProcNetDev, diskUsage };
