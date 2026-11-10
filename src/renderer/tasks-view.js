@@ -197,6 +197,7 @@
       }
     }
 
+    if (window.AeroUac) AeroUac.renderTile(barEl);
     if (window.AeroNotify) AeroNotify.renderTile(barEl);
     if (!tiles.length && !minimizedWidgets.length && !window.AeroNotify) {
       // Wayland offers no way to list other applications' windows (that is a

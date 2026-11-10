@@ -1076,6 +1076,12 @@ webview.plugin-frame { background: #fff; }
 .ai-conn.wait { background: #fbbf24; }
 .ai-msg.ai-notice { align-self: center; font-size: 10.5px; font-style: italic; opacity: .7; background: transparent; padding: 2px 8px; }
 .ai-msg.ai-blocked { opacity: 1; font-style: normal; text-align: center; }
+/* UAC shield tile (dock) */
+.uac-tile .dock-ico { color: rgba(var(--text-rgb), .55); }
+.uac-tile.uac-open .dock-ico, .uac-tile.uac-busy .dock-ico { color: #fbbf24; }
+.uac-tile.uac-waiting .dock-ico { color: #fbbf24; animation: aero-uac-pulse 1s ease-in-out infinite; }
+.uac-tile.uac-weak .dock-ico { color: #f87171; }
+@keyframes aero-uac-pulse { 0%, 100% { filter: drop-shadow(0 0 0 transparent); } 50% { filter: drop-shadow(0 0 6px #fbbf24); } }
 .ai-evict { display: block; margin: 5px auto 2px; font-size: 11px; padding: 3px 10px; }
 
 /* Media controller widget */

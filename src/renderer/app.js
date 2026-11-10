@@ -84,6 +84,7 @@
   if (window.AeroAi) AeroAi.init({ aero });
   if (window.AeroMedia) AeroMedia.init({ aero });
   if (window.AeroPower) AeroPower.init({ aero });
+  if (window.AeroUac) AeroUac.init({ aero });
   if (window.AeroNotify) AeroNotify.init({
     aero,
     focusWebWidget: (id) => {
@@ -345,6 +346,8 @@
     $('set-snap').checked = !!s.snapToGrid;
     $('set-locked').checked = !!s.locked;
     setVal($('set-dock-align'), (s.dock && s.dock.align) || 'center');
+    $('set-dock-uac').checked = !s.appDock || s.appDock.uacShield !== false;
+    $('set-uac-row').classList.toggle('hidden', !navigator.userAgent.includes('Windows'));
     $('set-startup').checked = s.launchAtStartup;
     const aiCfg = s.ai || {};
     const aiEl = document.querySelector('.ai-widget');
@@ -1147,6 +1150,10 @@
   $('set-snap').addEventListener('change', (e) => aero.setSettings({ snapToGrid: e.target.checked }));
   $('set-locked').addEventListener('change', (e) => aero.setSettings({ locked: e.target.checked }));
   $('set-dock-align').addEventListener('change', (e) => aero.setSettings({ dock: { align: e.target.value } }));
+  $('set-dock-uac').addEventListener('change', async (e) => {
+    await aero.setSettings({ appDock: { uacShield: e.target.checked } });
+    if (window.AeroUac) AeroUac.setState(await aero.uacEnable(e.target.checked));
+  });
   $('btn-reset-layout').addEventListener('click', () => AeroLayout.reset());
   $('btn-settings-export').addEventListener('click', () => aero.exportSettings());
   $('btn-settings-import').addEventListener('click', () => aero.importSettings());

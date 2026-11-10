@@ -82,6 +82,15 @@ the final answer.
 - Dropped connections keep the existing protection: automatic retries, then waiting for
   the server and resuming your message.
 
+## UAC shield in the dock (Windows)
+A shield beside the notification bell shows User Account Control at a glance:
+- **Amber while an admin prompt is open**, and pulsing when Windows is holding a prompt back
+  (a program in the background asked); click it to show that prompt.
+- **Its menu sets the prompt level**, the same four positions as the Windows slider: always
+  notify, the Windows default, notify without dimming the desktop, or never notify (shown in
+  red). Changing it asks for approval once, and the result is checked back.
+- Turn it off under Settings > Dock.
+
 Installed Windows copies update automatically.
 
 ## Linux install / update

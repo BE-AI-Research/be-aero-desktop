@@ -107,6 +107,23 @@ while ($true) {
   } elseif ($cmd -eq 'setpos' -and $parts.Length -gt 5) {
     [WinEnum]::MoveWindow([IntPtr][int64]$parts[1], [int]$parts[2], [int]$parts[3], [int]$parts[4], [int]$parts[5], $true) | Out-Null
     [Console]::Out.WriteLine('ok')
+  } elseif ($cmd -eq 'uac') {
+    # UAC shield: is consent.exe (the elevation prompt) running, and does it
+    # have a visible window on this desktop (a prompt Windows held back)?
+    $cp = @(Get-Process consent -ErrorAction SilentlyContinue)
+    $script:uacHwnd = 0
+    if ($cp.Count -gt 0) {
+      $uacIds = @{}
+      foreach ($p in $cp) { $uacIds[[uint32]$p.Id] = $true }
+      $cbu = [WinEnum+EnumProc]{ param($h, $l)
+        $wpid = [uint32]0
+        [WinEnum]::GetWindowThreadProcessId($h, [ref]$wpid) | Out-Null
+        if ($uacIds.ContainsKey($wpid) -and [WinEnum]::IsWindowVisible($h)) { $script:uacHwnd = [int64]$h; return $false }
+        $true
+      }
+      [WinEnum]::EnumWindows($cbu, [IntPtr]::Zero) | Out-Null
+    }
+    [Console]::Out.WriteLine('{"count":' + $cp.Count + ',"hwnd":' + $script:uacHwnd + '}')
   } else {
     [Console]::Out.WriteLine('err')
   }

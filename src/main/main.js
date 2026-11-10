@@ -49,6 +49,7 @@ let dockSummoned = false;    // sidebar lifted above everything by the dock hotk
 let lastUpdateStatus = { state: 'idle' };
 let updateTimer = null;
 let taskWindows = null;
+let uacMonitor = null;
 const taskIconCache = new Map();
 let PLUGINS_DIR = null;
 
@@ -1298,6 +1299,43 @@ function dockKnowsExe(exe) {
 }
 let lastDockExes = new Set();
 
+ipcMain.handle('uac:state', () => (uacMonitor && (store.get('appDock') || {}).uacShield !== false ? uacMonitor.state() : { supported: false }));
+ipcMain.handle('uac:enable', (_e, on) => {
+  if (!uacMonitor) return { supported: false };
+  if (on) uacMonitor.start(); else uacMonitor.stop();
+  return on ? uacMonitor.state() : { supported: false };
+});
+// The shield's menu: status, bring a held-back prompt forward, the level.
+ipcMain.handle('uac:menu', async () => {
+  if (!uacMonitor) return false;
+  await uacMonitor.refreshLevel();
+  const st = uacMonitor.state();
+  const { LEVELS } = require('./uac');
+  const status = st.busy ? 'Waiting for you to approve the change…'
+    : st.waiting ? 'A UAC prompt is waiting' : st.open ? 'A UAC prompt is open' : `UAC: ${st.levelLabel}`;
+  const tell = (title, body) => { if (notifyCenter) notifyCenter.add({ source: 'system', title, body, toast: true }); };
+  const template = [
+    { label: status, enabled: false },
+    ...(st.waiting ? [{ label: 'Show the waiting prompt', click: () => uacMonitor.bringForward() }] : []),
+    { type: 'separator' },
+    { label: 'Prompt level (changing it asks for approval)', enabled: false },
+    ...Object.entries(LEVELS).map(([id, L]) => ({
+      label: L.label, type: 'radio', checked: st.level === id, enabled: !st.busy,
+      click: () => {
+        if (st.level === id) return;
+        uacMonitor.setLevel(id).then((r) => {
+          if (r.ok) tell('UAC level changed', `${L.label}.`);
+          else if (!r.cancelled) tell('UAC level not changed', r.error || 'Windows did not apply the change.');
+        });
+      }
+    })),
+    { type: 'separator' },
+    { label: 'Open Windows UAC settings…', click: () => { require('child_process').spawn('UserAccountControlSettings.exe', [], { detached: true, stdio: 'ignore' }).unref(); } }
+  ];
+  Menu.buildFromTemplate(template).popup({ window: win });
+  return true;
+});
+
 ipcMain.handle('tasks:list', async () => {
   const list = taskWindows ? await taskWindows.list()
     : linuxTasks ? await linuxTasks.list() : [];
@@ -1757,6 +1795,14 @@ app.whenReady().then(() => {
   startApi();
 
   if (process.platform === 'win32') taskWindows = new TaskWindows({ ownExePath: process.execPath });
+  // UAC shield: prompt status and the prompt level, for the dock tile.
+  if (taskWindows) {
+    uacMonitor = new (require('./uac').UacMonitor)({
+      taskWindows,
+      onChange: (st) => { if (win && !win.isDestroyed()) win.webContents.send('uac:update', st); }
+    });
+    if ((store.get('appDock') || {}).uacShield !== false) uacMonitor.start();
+  }
   // Linux cannot list other apps' windows (Wayland policy), but /proc shows
   // which applications RUN - the dock mirrors that instead.
   if (process.platform === 'linux') linuxTasks = new (require('./tasks-linux').LinuxTasks)();
