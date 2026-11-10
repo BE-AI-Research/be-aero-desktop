@@ -188,22 +188,7 @@ class Piper {
   // (Debian ships 1.51), which lacks espeak_TextToPhonemesWithTerminator, and
   // every request fails. Make each soname a real copy of the bundled library.
   repairLinuxLibs(platform = process.platform) {
-    if (platform !== 'linux') return [];
-    let names;
-    try { names = fs.readdirSync(this.binDir); } catch { return []; }
-    const fixed = [];
-    for (const n of names) {
-      const m = /^(lib[\w+-]+\.so)\.(\d+)\.[\d.]+$/.exec(n);
-      if (!m) continue;
-      const real = path.join(this.binDir, n);
-      try { if (!fs.lstatSync(real).isFile()) continue; } catch { continue; }
-      for (const alias of [`${m[1]}.${m[2]}`, m[1]]) {
-        const dest = path.join(this.binDir, alias);
-        if (fs.existsSync(dest)) continue;          // follows links: a broken link counts as missing
-        try { fs.rmSync(dest, { force: true }); fs.copyFileSync(real, dest); fixed.push(alias); } catch { /* read-only dir */ }
-      }
-    }
-    return fixed;
+    return require('./sonames').repairSonames(this.binDir, platform);
   }
 
   args(opts, outFile) {

@@ -118,3 +118,15 @@ test('Whisper session: phrases are transcribed in order with context, end after 
   assert.deepStrictEqual(calls, ['', 'phrase 1.'], 'second phrase primed with the first');
   assert.strictEqual(v.listening(), false);
 });
+
+test('soname repair covers Whisper libraries (libggml-base.so.0 style names)', () => {
+  const { repairSonames } = require('../src/main/sonames');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aero-sonames-'));
+  try {
+    for (const f of ['libwhisper.so.1.9.5', 'libggml.so.0.26.0', 'libggml-base.so.0.26.0', 'libggml-cpu-haswell.so', 'whisper-server']) fs.writeFileSync(path.join(dir, f), f);
+    const fixed = repairSonames(dir, 'linux').sort();
+    assert.deepStrictEqual(fixed, ['libggml-base.so', 'libggml-base.so.0', 'libggml.so', 'libggml.so.0', 'libwhisper.so', 'libwhisper.so.1']);
+    assert.strictEqual(fs.readFileSync(path.join(dir, 'libggml-base.so.0'), 'utf8'), 'libggml-base.so.0.26.0');
+    assert.deepStrictEqual(repairSonames(dir, 'linux'), []);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});

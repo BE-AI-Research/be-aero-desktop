@@ -1,6 +1,6 @@
 # BE-Aero Desktop v1.1.1
 
-Two Linux fixes: the media controller and Piper voices.
+Linux fixes for the media controller, Piper voices and Whisper dictation.
 
 ## Fixed
 
@@ -15,6 +15,9 @@ Two Linux fixes: the media controller and Piper voices.
   used the system's older espeak-ng instead, which Piper cannot work with. BE-Aero now
   makes sure Piper's own libraries are in place, repairing existing installs without a
   new download. If Piper still fails, the chat shows its full error.
+- **Whisper dictation on Linux** gets the same protection: its libraries are checked and
+  repaired before the speech server starts, and a server that cannot start now says why.
+  Whisper needs a system at least as new as Debian 12 or Ubuntu 22.04.
 
 Installed Windows copies update automatically (no change in behaviour on Windows).
 

@@ -146,6 +146,7 @@ class Whisper {
         fs.rmSync(stage, { recursive: true, force: true });
         fs.unlinkSync(archive);
         if (process.platform !== 'win32') { try { fs.chmodSync(this.serverPath(), 0o755); } catch { /* best effort */ } }
+        require('./sonames').repairSonames(this.binDir);
       }
       const m = this.modelPath(modelId);
       if (!fs.existsSync(m)) {
@@ -171,7 +172,8 @@ class Whisper {
   // Start (or reuse) the server for `model`. Resolves when it answers.
   async ensureServer(model) {
     const id = this.pickModel(model);
-    if (!id || !fs.existsSync(this.serverPath())) throw new Error('Whisper is not installed - download it in Settings > AI assistant > Voice.');
+    if (!id || !fs.existsSync(this.serverPath())) throw new Error('Whisper is not installed - download it in Settings > Voice input.');
+    if (!this.libsChecked) { this.libsChecked = true; require('./sonames').repairSonames(this.binDir); }
     this.touch();
     if (this.server && this.server.model === id && this.server.ready) return this.server;
     if (this.server && this.server.model === id && this.server.starting) return this.server.starting;
@@ -191,7 +193,7 @@ class Whisper {
     srv.starting = (async () => {
       const deadline = Date.now() + 60000;
       while (Date.now() < deadline) {
-        if (proc.exitCode !== null) throw new Error(`Whisper server exited: ${log.split(/\r?\n/).filter(Boolean).slice(-2).join(' ')}`);
+        if (proc.exitCode !== null) throw new Error(`Whisper server exited: ${log.split(/\r?\n/).map((l) => l.trim()).filter(Boolean).slice(-3).join(' | ') || `code ${proc.exitCode}`}`);
         try { const r = await fetch(`http://127.0.0.1:${port}/`); if (r.status) { srv.ready = true; return srv; } } catch { /* not yet */ }
         await new Promise((r) => setTimeout(r, 250));
       }
