@@ -17,6 +17,11 @@ Tasks now use the same scheduling model as BE-Code.
 - **Failing tasks pause themselves** after 3 failures in a row, with a notification. Each
   task shows its last result, and has pause/resume and a two-click delete.
 - **A runtime cap** (30 minutes by default) stops a run that hangs.
+- **Choose the model tasks run on.** Settings > AI assistant > "Model for scheduled tasks",
+  and each task can pick its own. Using the model another program on the same server
+  already has loaded avoids swapping models in and out.
+- **Read the result aloud.** A task can say its result on your speakers when it finishes,
+  handy for a morning briefing. Turn it on in the task's form; the assistant can set it too.
 - **Easier for the assistant.** Small local models now create tasks reliably, and the
   assistant can pause and resume tasks. Tasks it creates are marked "AI".
 

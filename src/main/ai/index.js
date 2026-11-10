@@ -84,6 +84,13 @@ class AiService {
       const last = [...conv.messages].reverse().find((m) => m.role === 'assistant' && m.content);
       this.d.notify(`Task "${task.name}" ${result.error ? 'failed' : 'finished'}`,
         result.error ? String(result.error) : String(last ? last.content : '').replace(/\s+/g, ' ').slice(0, 160));
+      // "Read the result aloud": the final reply, through the same voice and
+      // speech formatting as chat. Skipped when every reply is already read
+      // aloud (Settings > Voice), or it would be said twice.
+      const alreadySpoken = !!((this.config().voice || {}).speak);
+      if (task.readAloud && !alreadySpoken && !result.error && !result.stopped && last && this.d.speak) {
+        this.d.speak(`${task.name}. ${last.content}`);
+      }
     } catch { /* best effort */ }
     return { ...result, conversationId: convId };
   }

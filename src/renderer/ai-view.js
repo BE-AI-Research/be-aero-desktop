@@ -748,6 +748,7 @@
       <div class="ai-when-preview hint-text"></div>
       <div class="row">
         <select name="model" title="Model this task runs on" data-current="${esc(t.model || '')}"><option value="">Model: default for tasks</option>${t.model ? `<option value="${esc(t.model)}" selected>Model: ${esc(t.model)}</option>` : ''}</select>
+        <label class="check" title="Say the result on your speakers when the task finishes"><input type="checkbox" name="readAloud"${t.readAloud ? ' checked' : ''}> Read the result aloud</label>
       </div>
       <div class="row">
         <select name="conversationMode" title="Where the results go">
@@ -767,7 +768,7 @@
 
   function readForm(form, base) {
     const f = new FormData(form);
-    const out = { ...(base || {}), name: String(f.get('name')).trim(), prompt: String(f.get('prompt')).trim(), when: String(f.get('when')).trim(), conversationMode: f.get('conversationMode'), permission: f.get('permission'), model: String(f.get('model') || '') };
+    const out = { ...(base || {}), name: String(f.get('name')).trim(), prompt: String(f.get('prompt')).trim(), when: String(f.get('when')).trim(), conversationMode: f.get('conversationMode'), permission: f.get('permission'), model: String(f.get('model') || ''), readAloud: f.get('readAloud') === 'on' };
     delete out.schedule;
     for (const k of ['summary', 'nextRun', 'running', 'queued', 'enabled', 'lastStatus', 'whenError']) delete out[k];
     return out;
@@ -834,7 +835,7 @@
         : state === 'done' ? 'done' : state === 'paused' ? (t.failures >= 3 ? `paused after ${t.failures} failures` : 'paused')
         : t.nextRun ? `next ${fmtTime(t.nextRun)}` : 'not scheduled';
       const last = t.lastOutcome ? ` · last: ${t.lastOutcome}` : '';
-      const perm = (t.permission === 'allow' ? ' · autonomous' : t.permission === 'deny' ? ' · read-only' : '') + (t.model ? ` · ${t.model.split('/').pop()}` : '');
+      const perm = (t.permission === 'allow' ? ' · autonomous' : t.permission === 'deny' ? ' · read-only' : '') + (t.model ? ` · ${t.model.split('/').pop()}` : '') + (t.readAloud ? ' · read aloud' : '');
       row.innerHTML = `<button class="icon-btn t-state" title="${state === 'active' ? 'Pause' : 'Resume'}">${state === 'active' ? '⏸' : '▶'}</button>
         <div class="ai-task-main"><div class="ai-task-name">${esc(t.name)}${t.createdBy === 'agent' ? ' <span class="ai-task-by" title="Created by the assistant">AI</span>' : ''}</div>
         <div class="ai-task-meta">${esc(t.summary || t.when || '')} · ${esc(status)}${esc(last)}${perm}</div>
