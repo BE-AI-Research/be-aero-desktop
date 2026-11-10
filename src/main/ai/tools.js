@@ -389,9 +389,9 @@ const TOOLS = [
   },
   {
     name: 'browser_open', category: 'control',
-    description: "Open a URL in a new tab of the user's OS browser (Chrome, Edge or Brave, driven through DevTools with a dedicated BE-Aero profile) and return the page text and tab id. The way to browse the real web for the user.",
-    input_schema: obj({ url: str('http(s) URL') }, ['url']),
-    run: async (input, ctx) => ctx.browser('open', { url: input.url })
+    description: "Open a URL for the user in their OS browser and return the page text. By default it opens in the user's own browser (their main profile, signed in, with their bookmarks) - you get the text but cannot click or type there. Pass interact: true when you must click, type, scroll or read further in the page: it then opens in the assistant's own browser profile (Chrome, Edge or Brave, driven through DevTools) and returns a tab id for browser_elements / browser_click / browser_type.",
+    input_schema: obj({ url: str('http(s) URL'), interact: { type: 'boolean', description: 'true = open in the assistant browser profile so you can click/type in it' } }, ['url']),
+    run: async (input, ctx) => ctx.browser('open', { url: input.url, interact: !!input.interact })
   },
   {
     name: 'browser_read', category: 'read',

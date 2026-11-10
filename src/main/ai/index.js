@@ -494,6 +494,19 @@ class AiService {
       if (op === 'tabs') { const tabs = await b.tabs(); return { ok: true, browser: (b.exe || {}).name || b.info().browser, tabs: tabs.map((t) => ({ id: t.id, title: t.title, url: t.url })) }; }
       if (op === 'open') {
         if (!/^https?:\/\//i.test(args.url || '')) return { ok: false, error: 'http(s) URLs only' };
+        // The user's own browser and profile, unless the assistant has to
+        // act in the page: Chromium refuses DevTools control of the main
+        // profile, so clicking and typing need the assistant's profile.
+        if ((this.config().browserMode || 'main') === 'main' && !args.interact) {
+          await shell.openExternal(args.url);
+          let page = null;
+          try { page = await fetchPage(args.url); } catch { page = null; }
+          return {
+            ok: true, openedIn: "the user's own browser (main profile)", url: args.url,
+            ...(page && !page.error ? { title: page.title, text: page.text } : {}),
+            note: 'Opened in the user\'s own browser. You cannot click or type there; if you need to, call browser_open again with interact: true (the assistant browser profile).'
+          };
+        }
         const tab = await b.open(args.url);
         return { ...(await b.read(tab)), note: 'This browser runs with the BE-Aero profile; the user may need to sign in to sites once.' };
       }

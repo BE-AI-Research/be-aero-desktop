@@ -380,6 +380,7 @@
     $('set-ai-toolcalls').value = aiCfg.toolCalls || 'auto';
     $('set-ai-unload').value = aiCfg.unloadAfter || '1m';
     $('set-ai-evict').value = aiCfg.evictBlocking || 'ask';
+    $('set-ai-browser').value = aiCfg.browserMode || 'main';
     $('set-ai-memory').checked = aiCfg.memoryEnabled !== false;
     const vc = aiCfg.voice || {};
     if (window.__applyVoiceSettings) window.__applyVoiceSettings(vc);
@@ -604,6 +605,7 @@
   $('set-ai-toolcalls').addEventListener('change', (e) => aero.setSettings({ ai: { toolCalls: e.target.value } }));
   $('set-ai-unload').addEventListener('change', (e) => aero.setSettings({ ai: { unloadAfter: e.target.value } }));
   $('set-ai-evict').addEventListener('change', (e) => aero.setSettings({ ai: { evictBlocking: e.target.value } }));
+  $('set-ai-browser').addEventListener('change', (e) => aero.setSettings({ ai: { browserMode: e.target.value } }));
 
   // "Model for scheduled tasks": the server's models (fetched once per
   // section open), plus whatever is saved even if the list is unavailable.

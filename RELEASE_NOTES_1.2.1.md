@@ -82,6 +82,18 @@ the final answer.
 - Dropped connections keep the existing protection: automatic retries, then waiting for
   the server and resuming your message.
 
+## Also in this release
+- **The assistant opens pages in your own browser.** browser_open now uses your normal
+  browser and profile (signed in, with your bookmarks) instead of a separate empty profile
+  that looked like a private window. When the assistant needs to click or type in a page it
+  still uses its own profile, because browsers don't allow automating your main one.
+  Settings > AI assistant > "When the assistant opens a web page" can restore the old
+  behaviour.
+- **The notification panel is readable on any background.** It had no background at all
+  (a broken style), so it disappeared over matching wallpaper; it's now a frosted pane.
+- **Chat:** the edit / resend / delete buttons under messages are visible again.
+- **Linux:** the per-core CPU heatmap no longer flickers between 0% and 100%.
+
 ## UAC shield in the dock (Windows)
 A shield beside the notification bell shows User Account Control at a glance:
 - **Amber while an admin prompt is open**, and pulsing when Windows is holding a prompt back
