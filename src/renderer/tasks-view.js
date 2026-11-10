@@ -20,6 +20,8 @@
   let onRestoreWidget = null;
   const iconCache = new Map();     // exe -> dataURL|null
   const cycle = new Map();         // app key -> next window index for click-cycling
+  let drag = null;                 // pinned-tile drag in progress (refresh pauses meanwhile)
+  let suppressClick = false;
 
   const el = (tag, cls, parent, text) => {
     const e = document.createElement(tag);
@@ -70,8 +72,64 @@
     if (target) await aero.taskAction('activate', target.hwnd);
   }
 
+  // ---- Drag to reorder pinned tiles. Pointer events (not HTML5 drag) so it
+  // works the same in the frameless desktop-layer window; a 6 px threshold
+  // keeps plain clicks as clicks.
+  function startPinDrag(e, t, tile) {
+    if (e.button !== 0) return;
+    const sx = e.clientX;
+    const sy = e.clientY;
+    const onMove = (ev) => {
+      if (!drag) {
+        if (Math.hypot(ev.clientX - sx, ev.clientY - sy) < 6) return;
+        drag = { tile, el: t, marker: el('div', 'dock-drop-marker', barEl), index: -1 };
+        t.classList.add('dragging');
+        try { t.setPointerCapture(ev.pointerId); } catch { /* fine */ }
+      }
+      ev.preventDefault();
+      t.style.transform = `translate(${ev.clientX - sx}px, ${ev.clientY - sy}px)`;
+      // Slot among the OTHER pinned tiles, by pointer position.
+      const others = [...barEl.querySelectorAll('.dock-tile.pinned')].filter((x) => x !== t);
+      let index = others.length;
+      for (let i = 0; i < others.length; i++) {
+        const r = others[i].getBoundingClientRect();
+        const sameRow = ev.clientY < r.bottom && ev.clientY > r.top - 4;
+        if ((sameRow && ev.clientX < r.left + r.width / 2) || ev.clientY < r.top - 4) { index = i; break; }
+      }
+      drag.index = index;
+      const ref = others[index];
+      if (ref) barEl.insertBefore(drag.marker, ref);
+      else if (others.length) others[others.length - 1].after(drag.marker);
+      else barEl.prepend(drag.marker);
+    };
+    const onUp = async () => {
+      window.removeEventListener('pointermove', onMove, true);
+      window.removeEventListener('pointerup', onUp, true);
+      window.removeEventListener('pointercancel', onUp, true);
+      if (!drag) return;
+      const d = drag;
+      drag = null;
+      suppressClick = true;
+      setTimeout(() => { suppressClick = false; }, 0);
+      d.marker.remove();
+      d.el.classList.remove('dragging');
+      d.el.style.transform = '';
+      const next = window.AeroDock.reorderPinned(pinnedApps, d.tile.exe, d.index);
+      if (JSON.stringify(next) !== JSON.stringify(pinnedApps)) {
+        pinnedApps = next;
+        lastKey = '';
+        await aero.setSettings({ appDock: { pinned: next } });
+      }
+      refresh();
+    };
+    window.addEventListener('pointermove', onMove, true);
+    window.addEventListener('pointerup', onUp, true);
+    window.addEventListener('pointercancel', onUp, true);
+  }
+
   async function refresh() {
     if (!barEl || barEl.closest('.widget').classList.contains('hidden')) return;
+    if (drag) return;
     const windows = await aero.listTasks();
     const tiles = window.AeroDock.buildDock(windows, pinnedApps);
 
@@ -94,7 +152,13 @@
         dim: allMin
       });
       if (tile.windows.length > 1) el('span', 'dock-count', t, String(tile.windows.length));
-      t.addEventListener('click', () => onTileClick(tile));
+      if (tile.pinned) {
+        t.classList.add('pinned');
+        t.dataset.exe = tile.exe || '';
+        t.title += String.fromCharCode(10) + 'Drag to reorder';
+        t.addEventListener('pointerdown', (e) => startPinDrag(e, t, tile));
+      }
+      t.addEventListener('click', () => { if (!suppressClick) onTileClick(tile); });
       t.addEventListener('contextmenu', async (e) => {
         e.preventDefault();
         await aero.dockMenu({ key: tile.key, exe: tile.exe, name: tile.name, windows: tile.windows });

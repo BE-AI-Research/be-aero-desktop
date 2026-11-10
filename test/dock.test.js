@@ -85,3 +85,14 @@ test('a trampoline pin adopts the Store process with the same base name', () => 
   assert.ok(tiles[0].running);
   assert.strictEqual(tiles[0].windows[0].title, 'notes.txt');
 });
+
+test('reorderPinned moves one app and keeps the rest in order', () => {
+  const { reorderPinned } = require('../src/shared/dock');
+  const p = [{ exe: 'C:/a.exe' }, { exe: 'C:/b.exe' }, { exe: 'C:/c.exe' }, { exe: 'C:/d.exe' }];
+  const names = (l) => l.map((x) => x.exe.slice(3, 4)).join('');
+  assert.strictEqual(names(reorderPinned(p, 'C:/d.exe', 0)), 'dabc');
+  assert.strictEqual(names(reorderPinned(p, 'c:/A.EXE', 3)), 'bcda', 'case-insensitive, to the end');
+  assert.strictEqual(names(reorderPinned(p, 'C:/b.exe', 99)), 'acdb', 'clamped');
+  assert.strictEqual(names(reorderPinned(p, 'C:/x.exe', 0)), 'abcd', 'unknown app: unchanged');
+  assert.strictEqual(names(p), 'abcd', 'input untouched');
+});

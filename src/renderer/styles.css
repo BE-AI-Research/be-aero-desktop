@@ -1129,3 +1129,9 @@ webview.plugin-frame { background: #fff; }
 .power-note { font-size: 11px; opacity: .7; padding: 0 6px 8px; max-width: 220px; }
 .power-confirm { display: flex; gap: 6px; padding: 0 4px 2px; }
 .power-confirm .btn { flex: 1; }
+
+/* Drag to reorder pinned dock tiles */
+.dock-tile.pinned { touch-action: none; }
+.dock-tile.dragging { z-index: 5; opacity: .85; transition: none; cursor: grabbing; pointer-events: none; }
+.dock-tile.dragging:hover { transform: none; }
+.dock-drop-marker { width: 3px; height: 40px; align-self: center; margin: 0 -2px; border-radius: 2px; background: var(--accent); box-shadow: 0 0 8px var(--accent); }
