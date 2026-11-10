@@ -433,6 +433,12 @@
           <div id="dock-helper-status" class="hint"></div>
           <button id="btn-dock-helper" class="btn-small">Install GNOME dock helper</button>
         </div>
+        <label class="check"><input id="set-power-enabled" type="checkbox"> Power menu in the dock (lock, switch user, log off, sleep, restart, shut down)</label>
+        <label class="field-label">Power button side</label>
+        <select id="set-power-side">
+          <option value="right">Right end of the dock</option>
+          <option value="left">Left end of the dock</option>
+        </select>
         <label class="field-label">Dock icon alignment</label>
         <select id="set-dock-align">
           <option value="left">Left</option>
@@ -488,6 +494,7 @@
   <script src="media-view.js"></script>
   <script src="extensions.js"></script>
   <script src="tasks-view.js"></script>
+  <script src="power-view.js"></script>
   <script src="../shared/pagescripts.js"></script>
   <script src="webops.js"></script>
   <script src="ai-view.js"></script>

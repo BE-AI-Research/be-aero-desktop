@@ -82,6 +82,8 @@ const DEFAULTS = {
   },
   // Application dock widget. (The layout mode above is also called `dock`;
   // this object used to share that key and silently broke both.)
+  // Power button at the far end of the dock (lock / switch user / log off / sleep / restart / shut down).
+  powerMenu: { enabled: true, side: 'right' },
   appDock: {
     pinned: [],       // [{ exe, name }]
     align: 'center',  // 'left' | 'center' | 'right'

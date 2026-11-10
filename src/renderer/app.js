@@ -83,6 +83,7 @@
   // to the layout system so it gets a resize grip and remembered geometry.
   if (window.AeroAi) AeroAi.init({ aero });
   if (window.AeroMedia) AeroMedia.init({ aero });
+  if (window.AeroPower) AeroPower.init({ aero });
   if (window.AeroNotify) AeroNotify.init({
     aero,
     focusWebWidget: (id) => {
@@ -358,6 +359,11 @@
       AeroExtensions.setParkedWidgets(parkedIds.filter((id) => s.widgets[id] !== false && WIDGET_GLYPH[id]).map((id) => ({ id, name: WIDGET_NAME[id] || id, glyph: WIDGET_GLYPH[id] })));
     }
     $('set-spellcheck').checked = (s.spellcheck || {}).enabled !== false;
+    const pm = s.powerMenu || {};
+    $('set-power-enabled').checked = pm.enabled !== false;
+    $('set-power-side').value = pm.side === 'left' ? 'left' : 'right';
+    $('set-power-side').disabled = pm.enabled === false;
+    if (window.AeroPower) AeroPower.update(s);
     $('scratchpad').spellcheck = (s.spellcheck || {}).enabled !== false;
     if (window.AeroExtensions && AeroExtensions.setAiMinimized) AeroExtensions.setAiMinimized(!!aiCfg.minimized && aiCfg.enabled !== false && s.widgets.ai !== false);
     $('set-ai-enabled').checked = aiCfg.enabled !== false;
@@ -463,6 +469,8 @@
   if (zi) zi.addEventListener('click', () => aiZoom(0.1));
   if (zo) zo.addEventListener('click', () => aiZoom(-0.1));
   $('set-spellcheck').addEventListener('change', (e) => aero.setSettings({ spellcheck: { enabled: e.target.checked } }));
+  $('set-power-enabled').addEventListener('change', (e) => aero.setSettings({ powerMenu: { enabled: e.target.checked } }));
+  $('set-power-side').addEventListener('change', (e) => aero.setSettings({ powerMenu: { side: e.target.value } }));
 
   // Linux: say which window source the dock runs on and offer the GNOME helper.
   async function refreshDockHelper() {

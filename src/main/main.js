@@ -1219,6 +1219,10 @@ ipcMain.handle('displays:list', () => screen.getAllDisplays().map((d, i) => ({
   primary: d.id === screen.getPrimaryDisplay().id
 })));
 
+// ---------------------------------------------------------------- Power menu
+// Only the five fixed verbs reach the OS; the renderer never names a command.
+ipcMain.handle('power:action', (_e, action) => require('./power').runPower(String(action || '')));
+
 // ---------------------------------------------------------------- App dock
 ipcMain.handle('tasks:action', (_e, name, hwnd) => {
   if (taskWindows) return taskWindows.action(name, hwnd);

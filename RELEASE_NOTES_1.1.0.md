@@ -40,6 +40,9 @@ Installed Windows copies update automatically.
   focus and minimized state, click to focus or minimize, close. X11 sessions use
   `wmctrl`/`xprop`; without either the dock falls back to running applications as before.
   Settings shows which source is active and can install the helper.
+- **Power menu in the dock.** A power button at the far left or right end of the dock,
+  apart from the app icons, opens Lock, Switch user, Log off, Sleep, Restart and Shut down;
+  Log off, Restart and Shut down ask first. Switch it off or move it in Settings > Widgets.
 - **Minimize any widget to the dock.** Hover a widget for its minimize button; it parks in
   the dock as a glyph tile and comes back with a click (web widgets and the AI chat already
   did this).
