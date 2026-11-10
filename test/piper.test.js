@@ -108,3 +108,21 @@ test('persistent --json-input worker: requests are answered by output path, mode
     fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
+
+test('Linux library repair: missing or broken sonames become copies of the bundled libraries', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aero-piper-libs-'));
+  try {
+    const p = new Piper({ dir });
+    fs.mkdirSync(p.binDir, { recursive: true });
+    fs.writeFileSync(path.join(p.binDir, 'libespeak-ng.so.1.52.0.1'), 'ESPEAK');
+    fs.writeFileSync(path.join(p.binDir, 'libpiper_phonemize.so.1.2.0'), 'PHON');
+    fs.writeFileSync(path.join(p.binDir, 'libpiper_phonemize.so.1'), 'already-there');
+    fs.writeFileSync(path.join(p.binDir, 'libonnxruntime.so.1.14.1'), 'ORT');
+    const fixed = p.repairLinuxLibs('linux').sort();
+    assert.deepStrictEqual(fixed, ['libespeak-ng.so', 'libespeak-ng.so.1', 'libonnxruntime.so', 'libonnxruntime.so.1', 'libpiper_phonemize.so']);
+    assert.strictEqual(fs.readFileSync(path.join(p.binDir, 'libespeak-ng.so.1'), 'utf8'), 'ESPEAK');
+    assert.strictEqual(fs.readFileSync(path.join(p.binDir, 'libpiper_phonemize.so.1'), 'utf8'), 'already-there', 'existing names untouched');
+    assert.deepStrictEqual(p.repairLinuxLibs('linux'), [], 'second run is a no-op');
+    assert.deepStrictEqual(p.repairLinuxLibs('win32'), []);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});

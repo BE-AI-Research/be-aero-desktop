@@ -142,6 +142,7 @@ class Piper {
     fs.unlinkSync(archive);
     if (process.platform !== 'win32') {
       for (const f of ['piper', 'espeak-ng', 'piper_phonemize']) { try { fs.chmodSync(path.join(this.binDir, f), 0o755); } catch { /* optional */ } }
+      this.repairLinuxLibs();
     }
     if (!fs.existsSync(this.binPath())) throw new Error('Piper unpacked without its executable');
     return this.status();
@@ -181,6 +182,30 @@ class Piper {
     return ok;
   }
 
+  // Piper and its phonemizer load libespeak-ng.so.1 / libpiper_phonemize.so.1
+  // by soname, which the archive provides only as symlinks. If one is missing
+  // or broken, the loader quietly takes the distribution's own espeak-ng
+  // (Debian ships 1.51), which lacks espeak_TextToPhonemesWithTerminator, and
+  // every request fails. Make each soname a real copy of the bundled library.
+  repairLinuxLibs(platform = process.platform) {
+    if (platform !== 'linux') return [];
+    let names;
+    try { names = fs.readdirSync(this.binDir); } catch { return []; }
+    const fixed = [];
+    for (const n of names) {
+      const m = /^(lib[\w+-]+\.so)\.(\d+)\.[\d.]+$/.exec(n);
+      if (!m) continue;
+      const real = path.join(this.binDir, n);
+      try { if (!fs.lstatSync(real).isFile()) continue; } catch { continue; }
+      for (const alias of [`${m[1]}.${m[2]}`, m[1]]) {
+        const dest = path.join(this.binDir, alias);
+        if (fs.existsSync(dest)) continue;          // follows links: a broken link counts as missing
+        try { fs.rmSync(dest, { force: true }); fs.copyFileSync(real, dest); fixed.push(alias); } catch { /* read-only dir */ }
+      }
+    }
+    return fixed;
+  }
+
   args(opts, outFile) {
     const a = ['--model', this.voicePath(opts.voice), '--config', this.configPath(opts.voice),
       '--length_scale', String(lengthScaleFor(opts.rate)),
@@ -205,6 +230,7 @@ class Piper {
   workerKey(o) { return [o.voice, lengthScaleFor(o.rate), o.noiseScale, o.noiseW, o.sentenceSilence, o.speaker].join('|'); }
 
   getWorker(opts) {
+    if (!this.libsChecked) { this.libsChecked = true; this.repairLinuxLibs(); }
     const key = this.workerKey(opts);
     let w = this.workers.get(key);
     if (w && w.proc.exitCode === null) { this.touch(key); return w; }
@@ -279,7 +305,10 @@ class Piper {
         // The persistent mode failed (older build, crash): one process per request.
         this.killWorker(this.workerKey(opts));
         const r = await this.oneShot(t, opts, out);
-        if (!r.ok || !fs.existsSync(out)) throw new Error(`Piper failed: ${(r.log || w.log || 'no output').split(/\r?\n/).filter(Boolean).slice(-1)[0] || 'unknown error'}`);
+        if (!r.ok || !fs.existsSync(out)) {
+          const lines = String(r.log || w.log || '').split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+          throw new Error(`Piper failed: ${lines.slice(-3).join(' | ') || 'no output'}`);
+        }
       }
       // piper prints the path when it starts writing on some builds; wait for a stable size.
       let last = -1;

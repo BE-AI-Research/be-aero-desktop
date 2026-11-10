@@ -1,6 +1,6 @@
 # BE-Aero Desktop v1.1.1
 
-A fix for the media controller on Linux.
+Two Linux fixes: the media controller and Piper voices.
 
 ## Fixed
 
@@ -10,6 +10,11 @@ A fix for the media controller on Linux.
   players show up with title, artist, cover art and a live progress line. Play/pause,
   next/previous and dragging to seek work the same way. If `playerctl` is installed it is
   still used.
+- **Piper voices failed on Linux with a phoneme error.** Piper's helper libraries are
+  loaded by names the download provides only as links; when a link was missing, Linux
+  used the system's older espeak-ng instead, which Piper cannot work with. BE-Aero now
+  makes sure Piper's own libraries are in place, repairing existing installs without a
+  new download. If Piper still fails, the chat shows its full error.
 
 Installed Windows copies update automatically (no change in behaviour on Windows).
 
