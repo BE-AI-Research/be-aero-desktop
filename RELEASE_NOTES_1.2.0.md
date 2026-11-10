@@ -9,8 +9,9 @@ smoother.
 Ask for a comparison, a trend, a schedule or a summary and the assistant can answer with a
 **visual**: a chart, table, dashboard or diagram drawn right in the chat.
 - Visuals size themselves to fit, and the assistant adds a short comment below.
-- Click **↗** on a visual to keep it on the desktop as its own resizable widget. From there
-  you can reload it, send it back to the chat, or delete it.
+- Click **↗** on a visual to keep it on the desktop as its own resizable widget. The widget
+  has **✕** to close it (the visual stays in the chat), a reload button, and a trash
+  button to delete it.
 - The assistant can update a visual it already made instead of starting over.
 - **Safe by design:** each visual runs in a locked-down frame. It cannot reach the app, your
   files or your settings, and it cannot send anything over the network. It can only load

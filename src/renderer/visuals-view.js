@@ -85,16 +85,19 @@
       const controls = el('div', 'webw-controls', head);
       const reload = el('button', 'icon-btn webw-btn', controls, '↻');
       reload.title = 'Reload';
-      const toChat = el('button', 'icon-btn webw-btn', controls, '↙');
-      toChat.title = 'Remove from the desktop (it stays in the chat)';
-      const close = el('button', 'icon-btn webw-btn', controls, '✕');
-      close.title = 'Delete this visual';
+      // Trash deletes (two clicks); X just closes the widget - the visual
+      // stays in its chat, where the pin button can bring it back.
+      const del = el('button', 'icon-btn webw-btn visual-del', controls);
+      del.innerHTML = '<svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+      del.title = 'Delete this visual';
+      const close = el('button', 'icon-btn webw-btn visual-close', controls, '✕');
+      close.title = 'Close (it stays in the chat)';
       const f = frame(v.id, v.updatedAt);
       section.appendChild(f);
       reload.addEventListener('click', () => { f.src = srcFor(v.id, Date.now()); });
-      toChat.addEventListener('click', () => aero.aiVisualWhere(v.id, 'chat'));
-      close.addEventListener('click', () => {
-        if (!close.classList.contains('confirm')) { close.classList.add('confirm'); close.title = 'Click again to delete'; setTimeout(() => { close.classList.remove('confirm'); close.title = 'Delete this visual'; }, 2500); return; }
+      close.addEventListener('click', () => aero.aiVisualWhere(v.id, 'chat'));
+      del.addEventListener('click', () => {
+        if (!del.classList.contains('confirm')) { del.classList.add('confirm'); del.title = 'Click again to delete'; setTimeout(() => { del.classList.remove('confirm'); del.title = 'Delete this visual'; }, 2500); return; }
         aero.aiVisualDelete(v.id);
       });
       widgets.set(v.id, { section, frame: f, rev: v.updatedAt });
