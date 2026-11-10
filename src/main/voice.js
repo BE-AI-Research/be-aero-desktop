@@ -2,12 +2,14 @@
 //
 // Audio is captured in the RENDERER (getUserMedia, so the user picks the
 // microphone and the speaker like any web app) and streamed here as 16 kHz
-// mono 16-bit PCM. Speech-to-text: Windows feeds that stream straight into
-// the OS recognizer (System.Speech) in a PowerShell worker; Linux writes a
-// WAV and hands it to whisper.cpp when installed. Text-to-speech renders a
-// WAV in main (System.Speech / espeak-ng) that the renderer plays on the
-// chosen output device; without an engine the renderer falls back to
-// speechSynthesis.
+// mono 16-bit PCM. Speech-to-text engines:
+//   whisper - whisper.cpp (installed from Settings): a voice-activity
+//             segmenter cuts the stream into phrases, each transcribed by a
+//             local whisper-server with the previous text as context.
+//   system  - Windows System.Speech fed the stream directly (fallback).
+// Text-to-speech renders a WAV in main (System.Speech / espeak-ng) that the
+// renderer plays on the chosen output device; without an engine the
+// renderer falls back to speechSynthesis.
 const { spawn, execFile } = require('child_process');
 const fs = require('fs');
 const os = require('os');
@@ -75,13 +77,17 @@ const WIN_TTS = `
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Speech
 $text = [Console]::In.ReadToEnd()
-$out = $env:AERO_TTS_OUT; $voice = $env:AERO_TTS_VOICE; $rate = [int]$env:AERO_TTS_RATE
+$out = $env:AERO_TTS_OUT; $voice = $env:AERO_TTS_VOICE; $rate = [int]$env:AERO_TTS_RATE; $pitch = [int]$env:AERO_TTS_PITCH
 $syn = New-Object System.Speech.Synthesis.SpeechSynthesizer
 if ($voice) { try { $syn.SelectVoice($voice) } catch { } }
 $syn.Rate = [math]::Max(-10, [math]::Min(10, $rate))
 $fmt = New-Object System.Speech.AudioFormat.SpeechAudioFormatInfo(22050, [System.Speech.AudioFormat.AudioBitsPerSample]::Sixteen, [System.Speech.AudioFormat.AudioChannel]::Mono)
 $syn.SetOutputToWaveFile($out, $fmt)
-$syn.Speak($text)
+if ($pitch -ne 0) {
+  $esc = [System.Security.SecurityElement]::Escape($text)
+  $sign = if ($pitch -gt 0) { '+' } else { '' }
+  $syn.SpeakSsml('<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="en-US"><prosody pitch="' + $sign + $pitch + '%">' + $esc + '</prosody></speak>')
+} else { $syn.Speak($text) }
 $syn.Dispose()
 `;
 
@@ -136,68 +142,175 @@ function runPs(script, env, { input, timeout = 30000 } = {}) {
   });
 }
 
+// Voice-activity segmenter for the Whisper path: 20 ms frames, an adaptive
+// noise floor, 300 ms pre-roll, a phrase ends after `silenceMs` of quiet or
+// at `maxMs`. Pure: push(Int16 samples) -> completed phrases (Int16Arrays).
+class Segmenter {
+  constructor({ rate = RATE, silenceMs = 700, maxMs = 25000, minSpeechMs = 240 } = {}) {
+    this.frame = Math.round(rate * 0.02);
+    this.silenceFrames = Math.round(silenceMs / 20);
+    this.maxFrames = Math.round(maxMs / 20);
+    this.minSpeech = Math.round(minSpeechMs / 20);
+    this.preRoll = 15;
+    this.floor = 0.004;
+    this.pending = new Int16Array(0);
+    this.ring = [];           // pre-roll frames
+    this.cur = null;          // { frames: [], speech, quiet }
+  }
+  isSpeech(rms) { return rms > Math.max(0.012, this.floor * 3); }
+  push(samples) {
+    const out = [];
+    let buf = this.pending.length ? concat16(this.pending, samples) : samples;
+    let i = 0;
+    for (; i + this.frame <= buf.length; i += this.frame) {
+      const f = buf.subarray(i, i + this.frame);
+      let sum = 0;
+      for (let k = 0; k < f.length; k++) { const v = f[k] / 32768; sum += v * v; }
+      const rms = Math.sqrt(sum / f.length);
+      const speech = this.isSpeech(rms);
+      if (!speech) this.floor = this.floor * 0.98 + rms * 0.02;   // adapt only on quiet frames
+      const copy = Int16Array.from(f);
+      if (!this.cur) {
+        this.ring.push(copy);
+        if (this.ring.length > this.preRoll) this.ring.shift();
+        if (speech) { this.cur = { frames: this.ring.splice(0), speech: 1, quiet: 0 }; }
+        continue;
+      }
+      this.cur.frames.push(copy);
+      if (speech) { this.cur.speech++; this.cur.quiet = 0; } else this.cur.quiet++;
+      if (this.cur.quiet >= this.silenceFrames || this.cur.frames.length >= this.maxFrames) {
+        const done = this.close();
+        if (done) out.push(done);
+      }
+    }
+    this.pending = Int16Array.from(buf.subarray(i));
+    return out;
+  }
+  close() {
+    const c = this.cur;
+    this.cur = null;
+    if (!c || c.speech < this.minSpeech) return null;
+    return concat16(...c.frames);
+  }
+  flush() { return this.close(); }
+}
+
+function concat16(...arrays) {
+  const n = arrays.reduce((a, x) => a + x.length, 0);
+  const out = new Int16Array(n);
+  let o = 0;
+  for (const x of arrays) { out.set(x, o); o += x.length; }
+  return out;
+}
+
+// Light clean-up for the System.Speech path (it returns lowercase, no
+// punctuation): capitalize the phrase.
+function tidySystemText(t) {
+  const s = String(t || '').trim();
+  return s ? s[0].toUpperCase() + s.slice(1) : s;
+}
+
 class Voice {
-  constructor({ emit }) {
+  constructor({ emit, whisper, settings }) {
     this.emit = emit;          // (event) => void: { type: ready|final|error|end, text? }
-    this.proc = null;          // Windows recognizer worker
-    this.chunks = null;        // Linux: PCM collected for whisper
+    this.whisper = whisper;    // Whisper instance (may be null)
+    this.settings = settings || (() => ({}));
+    this.proc = null;          // System.Speech worker
+    this.session = null;       // whisper session { seg, queue, context, closed }
+    this.chunks = null;        // legacy Linux whisper-cli path
     this.fedBytes = 0;
     this.voiceCache = null;
   }
 
-  async available() {
-    const base = { listening: this.listening(), fedBytes: this.fedBytes };
-    if (process.platform === 'win32') return { ...base, stt: true, tts: true, engine: 'Windows Speech Recognition (offline)' };
-    if (process.platform === 'linux') {
-      const t = await whisperTools();
-      const tts = !!(await which('espeak-ng')) || !!(await which('espeak'));
-      if (!t.whisper) return { ...base, stt: false, tts, reason: 'No offline recognizer found: install whisper.cpp (whisper-cli) and a ggml model, or set WHISPER_MODEL.' };
-      if (!t.model) return { ...base, stt: false, tts, reason: 'whisper.cpp found but no ggml model: put one in ~/.cache/whisper or set WHISPER_MODEL.' };
-      return { ...base, stt: true, tts, engine: `whisper.cpp (${path.basename(t.model)})` };
-    }
-    return { ...base, stt: false, tts: false, reason: 'Voice input is not available on this platform yet.' };
+  cfg() { return (this.settings() || {}); }
+
+  // Which recognizer to use now: 'whisper' | 'system' | null.
+  engine() {
+    const want = this.cfg().engine || 'auto';
+    const wOk = !!(this.whisper && this.whisper.status().installed);
+    if (want === 'whisper') return wOk ? 'whisper' : null;
+    if (want === 'system') return process.platform === 'win32' ? 'system' : null;
+    if (wOk) return 'whisper';
+    return process.platform === 'win32' ? 'system' : null;
   }
 
-  listening() { return !!(this.proc || this.chunks); }
+  async available() {
+    const base = { listening: this.listening(), fedBytes: this.fedBytes, whisper: this.whisper ? this.whisper.status() : null };
+    const eng = this.engine();
+    const ttsLinux = process.platform === 'linux' && (!!(await which('espeak-ng')) || !!(await which('espeak')));
+    const tts = process.platform === 'win32' || ttsLinux;
+    if (eng === 'whisper') return { ...base, stt: true, tts, engine: `Whisper ${this.whisper.pickModel(this.cfg().whisperModel)} (offline)`, engineId: 'whisper' };
+    if (eng === 'system') return { ...base, stt: true, tts, engine: 'Windows Speech Recognition (offline, basic accuracy)', engineId: 'system' };
+    const reason = (this.cfg().engine === 'whisper')
+      ? 'Whisper is selected but not installed - download it below.'
+      : process.platform === 'linux' ? 'Download Whisper below to dictate (the Linux engine).' : 'Voice input is not available on this platform yet.';
+    return { ...base, stt: false, tts, reason };
+  }
+
+  listening() { return !!(this.proc || this.session || this.chunks); }
 
   // Begin a dictation session; the renderer then streams PCM with feed().
   start() {
     if (this.listening()) return true;
     this.fedBytes = 0;
-    if (process.platform === 'win32') {
-      const p = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', WIN_STT], { windowsHide: true });
-      this.proc = p;
-      let buf = '';
-      p.stdout.on('data', (d) => {
-        buf += d;
-        let i;
-        while ((i = buf.indexOf('\n')) !== -1) {
-          const line = buf.slice(0, i).trim();
-          buf = buf.slice(i + 1);
-          if (!line) continue;
-          try { this.emit(JSON.parse(line)); } catch { /* not ours */ }
-        }
-      });
-      p.stdin.on('error', () => { /* worker went away mid-feed */ });
-      const done = () => { if (this.proc === p) { this.proc = null; this.emit({ type: 'end' }); } };
-      p.on('exit', done);
-      p.on('error', (err) => { this.emit({ type: 'error', text: err.message }); done(); });
-      return true;
-    }
-    if (process.platform === 'linux') {
-      this.chunks = [];
-      whisperTools().then((t) => {
-        if (!t.whisper || !t.model) {
-          this.available().then((a) => { this.emit({ type: 'error', text: a.reason }); this.chunks = null; this.emit({ type: 'end' }); });
-          return;
-        }
-        this.emit({ type: 'ready', engine: 'whisper.cpp' });
-      });
-      return true;
-    }
-    this.emit({ type: 'error', text: 'Voice input is not available on this platform yet.' });
-    this.emit({ type: 'end' });
+    const eng = this.engine();
+    if (eng === 'whisper') return this.startWhisper();
+    if (eng === 'system') return this.startSystem();
+    this.available().then((a) => { this.emit({ type: 'error', text: a.reason }); this.emit({ type: 'end' }); });
     return false;
+  }
+
+  startWhisper() {
+    const c = this.cfg();
+    const silenceMs = Math.max(400, Math.min(2000, Number(c.phrasePauseMs) || 700));
+    const sess = { seg: new Segmenter({ silenceMs }), queue: Promise.resolve(), context: '', closed: false, model: c.whisperModel || 'base.en' };
+    this.session = sess;
+    this.whisper.ensureServer(sess.model)
+      .then(() => { if (this.session === sess) this.emit({ type: 'ready', engine: 'whisper' }); })
+      .catch((err) => { if (this.session === sess) { this.emit({ type: 'error', text: err.message }); this.session = null; this.emit({ type: 'end' }); } });
+    this.emit({ type: 'loading', engine: 'whisper' });
+    return true;
+  }
+
+  // Transcribe one phrase in order; the previous phrases prime the next one.
+  enqueuePhrase(sess, pcm) {
+    sess.queue = sess.queue.then(async () => {
+      this.emit({ type: 'working' });
+      try {
+        const buf = Buffer.from(pcm.buffer, pcm.byteOffset, pcm.byteLength);
+        const text = await this.whisper.transcribe(Buffer.concat([wavHeader(buf.length), buf]), { model: sess.model, prompt: sess.context });
+        if (text) {
+          sess.context = `${sess.context} ${text}`.trim().slice(-300);
+          this.emit({ type: 'final', text });
+        }
+      } catch (err) { this.emit({ type: 'error', text: `Whisper: ${err.message}` }); }
+    });
+    return sess.queue;
+  }
+
+  startSystem() {
+    const p = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', WIN_STT], { windowsHide: true });
+    this.proc = p;
+    let buf = '';
+    p.stdout.on('data', (d) => {
+      buf += d;
+      let i;
+      while ((i = buf.indexOf('\n')) !== -1) {
+        const line = buf.slice(0, i).trim();
+        buf = buf.slice(i + 1);
+        if (!line) continue;
+        try {
+          const ev = JSON.parse(line);
+          if (ev.type === 'final') ev.text = tidySystemText(ev.text);
+          this.emit(ev);
+        } catch { /* not ours */ }
+      }
+    });
+    p.stdin.on('error', () => { /* worker went away mid-feed */ });
+    const done = () => { if (this.proc === p) { this.proc = null; this.emit({ type: 'end' }); } };
+    p.on('exit', done);
+    p.on('error', (err) => { this.emit({ type: 'error', text: err.message }); done(); });
+    return true;
   }
 
   // 16 kHz mono 16-bit little-endian PCM from the renderer.
@@ -205,17 +318,25 @@ class Voice {
     const buf = Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes.buffer ? bytes.buffer : bytes);
     if (!buf.length) return false;
     this.fedBytes += buf.length;
-    if (this.proc) { try { this.proc.stdin.write(buf); } catch { return false; } return true; }
-    if (this.chunks) {
-      this.chunks.push(buf);
-      // 5 minutes of audio is plenty for one dictation.
-      if (this.fedBytes > RATE * 2 * 300) this.stop();
+    if (this.session) {
+      const aligned = Buffer.from(buf);   // own copy, even length
+      const samples = new Int16Array(aligned.buffer, aligned.byteOffset, Math.floor(aligned.length / 2));
+      for (const phrase of this.session.seg.push(samples)) this.enqueuePhrase(this.session, phrase);
       return true;
     }
+    if (this.proc) { try { this.proc.stdin.write(buf); } catch { return false; } return true; }
+    if (this.chunks) { this.chunks.push(buf); return true; }
     return false;
   }
 
   stop() {
+    if (this.session) {
+      const sess = this.session;
+      this.session = null;
+      const last = sess.seg.flush();
+      if (last) this.enqueuePhrase(sess, last);
+      sess.queue.then(() => this.emit({ type: 'end' }));
+    }
     if (this.proc) { try { this.proc.stdin.end(); } catch { /* gone */ } }
     if (this.chunks) {
       const data = Buffer.concat(this.chunks);
@@ -259,19 +380,20 @@ class Voice {
   }
 
   // Render text to a WAV (base64) with the chosen voice and rate (0.5-2).
-  async speak(text, { voice = '', rate = 1 } = {}) {
+  async speak(text, { voice = '', rate = 1, pitch = 0 } = {}) {
     const t = String(text || '').trim().slice(0, 4000);
     if (!t) return null;
     const out = path.join(os.tmpdir(), `aero-tts-${process.pid}-${Date.now()}.wav`);
     try {
       if (process.platform === 'win32') {
         const r10 = Math.round((Math.max(0.5, Math.min(2, Number(rate) || 1)) - 1) * 10);
-        const r = await runPs(WIN_TTS, { AERO_TTS_OUT: out, AERO_TTS_VOICE: voice || '', AERO_TTS_RATE: String(r10) }, { input: t, timeout: 60000 });
+        const r = await runPs(WIN_TTS, { AERO_TTS_OUT: out, AERO_TTS_VOICE: voice || '', AERO_TTS_RATE: String(r10), AERO_TTS_PITCH: String(Math.max(-50, Math.min(50, Math.round(Number(pitch) || 0)))) }, { input: t, timeout: 60000 });
         if (r.code !== 0 && !fs.existsSync(out)) return null;
       } else if (process.platform === 'linux' && (await which('espeak-ng') || await which('espeak'))) {
         const bin = (await which('espeak-ng')) ? 'espeak-ng' : 'espeak';
         const wpm = Math.round(175 * Math.max(0.5, Math.min(2, Number(rate) || 1)));
-        const args = ['-w', out, '-s', String(wpm), ...(voice ? ['-v', voice] : []), t];
+        const p99 = Math.max(0, Math.min(99, Math.round(50 + (Number(pitch) || 0))));
+        const args = ['-w', out, '-s', String(wpm), '-p', String(p99), ...(voice ? ['-v', voice] : []), t];
         const ok = await new Promise((resolve) => execFile(bin, args, { timeout: 60000 }, (e) => resolve(!e)));
         if (!ok) return null;
       } else return null;
@@ -283,4 +405,4 @@ class Voice {
   }
 }
 
-module.exports = { Voice, wavHeader, whisperTools, RATE };
+module.exports = { Voice, Segmenter, wavHeader, whisperTools, tidySystemText, RATE };

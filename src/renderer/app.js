@@ -368,10 +368,7 @@
     $('set-ai-compact').checked = aiCfg.compactWithModel !== false;
     $('set-ai-memory').checked = aiCfg.memoryEnabled !== false;
     const vc = aiCfg.voice || {};
-    $('set-ai-voice-autosend').checked = !!vc.autoSend;
-    $('set-ai-voice-speak').checked = !!vc.speak;
-    $('set-ai-voice-rate').value = Number(vc.rate) || 1;
-    fillVoices(vc.voiceName || '');
+    if (window.__applyVoiceSettings) window.__applyVoiceSettings(vc);
     if (window.AeroAi && AeroAi.setVoice) AeroAi.setVoice(vc);
     $('set-notify-toast').checked = (s.notifications || {}).toast !== false;
     refreshAiStatus();
@@ -646,8 +643,9 @@
     }
   }
   $('set-ai-memory').addEventListener('change', (e) => aero.setSettings({ ai: { memoryEnabled: e.target.checked } }));
-  // Voice: microphone and speaker are the renderer's devices (pick them
-  // like any web app); voices and dictation come from main's engine.
+  // Voice input + text to speech. Devices are the renderer's (getUserMedia),
+  // engines and voices come from main.
+  const voiceSet = (patch) => aero.setSettings({ ai: { voice: patch } });
   async function fillVoices(selected) {
     const sel = $('set-ai-voice-name');
     if (!voiceNames) {
@@ -660,6 +658,23 @@
     sel.value = voiceNames.some((v) => v.name === selected) ? selected : '';
   }
   if (window.speechSynthesis) speechSynthesis.addEventListener('voiceschanged', () => { if (voiceNames && !voiceNames.length) { voiceNames = null; fillVoices($('set-ai-voice-name').value); } });
+  function applyVoiceSettings(vc) {
+    if (document.activeElement !== $('set-ai-autosend-delay')) $('set-ai-autosend-delay').value = Number(vc.autoSendDelay) || 3;
+    $('set-ai-autosend').checked = !!vc.autoSend;
+    $('set-ai-engine').value = vc.engine || 'auto';
+    $('set-ai-voice-speak').checked = !!vc.speak;
+    $('set-ai-tts-interrupt').checked = vc.interrupt !== false;
+    $('set-ai-voice-rate').value = Number(vc.rate) || 1;
+    $('set-ai-tts-volume').value = vc.volume == null ? 100 : Number(vc.volume);
+    $('set-ai-tts-pitch').value = Number(vc.pitch) || 0;
+    $('tts-rate-val').textContent = `${Number($('set-ai-voice-rate').value).toFixed(1)}x`;
+    $('tts-volume-val').textContent = `${$('set-ai-tts-volume').value}%`;
+    const p = Number($('set-ai-tts-pitch').value);
+    $('tts-pitch-val').textContent = p ? `${p > 0 ? '+' : ''}${p}%` : 'normal';
+    fillVoices(vc.voiceName || '');
+  }
+  window.__applyVoiceSettings = applyVoiceSettings;
+  aero.getSettings().then((st) => applyVoiceSettings(((st.ai || {}).voice) || {}));   // first paint ran before this was defined
   async function fillDevices() {
     if (!window.AeroAi || !AeroAi.audioDevices) return;
     const cfg = ((await aero.getSettings()).ai || {}).voice || {};
@@ -674,8 +689,60 @@
     fill($('set-ai-mic'), devs.mics, cfg.micId || '', 'No microphone found');
     fill($('set-ai-speaker'), devs.speakers, cfg.speakerId || '', 'No output device found');
   }
-  $('set-ai-mic').addEventListener('change', (e) => aero.setSettings({ ai: { voice: { micId: e.target.value } } }));
-  $('set-ai-speaker').addEventListener('change', (e) => aero.setSettings({ ai: { voice: { speakerId: e.target.value } } }));
+  async function refreshVoiceInfo() {
+    try {
+      const v = await aero.aiVoiceAvailable();
+      $('ai-voice-info').textContent = v && v.stt
+        ? `Dictation engine: ${v.engine}. Click the microphone in the chat and speak.`
+        : `Dictation unavailable: ${v && v.reason || 'unknown'}`;
+    } catch { /* fine */ }
+  }
+  async function refreshWhisper() {
+    let st = null;
+    try { st = await aero.aiWhisperStatus(); } catch { st = null; }
+    const sel = $('set-ai-whisper-model');
+    const cfg = ((await aero.getSettings()).ai || {}).voice || {};
+    if (!st || !st.supported) {
+      sel.innerHTML = '<option>Not available on this system</option>';
+      $('btn-ai-whisper-install').disabled = true; $('btn-ai-whisper-remove').disabled = true;
+      $('ai-whisper-info').textContent = 'Whisper downloads are offered for Windows and Linux on x64.';
+      return;
+    }
+    sel.innerHTML = '';
+    for (const m of st.models) { const o = document.createElement('option'); o.value = m.id; o.textContent = `${m.label}${m.installed ? ' - installed' : ''}`; sel.appendChild(o); }
+    sel.value = cfg.whisperModel || 'base.en';
+    const chosen = st.models.find((m) => m.id === sel.value) || st.models[0];
+    $('btn-ai-whisper-install').disabled = st.installing || (chosen.installed && st.binary);
+    $('btn-ai-whisper-install').textContent = st.installing ? 'Downloading…' : (chosen.installed && st.binary) ? 'Installed' : 'Download';
+    $('btn-ai-whisper-remove').disabled = !chosen.installed;
+    $('ai-whisper-info').textContent = st.installed
+      ? `Whisper is installed${st.running ? ' and loaded' : ''}. It runs on this computer; nothing is sent anywhere.`
+      : 'Download the Whisper engine and a model (one time). Files come from the official whisper.cpp releases and are checked against pinned checksums.';
+    refreshVoiceInfo();
+  }
+  $('set-ai-whisper-model').addEventListener('change', (e) => voiceSet({ whisperModel: e.target.value }).then(refreshWhisper));
+  $('btn-ai-whisper-install').addEventListener('click', async () => {
+    const model = $('set-ai-whisper-model').value;
+    $('btn-ai-whisper-install').disabled = true;
+    $('ai-whisper-progress').classList.remove('hidden');
+    const r = await aero.aiWhisperInstall(model);
+    $('ai-whisper-progress').classList.add('hidden');
+    if (r && r.error) $('ai-whisper-info').textContent = `Download failed: ${r.error}`;
+    else await voiceSet({ whisperModel: model });
+    refreshWhisper();
+  });
+  if (aero.onAiWhisperProgress) aero.onAiWhisperProgress((p) => {
+    const bar = $('ai-whisper-progress').firstElementChild;
+    if (p.stage === 'unpack') { $('ai-whisper-info').textContent = 'Unpacking the engine…'; return; }
+    if (p.stage === 'done') { bar.style.width = '100%'; return; }
+    const pct = p.total ? Math.round((p.got / p.total) * 100) : 0;
+    bar.style.width = `${pct}%`;
+    $('ai-whisper-info').textContent = `Downloading the ${p.stage === 'engine' ? 'engine' : 'model'}: ${pct}% (${Math.round(p.got / 1048576)} of ${Math.round((p.total || 0) / 1048576)} MB)`;
+  });
+  $('btn-ai-whisper-remove').addEventListener('click', async () => { await aero.aiWhisperRemove($('set-ai-whisper-model').value); refreshWhisper(); });
+  $('set-ai-engine').addEventListener('change', (e) => voiceSet({ engine: e.target.value }).then(refreshVoiceInfo));
+  $('set-ai-mic').addEventListener('change', (e) => voiceSet({ micId: e.target.value }));
+  $('set-ai-speaker').addEventListener('change', (e) => voiceSet({ speakerId: e.target.value }));
   $('btn-ai-devices').addEventListener('click', fillDevices);
   $('btn-ai-mic-test').addEventListener('click', async () => {
     const bar = $('ai-mic-meter').firstElementChild;
@@ -687,24 +754,28 @@
     } catch (err) { $('ai-voice-info').textContent = `Microphone test failed: ${err && err.message || err}`; }
     bar.style.width = '0%'; btn.disabled = false; btn.textContent = 'Test';
   });
+  $('set-ai-autosend').addEventListener('change', (e) => voiceSet({ autoSend: e.target.checked }));
+  $('set-ai-autosend-delay').addEventListener('change', (e) => voiceSet({ autoSendDelay: Math.max(1, Math.min(30, Number(e.target.value) || 3)) }));
+  $('set-ai-voice-speak').addEventListener('change', (e) => voiceSet({ speak: e.target.checked }));
+  $('set-ai-tts-interrupt').addEventListener('change', (e) => voiceSet({ interrupt: e.target.checked }));
+  $('set-ai-voice-name').addEventListener('change', (e) => voiceSet({ voiceName: e.target.value }));
+  $('set-ai-voice-rate').addEventListener('input', (e) => { $('tts-rate-val').textContent = `${Number(e.target.value).toFixed(1)}x`; });
+  $('set-ai-voice-rate').addEventListener('change', (e) => voiceSet({ rate: Number(e.target.value) || 1 }));
+  $('set-ai-tts-volume').addEventListener('input', (e) => { $('tts-volume-val').textContent = `${e.target.value}%`; });
+  $('set-ai-tts-volume').addEventListener('change', (e) => voiceSet({ volume: Number(e.target.value) }));
+  $('set-ai-tts-pitch').addEventListener('input', (e) => { const p = Number(e.target.value); $('tts-pitch-val').textContent = p ? `${p > 0 ? '+' : ''}${p}%` : 'normal'; });
+  $('set-ai-tts-pitch').addEventListener('change', (e) => voiceSet({ pitch: Number(e.target.value) }));
   $('btn-ai-speaker-test').addEventListener('click', async () => {
     const cfg = ((await aero.getSettings()).ai || {}).voice || {};
-    if (window.AeroAi) { AeroAi.setVoice(cfg); AeroAi.speak('This is the BE-Aero assistant speaking on the selected device.'); }
+    if (window.AeroAi) { AeroAi.setVoice(cfg); AeroAi.stopSpeaking(); AeroAi.speak($('tts-test-text').value || 'Testing.'); }
   });
-  $('set-ai-voice-autosend').addEventListener('change', (e) => aero.setSettings({ ai: { voice: { autoSend: e.target.checked } } }));
-  $('set-ai-voice-speak').addEventListener('change', (e) => aero.setSettings({ ai: { voice: { speak: e.target.checked } } }));
-  $('set-ai-voice-name').addEventListener('change', (e) => aero.setSettings({ ai: { voice: { voiceName: e.target.value } } }));
-  $('set-ai-voice-rate').addEventListener('change', (e) => aero.setSettings({ ai: { voice: { rate: Number(e.target.value) || 1 } } }));
-  if (aero.aiVoiceAvailable) {
-    aero.aiVoiceAvailable().then((v) => {
-      $('ai-voice-info').textContent = v && v.stt
-        ? `Dictation: ${v.engine}. Click the microphone in the chat and speak; the text lands in the message box.${v.tts === false ? ' Spoken replies use the browser voice (install espeak-ng for a system voice).' : ''}`
-        : `Dictation unavailable: ${v && v.reason || 'unknown'}`;
-    }).catch(() => {});
+  $('btn-ai-tts-stop').addEventListener('click', () => { if (window.AeroAi) AeroAi.stopSpeaking(); });
+  // Devices and engines are read when either voice section opens (needs the mic permission once).
+  for (const sec of ['voice', 'tts']) {
+    const d = document.querySelector(`details[data-section="${sec}"]`);
+    if (d) d.addEventListener('toggle', () => { if (d.open) { fillDevices(); refreshWhisper(); } });
   }
-  // Devices are read when the AI settings section is opened (needs the mic permission once).
-  const aiSection = document.querySelector('details[data-section="ai"]');
-  if (aiSection) aiSection.addEventListener('toggle', () => { if (aiSection.open) fillDevices(); });
+  refreshVoiceInfo();
   $('btn-ai-memory-add').addEventListener('click', async () => {
     const v = $('ai-memory-new').value.trim();
     if (!v) return;

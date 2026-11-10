@@ -40,6 +40,7 @@ let peerResolver = null;
 let linuxTasks = null;
 let mediaCtl = null;
 let voice = null;
+let whisper = null;
 let aiService = null;
 let notifyCenter = null;
 let dockHotkey = null;       // the accelerator actually registered for the dock
@@ -1738,9 +1739,19 @@ app.whenReady().then(() => {
   mediaCtl = new (require('./media').MediaController)();
   ipcMain.handle('media:info', () => mediaCtl.info());
   ipcMain.handle('media:action', (_e, name) => mediaCtl.action(String(name || '')));
+  whisper = new (require('./whisper').Whisper)({ dir: path.join(app.getPath('userData'), 'whisper') });
   voice = new (require('./voice').Voice)({
-    emit: (ev) => { if (win && !win.isDestroyed()) win.webContents.send('ai:voice', ev); }
+    emit: (ev) => { if (win && !win.isDestroyed()) win.webContents.send('ai:voice', ev); },
+    whisper,
+    settings: () => ((store.get('ai') || {}).voice || {})
   });
+  ipcMain.handle('ai:whisper-status', () => whisper.status());
+  ipcMain.handle('ai:whisper-install', async (_e, model) => {
+    try {
+      return await whisper.install(String(model || 'base.en'), (p) => { if (win && !win.isDestroyed()) win.webContents.send('ai:whisper-progress', p); });
+    } catch (err) { return { error: err.message }; }
+  });
+  ipcMain.handle('ai:whisper-remove', (_e, model) => whisper.removeModel(String(model || '')));
   ipcMain.handle('ai:voice-available', () => voice.available());
   ipcMain.handle('ai:voice-start', () => voice.start());
   ipcMain.handle('ai:voice-stop', () => voice.stop());
@@ -1856,6 +1867,7 @@ app.on('before-quit', () => {
   isQuitting = true;
   if (mediaCtl) mediaCtl.destroy();
   if (voice) voice.stop();
+  if (whisper) whisper.shutdown();
   clearInterval(telemetryTimer);
   clearInterval(updateTimer);
   if (apiServer) apiServer.stop();

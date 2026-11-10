@@ -1104,3 +1104,7 @@ webview.plugin-frame { background: #fff; }
 .ai-mic.on { color: #f87171; box-shadow: 0 0 calc(2px + 14px * var(--level, 0)) rgba(248,113,113, calc(.25 + .7 * var(--level, 0))); animation: none; }
 .voice-meter { height: 6px; border-radius: 3px; background: rgba(255,255,255,.1); overflow: hidden; margin: 4px 0 6px; }
 .voice-meter-bar { height: 100%; width: 0; background: var(--accent); transition: width 60ms linear; }
+
+/* Auto send toggle on the chat widget */
+.ai-autosend { font-size: 11px; font-weight: 700; letter-spacing: .02em; opacity: .55; }
+.ai-autosend.on { opacity: 1; color: var(--accent); box-shadow: 0 0 8px rgba(var(--accent-rgb), .55); }

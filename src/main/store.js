@@ -123,7 +123,15 @@ const DEFAULTS = {
     zoom: 1,             // chat text scale (0.8 - 1.6)
     contextTokens: 0,    // request budget; 0 = default for the provider (local servers 16k)
     compactWithModel: true,
-    voice: { speak: false, voiceName: '', rate: 1, autoSend: false, micId: '', speakerId: '' }
+    voice: {
+      engine: 'auto',        // auto (Whisper when installed) | whisper | system
+      whisperModel: 'base.en',
+      micId: '', speakerId: '',
+      autoSend: false,       // send the dictated message after autoSendDelay seconds of quiet
+      autoSendDelay: 3,
+      speak: false, voiceName: '', rate: 1, volume: 100, pitch: 0,
+      interrupt: true        // stop speaking when the microphone starts
+    }
   },
   notifications: {
     toast: true              // also show OS toasts for web-widget / AI notifications
