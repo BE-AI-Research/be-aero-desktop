@@ -211,9 +211,10 @@ function tidySystemText(t) {
 }
 
 class Voice {
-  constructor({ emit, whisper, settings }) {
+  constructor({ emit, whisper, piper, settings }) {
     this.emit = emit;          // (event) => void: { type: ready|final|error|end, text? }
     this.whisper = whisper;    // Whisper instance (may be null)
+    this.piper = piper;        // Piper instance (may be null)
     this.settings = settings || (() => ({}));
     this.proc = null;          // System.Speech worker
     this.session = null;       // whisper session { seg, queue, context, closed }
@@ -380,9 +381,17 @@ class Voice {
   }
 
   // Render text to a WAV (base64) with the chosen voice and rate (0.5-2).
-  async speak(text, { voice = '', rate = 1, pitch = 0 } = {}) {
+  async speak(text, { voice = '', rate = 1, pitch = 0, engine } = {}) {
     const t = String(text || '').trim().slice(0, 4000);
     if (!t) return null;
+    const c = this.cfg();
+    if ((engine || c.ttsEngine) === 'piper' && this.piper) {
+      const wav = await this.piper.synth(t, {
+        voice: c.piperVoice, speaker: c.piperSpeaker, rate,
+        noiseScale: c.piperNoise, noiseW: c.piperNoiseW, sentenceSilence: c.piperSentenceSilence
+      });
+      return wav ? wav.toString('base64') : null;
+    }
     const out = path.join(os.tmpdir(), `aero-tts-${process.pid}-${Date.now()}.wav`);
     try {
       if (process.platform === 'win32') {

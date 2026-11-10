@@ -672,8 +672,116 @@
     const p = Number($('set-ai-tts-pitch').value);
     $('tts-pitch-val').textContent = p ? `${p > 0 ? '+' : ''}${p}%` : 'normal';
     fillVoices(vc.voiceName || '');
+    const piperOn = vc.ttsEngine === 'piper';
+    $('set-ai-tts-engine').value = piperOn ? 'piper' : 'system';
+    $('tts-system-block').classList.toggle('hidden', piperOn);
+    $('tts-piper-block').classList.toggle('hidden', !piperOn);
+    $('tts-pitch-block').classList.toggle('hidden', piperOn);   // Piper voices have no pitch control
+    const setR = (id, valId, v, fmt) => { if (document.activeElement !== $(id)) $(id).value = v; $(valId).textContent = fmt(Number($(id).value)); };
+    setR('set-ai-piper-noise', 'piper-noise-val', vc.piperNoise == null ? 0.667 : vc.piperNoise, (x) => x.toFixed(2));
+    setR('set-ai-piper-noisew', 'piper-noisew-val', vc.piperNoiseW == null ? 0.8 : vc.piperNoiseW, (x) => x.toFixed(2));
+    setR('set-ai-piper-silence', 'piper-silence-val', vc.piperSentenceSilence == null ? 0.2 : vc.piperSentenceSilence, (x) => `${x.toFixed(2)} s`);
+    if (piperOn && !piperCatalog) refreshPiper();
   }
   window.__applyVoiceSettings = applyVoiceSettings;
+
+  // ---- Piper: catalog (bundled, 180 voices), language/quality filters,
+  // download / remove, multi-speaker voices.
+  let piperCatalog = null;
+  let piperStatus = null;
+  const mb = (n) => `${Math.round(n / 1048576)} MB`;
+  async function refreshPiper() {
+    try { [piperStatus, piperCatalog] = await Promise.all([aero.aiPiperStatus(), aero.aiPiperCatalog()]); } catch { return; }
+    const cfg = ((await aero.getSettings()).ai || {}).voice || {};
+    const cur = piperCatalog.find((v) => v.key === cfg.piperVoice) || piperCatalog.find((v) => v.key === 'en_US-lessac-medium') || piperCatalog[0];
+    const langSel = $('piper-lang');
+    if (!langSel.options.length) {
+      const langs = [...new Map(piperCatalog.map((v) => [v.lang, `${v.language} (${v.country || v.lang})`])).entries()].sort((a, b) => a[1].localeCompare(b[1]));
+      const inst = document.createElement('option'); inst.value = '*installed'; inst.textContent = 'Installed voices'; langSel.appendChild(inst);
+      for (const [code, label] of langs) { const o = document.createElement('option'); o.value = code; o.textContent = label; langSel.appendChild(o); }
+      langSel.value = cur ? cur.lang : 'en_US';
+    }
+    fillPiperVoices(cur ? cur.key : '');
+    if (!piperStatus.supported) {
+      $('piper-info').textContent = 'Piper downloads are offered for Windows and Linux on x64.';
+      $('btn-piper-install').disabled = true;
+      return;
+    }
+    $('piper-info').textContent = piperStatus.engine
+      ? `Piper is installed with ${piperStatus.installedVoices.length} voice${piperStatus.installedVoices.length === 1 ? '' : 's'}. Voices run on this computer.`
+      : 'Download Piper (22 MB, one time) and a voice. Files come from the official Piper release and voice repository, checked against checksums shipped with BE-Aero.';
+  }
+  function fillPiperVoices(selected) {
+    if (!piperCatalog) return;
+    const lang = $('piper-lang').value;
+    const q = $('piper-quality').value;
+    const list = piperCatalog.filter((v) => (lang === '*installed' ? v.installed : v.lang === lang) && (!q || v.quality === q))
+      .sort((a, b) => (b.installed - a.installed) || a.name.localeCompare(b.name) || a.quality.localeCompare(b.quality));
+    const sel = $('set-ai-piper-voice');
+    sel.innerHTML = '';
+    if (!list.length) { const o = document.createElement('option'); o.value = ''; o.textContent = lang === '*installed' ? 'No voices installed yet' : 'No voices match'; sel.appendChild(o); }
+    for (const v of list) {
+      const o = document.createElement('option');
+      o.value = v.key;
+      o.textContent = `${v.installed ? '\u2713 ' : ''}${v.name} - ${v.quality.replace('_', ' ')}${v.speakers > 1 ? `, ${v.speakers} speakers` : ''} (${mb(v.size)})`;
+      sel.appendChild(o);
+    }
+    sel.value = list.some((v) => v.key === selected) ? selected : (list[0] ? list[0].key : '');
+    syncPiperButtons();
+  }
+  async function syncPiperButtons() {
+    const v = piperCatalog && piperCatalog.find((x) => x.key === $('set-ai-piper-voice').value);
+    const ready = !!(v && v.installed && piperStatus && piperStatus.engine);
+    $('btn-piper-install').disabled = !v || ready || !!(piperStatus && piperStatus.installing);
+    $('btn-piper-install').textContent = piperStatus && piperStatus.installing ? 'Downloading…' : ready ? 'Installed' : 'Download';
+    $('btn-piper-remove').disabled = !(v && v.installed);
+    const spRow = $('piper-speaker-row');
+    spRow.classList.toggle('hidden', !(v && v.speakers > 1));
+    if (v && v.speakers > 1) {
+      const cfg = ((await aero.getSettings()).ai || {}).voice || {};
+      const sel = $('set-ai-piper-speaker');
+      sel.innerHTML = '';
+      const names = v.speakerIds ? Object.entries(v.speakerIds).sort((a, b) => a[1] - b[1]) : Array.from({ length: v.speakers }, (_, i) => [`Speaker ${i}`, i]);
+      for (const [name, id] of names) { const o = document.createElement('option'); o.value = String(id); o.textContent = `${name} (#${id})`; sel.appendChild(o); }
+      sel.value = String(Number(cfg.piperSpeaker) || 0);
+    }
+  }
+  $('set-ai-tts-engine').addEventListener('change', async (e) => { await voiceSet({ ttsEngine: e.target.value }); if (e.target.value === 'piper') refreshPiper(); });
+  $('piper-lang').addEventListener('change', () => fillPiperVoices(''));
+  $('piper-quality').addEventListener('change', () => fillPiperVoices($('set-ai-piper-voice').value));
+  $('set-ai-piper-voice').addEventListener('change', async (e) => {
+    const v = piperCatalog && piperCatalog.find((x) => x.key === e.target.value);
+    if (v && v.installed) await voiceSet({ piperVoice: v.key, piperSpeaker: 0 });
+    syncPiperButtons();
+  });
+  $('set-ai-piper-speaker').addEventListener('change', (e) => voiceSet({ piperSpeaker: Number(e.target.value) || 0 }));
+  $('btn-piper-install').addEventListener('click', async () => {
+    const key = $('set-ai-piper-voice').value;
+    if (!key) return;
+    $('btn-piper-install').disabled = true; $('btn-piper-install').textContent = 'Downloading…';
+    $('piper-progress').classList.remove('hidden');
+    const r = await aero.aiPiperInstall(key);
+    $('piper-progress').classList.add('hidden');
+    if (r && r.error) $('piper-info').textContent = `Download failed: ${r.error}`;
+    else await voiceSet({ piperVoice: key, piperSpeaker: 0, ttsEngine: 'piper' });
+    await refreshPiper();
+  });
+  $('btn-piper-remove').addEventListener('click', async () => { await aero.aiPiperRemove($('set-ai-piper-voice').value); refreshPiper(); });
+  if (aero.onAiPiperProgress) aero.onAiPiperProgress((p) => {
+    const bar = $('piper-progress').firstElementChild;
+    if (p.stage === 'unpack') { $('piper-info').textContent = 'Unpacking Piper…'; return; }
+    if (p.stage === 'done') { bar.style.width = '100%'; return; }
+    const pct = p.total ? Math.round((p.got / p.total) * 100) : 0;
+    bar.style.width = `${pct}%`;
+    $('piper-info').textContent = `Downloading ${p.stage === 'engine' ? 'Piper' : 'the voice'}: ${pct}% (${mb(p.got)} of ${mb(p.total || 0)})`;
+  });
+  const piperRange = (id, valId, key, fmt) => {
+    $(id).addEventListener('input', (e) => { $(valId).textContent = fmt(Number(e.target.value)); });
+    $(id).addEventListener('change', (e) => voiceSet({ [key]: Number(e.target.value) }));
+  };
+  piperRange('set-ai-piper-noise', 'piper-noise-val', 'piperNoise', (x) => x.toFixed(2));
+  piperRange('set-ai-piper-noisew', 'piper-noisew-val', 'piperNoiseW', (x) => x.toFixed(2));
+  piperRange('set-ai-piper-silence', 'piper-silence-val', 'piperSentenceSilence', (x) => `${x.toFixed(2)} s`);
   aero.getSettings().then((st) => applyVoiceSettings(((st.ai || {}).voice) || {}));   // first paint ran before this was defined
   async function fillDevices() {
     if (!window.AeroAi || !AeroAi.audioDevices) return;
@@ -773,7 +881,7 @@
   // Devices and engines are read when either voice section opens (needs the mic permission once).
   for (const sec of ['voice', 'tts']) {
     const d = document.querySelector(`details[data-section="${sec}"]`);
-    if (d) d.addEventListener('toggle', () => { if (d.open) { fillDevices(); refreshWhisper(); } });
+    if (d) d.addEventListener('toggle', () => { if (d.open) { fillDevices(); refreshWhisper(); if (sec === 'tts') refreshPiper(); } });
   }
   refreshVoiceInfo();
   $('btn-ai-memory-add').addEventListener('click', async () => {

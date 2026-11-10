@@ -210,6 +210,7 @@ class AiService {
         action: (name, id) => d.tasks.action(name, id)
       },
       media: d.media,
+      speak: d.speak,
       createWebWidget: (url, name) => {
         const id = 'w' + crypto.randomBytes(4).toString('hex');
         const list = [...(d.store.get('webWidgets') || []), { id, url, name: name || new URL(url).hostname }];

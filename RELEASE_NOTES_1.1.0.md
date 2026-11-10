@@ -16,7 +16,11 @@ Installed Windows copies update automatically.
   Speech Recognition is the basic fallback. **Auto send** sends the dictated message after
   a silence you choose (1-30 s), with an on/off button right on the chat widget. A new
   **Text to speech** section reads replies aloud on the speaker you pick, with voice,
-  rate, volume, pitch and a test line. Microphone picker with a level test. Nothing
+  rate, volume, pitch and a test line. **Piper** neural voices are built in: 180 voices
+  in 58 languages (multi-speaker voices included), downloaded from Settings and checked
+  against checksums shipped with the app, with expressiveness, rhythm and sentence-pause
+  controls; long replies start playing after the first sentence. The assistant can speak
+  on request (`speak_text`). Microphone picker with a level test. Nothing
   leaves the machine.
 - **Context buffer.** Conversations stay inside a token budget the way BE-Code keeps small
   local models honest: old tool output is trimmed first, then the older conversation is
