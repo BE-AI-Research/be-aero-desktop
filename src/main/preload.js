@@ -67,6 +67,7 @@ contextBridge.exposeInMainWorld('aero', {
   aiTaskPreview: (when) => ipcRenderer.invoke('ai:task-preview', when),
   onAiTasks: (cb) => subscribe('ai:tasks', cb),
   aiStop: (id) => ipcRenderer.invoke('ai:stop', id),
+  aiEvictBlocking: (id) => ipcRenderer.invoke('ai:evict-blocking', id),
   aiPin: (on) => ipcRenderer.invoke('ai:pin', on),
   aiProbe: () => ipcRenderer.invoke('ai:probe'),
   aiVoiceAvailable: () => ipcRenderer.invoke('ai:voice-available'),

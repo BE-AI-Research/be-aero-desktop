@@ -124,7 +124,9 @@ const DEFAULTS = {
     maxSteps: 12,
     zoom: 1,             // chat text scale (0.8 - 1.6)
     contextTokens: 0,    // request budget; 0 = default for the provider (local servers 16k), capped by the live window
-    keepAlive: '30m',
+    keepAlive: '30m',    // (older setting, replaced by unloadAfter)
+    unloadAfter: '1m',   // Ollama: unload the model this long after the last reply ('keep' = server default)
+    evictBlocking: 'ask', // another model holding the server while ours waits: ask | auto | never
     toolCalls: 'auto',   // auto (by model family, with fallback) | native (JSON tools field) | compat (text tool calls)    // local servers (Ollama): keep the model loaded this long after a reply; '0' = don't
     taskMaxRuntimeMin: 30,
     taskModel: '',       // model for scheduled tasks; '' = the chat model (a task can override)

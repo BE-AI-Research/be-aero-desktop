@@ -29,6 +29,7 @@ class AiService {
     this.pendingWebOps = new Map(); // opId -> { resolve, timer }
     this.pinned = false;
     this.calibrations = new Map();  // provider|model -> chars-per-token learned from usage
+    this.runInfo = new Map();       // conversation id -> { ep, model, restart, ... } while a turn runs
     this.memory = new Memory(path.join(deps.userDataDir, 'ai', 'memory.json'));
     this.visuals = new (require('./visuals').Visuals)(path.join(deps.userDataDir, 'ai', 'visuals'));
     this.browser = new BrowserController({
@@ -183,14 +184,63 @@ class AiService {
     return st;
   }
 
-  // After a reply: extend the model's residency so a pause between
-  // messages does not unload it (Ollama keep_alive; default 30 minutes).
+  // After a reply or task: how long the model stays loaded (Ollama
+  // keep_alive, counted from now). The default unloads it a minute after the
+  // last reply, so a shared server's memory is free for other models; a
+  // new message in the meantime keeps it loaded. 'keep' leaves the server's
+  // own setting alone.
   refreshKeepAlive(model, ep) {
     const be = this.backend(ep);
     if (!be) return;
-    const ka = String(this.config().keepAlive || '30m');
-    if (ka === '0') return;
+    const ka = String(this.config().unloadAfter || '1m');
+    if (!ka || ka === 'keep') return;
     be.b.keepAlive(model, ka).catch(() => {});
+  }
+
+  // A request that has been silent long enough for a stall notice: is
+  // another model holding the server while ours waits to load? Then offer to
+  // unload it (or, per Settings, do it after a further wait).
+  async onStall(convId, stage, emit) {
+    const run = this.runInfo.get(convId);
+    if (!run) return;
+    if (stage === 0) { run.stalled = false; clearTimeout(run.autoTimer); return; }
+    if (stage !== 1) return;
+    run.stalled = true;
+    if (run.blockedShown) return;
+    const be = this.backend(run.ep);
+    if (!be) return;
+    const st = await be.b.status(run.model, { fresh: true });
+    if (!st || st.loaded || !st.others || !st.others.length || !run.stalled) return;
+    let mode = this.config().evictBlocking || 'ask';
+    if (mode === 'never') return;
+    // Nobody is watching a scheduled task to press the button.
+    if (run.unattended) mode = 'auto';
+    run.blockedShown = true;
+    if (mode === 'auto') {
+      emit({ type: 'notice', text: `${run.model} is waiting to load behind ${st.others.join(', ')} on the server. If nothing changes in 45 seconds, that model will be unloaded.` });
+      run.autoTimer = setTimeout(() => { if (run.stalled && this.runInfo.get(convId) === run) this.evictBlocking(convId).catch(() => {}); }, 45000);
+    } else {
+      emit({ type: 'blocked', model: run.model, others: st.others });
+    }
+  }
+
+  // Unload the other models on the server this conversation's request is
+  // waiting on, then send the request again.
+  async evictBlocking(convId) {
+    const run = this.runInfo.get(convId);
+    if (!run) return { error: 'nothing is waiting in this conversation' };
+    const be = this.backend(run.ep);
+    if (!be) return { error: 'this server cannot unload models' };
+    const st = await be.b.status(run.model, { fresh: true });
+    const emit = (ev) => this.emit(convId, ev);
+    if (st && st.loaded) return { ok: true, unloaded: [], note: `${run.model} is loaded now` };
+    const others = (st && st.others) || [];
+    if (!others.length) return { ok: false, error: 'no other model is loaded on the server' };
+    const done = [];
+    for (const m of others) if (await be.b.unload(m)) done.push(m);
+    emit({ type: 'notice', text: done.length ? `Unloaded ${done.join(', ')} from the server; loading ${run.model}.` : `The server did not unload ${others.join(', ')}.` });
+    if (done.length && run.restart) run.restart();
+    return { ok: done.length > 0, unloaded: done };
   }
 
   // Token budget for one request: the user's number, else a default for
@@ -644,6 +694,8 @@ class AiService {
     }
     this.runs.set(conv.id, controller);
     const emit = (ev) => this.emit(conv.id, ev);
+    const run = { ep, model, restart: null, stalled: false, blockedShown: false, autoTimer: null, unattended: opts.source === 'schedule' || opts.source === 'task' };
+    this.runInfo.set(conv.id, run);
     try {
       const provider = this.provider(ep);
       const result = await runTurn({
@@ -654,10 +706,14 @@ class AiService {
           toolMode: c.toolCalls || 'auto',
           session: this.toolSession(model, ep),
           budget: this.contextBudget(ep), calibration: this.calibration(model, ep), compactWithModel: c.compactWithModel !== false,
-          checkBackend: () => this.checkBackend(model, emit, ep)
+          checkBackend: () => this.checkBackend(model, emit, ep),
+          registerStep: (fn) => { run.restart = fn; },
+          onStall: (stage) => { this.onStall(conv.id, stage, emit).catch(() => {}); }
         }
       });
-      if (result && !result.error && !result.stopped) this.refreshKeepAlive(model, ep);
+      // Finished (or stopped): the model unloads after the configured idle
+      // time. Not after an error - that could load a model that failed.
+      if (result && !result.error) this.refreshKeepAlive(model, ep);
       // A server that went away mid-task: the renderer polls and resumes.
       if (result && result.error && result.retryable) emit({ type: 'offline', message: result.error, local: !!preset.local });
       emit({ type: 'done', ...result });
@@ -667,6 +723,8 @@ class AiService {
       emit({ type: 'done', error: err.message });
       return { conversationId: conv.id, error: err.message };
     } finally {
+      clearTimeout(run.autoTimer);
+      this.runInfo.delete(conv.id);
       this.runs.delete(conv.id);
       // Next queued message becomes the next turn, in order.
       const q = this.queues.get(conv.id);
@@ -780,6 +838,7 @@ class AiService {
       return filePaths.map((p) => { try { return attachments.describe(p); } catch { return null; } }).filter(Boolean);
     });
     ipcMain.handle('ai:stop', (_e, id) => this.stop(id));
+    ipcMain.handle('ai:evict-blocking', (_e, id) => this.evictBlocking(String(id || '')));
     ipcMain.handle('ai:queue', (_e, id) => this.queue(id));
     ipcMain.handle('ai:unqueue', (_e, id, index) => this.unqueue(id, Number(index)));
     ipcMain.handle('ai:pin', (_e, on) => this.setPinned(on));

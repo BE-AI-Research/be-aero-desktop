@@ -187,6 +187,21 @@
         <select id="set-ai-task-model" title="Model scheduled tasks run on (a task can choose its own)"></select>
         <div class="hint-text" id="ai-task-hint">Tasks run on this model unless a task picks its own. Using the same model as another program on the same server avoids swapping models in and out.</div>
         <div class="hint-text" id="ai-provider-hint"></div>
+        <label class="field-label">Unload a local model after use</label>
+        <select id="set-ai-unload" title="Ollama: how long a model stays loaded after the last reply or task">
+          <option value="30s">30 seconds after the last reply</option>
+          <option value="1m">1 minute after the last reply</option>
+          <option value="5m">5 minutes after the last reply</option>
+          <option value="30m">30 minutes after the last reply</option>
+          <option value="keep">Leave it to the server's setting</option>
+        </select>
+        <label class="field-label">If another model is holding the server</label>
+        <select id="set-ai-evict" title="When a request waits because another model occupies the server">
+          <option value="ask">Ask before unloading it (scheduled tasks unload it on their own)</option>
+          <option value="auto">Unload it automatically after a wait</option>
+          <option value="never">Never unload other models</option>
+        </select>
+        <div class="hint-text">Ollama servers. Unloading frees the server's memory for other models and programs; whoever uses a model next waits for it to load again.</div>
         <label class="field-label">Tool call format</label>
         <select id="set-ai-toolcalls">
           <option value="auto">Automatic (by model; Qwen XML, Llama, Mistral, Gemma understood)</option>

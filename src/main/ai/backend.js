@@ -60,10 +60,12 @@ class Backend {
 
   supported() { return this.kind !== null; }
 
-  // -> { loaded: bool, window: number|0 } or null when the server cannot say.
-  async status(model) {
+  // -> { loaded: bool, window: number|0, others: [model names] } or null
+  // when the server cannot say. others: the other models resident on an
+  // Ollama server (the ones that can hold it while ours waits to load).
+  async status(model, { fresh = false } = {}) {
     if (this.kind === null || !this.root || /^unix:/i.test(this.root)) return null;
-    if (this.cache && this.cache.model === model && Date.now() - this.cache.at < STATUS_TTL_MS) return this.cache.result;
+    if (!fresh && this.cache && this.cache.model === model && Date.now() - this.cache.at < STATUS_TTL_MS) return this.cache.result;
     let result = null;
     try {
       if (this.kind === undefined || this.kind === 'ollama') {
@@ -71,7 +73,8 @@ class Backend {
         if (r.json && Array.isArray(r.json.models)) {
           this.kind = 'ollama';
           const m = r.json.models.find((x) => x.name === model || x.model === model);
-          result = { loaded: !!m, window: m ? Number(m.context_length) || 0 : 0 };
+          const others = r.json.models.filter((x) => x !== m).map((x) => x.name || x.model).filter(Boolean);
+          result = { loaded: !!m, window: m ? Number(m.context_length) || 0 : 0, others };
         } else if (this.kind === 'ollama') {
           result = null;
         }
@@ -95,8 +98,19 @@ class Backend {
     return result;
   }
 
-  // Extend the model's residency (Ollama only). Fire and forget.
-  async keepAlive(model, duration = '30m') {
+  // Unload a model now (Ollama keep_alive 0). True when the server agreed.
+  async unload(model) {
+    if (this.kind !== 'ollama' || !model) return false;
+    try {
+      const r = await getJson(this.fetch, `${this.root}/api/generate`, { method: 'POST', body: { model, keep_alive: 0 }, timeout: 30000 });
+      this.cache = null;
+      return r.status === 200;
+    } catch { return false; }
+  }
+
+  // Set how long the model stays loaded from now (Ollama only): '1m',
+  // '30s', '30m'. Fire and forget.
+  async keepAlive(model, duration = '1m') {
     if (this.kind !== 'ollama' || !duration || duration === '0') return false;
     try {
       const r = await getJson(this.fetch, `${this.root}/api/generate`, { method: 'POST', body: { model, keep_alive: duration }, timeout: 120000 });

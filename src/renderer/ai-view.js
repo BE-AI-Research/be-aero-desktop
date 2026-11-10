@@ -671,6 +671,24 @@
       case 'notice':
         if (isActive) bubble('notice', esc(ev.text || ''));
         break;
+      case 'blocked':
+        // Another model holds the server while ours waits: one click
+        // unloads it and sends the request again.
+        if (isActive) {
+          const others = (ev.others || []).join(', ');
+          const n = bubble('notice ai-blocked', `${esc(ev.model || 'The model')} is waiting to load: ${esc(others)} is holding the server. `);
+          const btn = document.createElement('button');
+          btn.className = 'btn ai-evict';
+          btn.textContent = `Unload ${(ev.others || []).length > 1 ? 'them' : (ev.others || [''])[0].split('/').pop()} and continue`;
+          btn.title = `Unloads ${others} from the server (other programs using it will reload it when they next need it), then sends this request again`;
+          btn.addEventListener('click', async () => {
+            btn.disabled = true; btn.textContent = 'Unloading…';
+            const r = await aero.aiEvictBlocking(convId).catch((e) => ({ error: String(e) }));
+            btn.textContent = r && r.ok ? 'Unloaded' : `Could not unload${r && r.error ? `: ${r.error}` : ''}`;
+          });
+          n.appendChild(btn);
+        }
+        break;
       case 'context':
         lv.context = { tokens: ev.tokens, budget: ev.budget, compacted: !!ev.compacted };
         break;

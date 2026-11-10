@@ -375,6 +375,8 @@
     if (document.activeElement !== $('set-ai-context')) $('set-ai-context').value = Number(aiCfg.contextTokens) || '';
     $('set-ai-compact').checked = aiCfg.compactWithModel !== false;
     $('set-ai-toolcalls').value = aiCfg.toolCalls || 'auto';
+    $('set-ai-unload').value = aiCfg.unloadAfter || '1m';
+    $('set-ai-evict').value = aiCfg.evictBlocking || 'ask';
     $('set-ai-memory').checked = aiCfg.memoryEnabled !== false;
     const vc = aiCfg.voice || {};
     if (window.__applyVoiceSettings) window.__applyVoiceSettings(vc);
@@ -597,6 +599,8 @@
   $('set-ai-context').addEventListener('change', (e) => aero.setSettings({ ai: { contextTokens: Math.max(0, Number(e.target.value) || 0) } }).then(refreshAiStatus));
   $('set-ai-compact').addEventListener('change', (e) => aero.setSettings({ ai: { compactWithModel: e.target.checked } }));
   $('set-ai-toolcalls').addEventListener('change', (e) => aero.setSettings({ ai: { toolCalls: e.target.value } }));
+  $('set-ai-unload').addEventListener('change', (e) => aero.setSettings({ ai: { unloadAfter: e.target.value } }));
+  $('set-ai-evict').addEventListener('change', (e) => aero.setSettings({ ai: { evictBlocking: e.target.value } }));
 
   // "Model for scheduled tasks": the server's models (fetched once per
   // section open), plus whatever is saved even if the list is unavailable.

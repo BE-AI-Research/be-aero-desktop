@@ -91,6 +91,9 @@ async function runTurn({ provider, model, conversation, ctx, permit, emit, signa
   // Read-only calls already made in this request (name + input): a repeat
   // is answered from memory instead of fetching the same page again.
   const seen = new Map();
+  // Set when the step's request was cancelled to be sent again (the model
+  // blocking the server was unloaded): not a stop, the step re-runs.
+  let restartStep = false;
   const baseBudget = Number(context.budget) > 0 ? Number(context.budget) : ctxbuf.DEFAULT_BUDGETS.local;
   let budget = baseBudget;
   const calibration = context.calibration || new ctxbuf.Calibration();
@@ -126,23 +129,40 @@ async function runTurn({ provider, model, conversation, ctx, permit, emit, signa
       // <think> blocks never reach the screen; a separate reasoning stream
       // counts as activity and shows as "thinking".
       const think = new toolcalls.ThinkFilter();
+      // The step's own abort: the run's Stop aborts it, and so can
+      // registerStep's restart (then the same step is sent again).
+      const stepAc = new AbortController();
+      const relay = () => stepAc.abort();
+      if (signal) { if (signal.aborted) stepAc.abort(); else signal.addEventListener('abort', relay, { once: true }); }
+      if (context.registerStep) context.registerStep(() => { restartStep = true; stepAc.abort(); });
       const stall = watchStall((delta) => { const v = think.feed(delta); if (v) emit({ type: 'delta', text: v }); },
-        (stage, idleMs) => emit({ type: 'stall', stage, seconds: Math.round(idleMs / 1000) }), context.stall || {});
+        (stage, idleMs) => { emit({ type: 'stall', stage, seconds: Math.round(idleMs / 1000) }); if (context.onStall) context.onStall(stage, idleMs); }, context.stall || {});
       let thinkingShown = false;
       const onReasoning = () => { stall.onText(''); if (!thinkingShown) { thinkingShown = true; emit({ type: 'thinking' }); } };
       try {
         res = await chatWithRetry(provider, {
-          model, system, tools: compatMode() || finalOnly ? [] : defs, compat: compatMode() && !finalOnly, signal, messages,
+          model, system, tools: compatMode() || finalOnly ? [] : defs, compat: compatMode() && !finalOnly, signal: stepAc.signal, messages,
           onText: stall.onText, onReasoning
-        }, { emit, signal });
+        }, { emit, signal: stepAc.signal });
         const tail = think.flush();
         if (tail) emit({ type: 'delta', text: tail });
-      } finally { stall.stop(); }
+      } finally {
+        stall.stop();
+        if (signal) signal.removeEventListener('abort', relay);
+        if (context.registerStep) context.registerStep(null);
+      }
       emit({ type: 'stall', stage: 0, seconds: 0 });
       if (res && res.usage && res.usage.input) calibration.observe(ctxbuf.totalChars(messages, system), res.usage.input);
       emit({ type: 'context', tokens: ctxbuf.estimateTokens(messages, system, calibration.cpt), budget, compacted: !!conversation.summary });
     } catch (err) {
       if (signal && signal.aborted) return { stopped: true };
+      if (restartStep) {
+        restartStep = false;
+        steps--;
+        emit({ type: 'stall', stage: 0, seconds: 0 });
+        emit({ type: 'notice', text: 'Sending the request again now that the server is free.' });
+        continue;
+      }
       // Some servers reject the tools field outright: embedded calls for the
       // rest of the session, and this step again.
       if (!compatMode() && setting !== 'native' && defs.length && !session.nativeWorked && toolcalls.looksLikeToolsUnsupported(err)) {

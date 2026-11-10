@@ -35,11 +35,11 @@ test('Ollama: residency and window from /api/ps; eviction seen; keep_alive sent'
   });
   try {
     const b = new Backend({ baseUrl: url });
-    assert.deepStrictEqual(await b.status('qwen3:8b'), { loaded: true, window: 8192 });
+    assert.deepStrictEqual(await b.status('qwen3:8b'), { loaded: true, window: 8192, others: [] });
     assert.strictEqual(b.kind, 'ollama');
     resident = false;
     b.cache = null;
-    assert.deepStrictEqual(await b.status('qwen3:8b'), { loaded: false, window: 0 });
+    assert.deepStrictEqual(await b.status('qwen3:8b'), { loaded: false, window: 0, others: [] });
     assert.strictEqual(await b.keepAlive('qwen3:8b', '30m'), true);
     assert.deepStrictEqual(posted, [{ model: 'qwen3:8b', keep_alive: '30m' }]);
   } finally { s.close(); }
@@ -106,4 +106,50 @@ test('agent loop: the live window shrinks the context budget before the call', a
   });
   assert.deepStrictEqual(seenBudgets, [3072]);
   assert.ok(events.some((e) => e.type === 'stall' && e.stage === 0), 'stall state cleared after the call');
+});
+
+test('Ollama: another resident model is named, unload() frees it, and fresh status skips the cache', async () => {
+  let resident = ['big:q5'];
+  const posted = [];
+  const { s, url } = await server((req, res, body) => {
+    if (req.url === '/api/ps') return json(res, { models: resident.map((n) => ({ name: n, model: n, context_length: 32768 })) });
+    if (req.url === '/api/generate') { posted.push(body); if (body.keep_alive === 0) resident = resident.filter((n) => n !== body.model); return json(res, { done: true }); }
+    json(res, {}, 404);
+  });
+  try {
+    const b = new Backend({ baseUrl: url });
+    assert.deepStrictEqual(await b.status('small:q4'), { loaded: false, window: 0, others: ['big:q5'] });
+    assert.strictEqual(await b.unload('big:q5'), true);
+    assert.deepStrictEqual(posted, [{ model: 'big:q5', keep_alive: 0 }]);
+    resident.push('small:q4');
+    assert.deepStrictEqual(await b.status('small:q4', { fresh: true }), { loaded: true, window: 32768, others: [] });
+  } finally { s.close(); }
+});
+
+test('agent: a stalled step restarted from outside is sent again, not stopped', async () => {
+  const conv = { messages: [{ role: 'user', content: 'hi' }] };
+  const ctx = { settings: () => ({ dock: 'right', theme: {} }), plugins: () => [], append: (m) => conv.messages.push(m) };
+  let calls = 0;
+  let restart = null;
+  const provider = {
+    chat: ({ signal }) => {
+      calls++;
+      if (calls === 1) {
+        // The first request hangs until it is aborted.
+        return new Promise((_, rej) => signal.addEventListener('abort', () => rej(Object.assign(new Error('aborted'), { name: 'AbortError' }))));
+      }
+      return Promise.resolve({ text: 'Loaded and answered.', toolCalls: [], stopReason: 'end_turn' });
+    }
+  };
+  const events = [];
+  const p = runTurn({ provider, model: 'small:q4', conversation: conv, ctx, permit: async () => true, emit: (e) => events.push(e),
+    context: { registerStep: (fn) => { if (fn) restart = fn; } } });
+  await new Promise((r) => setTimeout(r, 50));
+  assert.ok(restart, 'the step registered a restart');
+  restart();
+  const r = await p;
+  assert.ok(r.done && !r.stopped);
+  assert.strictEqual(calls, 2);
+  assert.strictEqual(conv.messages[conv.messages.length - 1].content, 'Loaded and answered.');
+  assert.ok(events.some((e) => e.type === 'notice' && /again now that the server is free/.test(e.text)));
 });

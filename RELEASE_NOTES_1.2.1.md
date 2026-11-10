@@ -68,8 +68,14 @@ the final answer.
 - **The context buffer follows the model's real window.** If a model is reloaded with a
   smaller context window, the conversation is summarized to fit instead of being cut off
   by the server.
-- **The model stays loaded between messages:** BE-Aero asks Ollama to keep it loaded for 30
-  minutes after each reply.
+- **Models unload when you're done.** A minute after the last reply or task (your choice: 30
+  seconds to 30 minutes, or the server's own setting), BE-Aero tells Ollama to unload the
+  model, so a shared server's memory is free for other models. Another message in the
+  meantime keeps it loaded.
+- **Unload a model that's holding the server.** If your request waits because another model
+  occupies the server, the chat offers "Unload <model> and continue": one click frees the
+  server and sends your request again. Settings can make this automatic or turn it off;
+  scheduled tasks, with nobody there to click, do it on their own after a wait.
 - **Waits are explained.** If the model is silent for 45 seconds (loading, re-reading a long
   conversation, or busy with another request), the status line says so. After 3 minutes it
   reminds you that Stop is safe.
