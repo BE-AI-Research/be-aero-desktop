@@ -1077,9 +1077,14 @@ webview.plugin-frame { background: #fff; }
 .ai-msg.ai-notice { align-self: center; font-size: 10.5px; font-style: italic; opacity: .7; background: transparent; padding: 2px 8px; }
 
 /* Media controller widget */
-.media-widget { display: flex; flex-direction: column; gap: 6px; padding: 12px 14px; height: 132px; overflow: hidden; }
+.media-widget { display: flex; flex-direction: column; gap: 4px; padding: 10px 14px 12px; height: 160px; overflow: hidden; }
+.media-head { display: flex; align-items: center; gap: 6px; flex: none; }
+.media-head .widget-title { margin: 0 auto 0 0; }
+.media-min { opacity: .6; }
+.media-widget:hover .media-min { opacity: 1; }
+.media-body { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 6px; container-type: size; }
 .media-row { display: flex; gap: 10px; align-items: center; min-height: 0; flex: 1; }
-.media-art { width: 52px; height: 52px; flex: none; border-radius: 8px; background: rgba(255,255,255,.08) center/cover no-repeat; box-shadow: 0 2px 10px rgba(0,0,0,.3); position: relative; }
+.media-art { width: clamp(40px, calc(100cqh - 52px), 220px); height: clamp(40px, calc(100cqh - 52px), 220px); max-width: 45cqw; max-height: 45cqw; flex: none; border-radius: 8px; background: rgba(255,255,255,.08) center/cover no-repeat; box-shadow: 0 2px 10px rgba(0,0,0,.3); position: relative; }
 .media-art::after { content: '\266B'; position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 22px; opacity: .35; }
 .media-art[style*="url("]::after { content: none; }
 .media-text { min-width: 0; flex: 1; }
@@ -1169,3 +1174,7 @@ webview.plugin-frame { background: #fff; }
   background: rgba(0,0,0,.25); color: inherit; font: inherit; padding: 6px 8px; }
 .ai-edit-row { display: flex; gap: 6px; justify-content: flex-end; margin-top: 6px; }
 .ai-msg.editing > .ai-actions { display: none !important; }
+
+/* Bigger widget, bigger type */
+@container (min-height: 160px) { .media-title { font-size: 15px; } .media-sub { font-size: 12.5px; } .media-btn { width: 32px; height: 28px; font-size: 15px; } .media-play { font-size: 18px; } }
+@container (min-height: 260px) { .media-title { font-size: 18px; white-space: normal; } .media-sub { font-size: 14px; } .media-app { font-size: 11.5px; } }

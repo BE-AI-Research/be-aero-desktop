@@ -82,9 +82,22 @@
 
   function init(opts) {
     aero = opts.aero;
-    root = document.querySelector('.media-widget');
-    if (!root) return;
-    root.innerHTML = `
+    const widget = document.querySelector('.media-widget');
+    if (!widget) return;
+    // Our own container: the widget itself also holds the layout's resize
+    // grip, which must survive.
+    widget.insertAdjacentHTML('afterbegin', `
+      <div class="media-head">
+        <h3 class="widget-title">NOW PLAYING</h3>
+        <button class="icon-btn media-min" title="Minimize to the dock">&#8212;</button>
+      </div>
+      <div class="media-body"></div>`);
+    widget.querySelector('.media-min').addEventListener('click', (e) => {
+      e.stopPropagation();
+      aero.setSettings({ widgetMinimized: { media: true } });
+    });
+    root = widget;
+    widget.querySelector('.media-body').innerHTML = `
       <div class="media-row">
         <div class="media-art"></div>
         <div class="media-text">
