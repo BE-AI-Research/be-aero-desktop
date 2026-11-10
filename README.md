@@ -44,7 +44,10 @@ trust this source. All downloads are also on the [releases page](https://github.
 - **Weather** - live conditions from Open-Meteo (free, no API key). Animated sun/moon/cloud/rain/snow/storm/fog, plus a 7-day forecast strip that appears once you make the widget tall enough (it can also be switched off in Settings). Pick any city in Settings.
 - **System telemetry** - real CPU, RAM, disk, network and battery readings in five styles: rings, speedometer arcs, bars, live graphs or compact chips. Per-core heatmap, configurable colours, sample interval, history length, warning threshold and stroke thickness.
 - **Application dock** - a macOS-style dock on glass: pin apps to it (click launches them), every open application shows with its real icon, a running dot and a window-count badge; click focuses (repeated clicks cycle an app's windows), right-click manages (that app's windows, new window, pin/unpin, minimize all, close all). Icon alignment (left / center / right) is configurable, minimized web widgets park here with their site favicons, and the dock - like every widget, plugin and web widget - can be toggled individually from the tray. A reconfigurable **dock hotkey** (Ctrl+Alt+D by default) summons the dock above whatever is on screen - a full-screen game included - and it sinks back to the desktop layer as soon as you pick an app or press the key again.
+- **Media controller** - what is playing anywhere on the machine (any app with a media session: Spotify, a browser tab, a player) with cover art, progress, play/pause, previous/next and volume up/down/mute. Windows reads the system media session; Linux uses `playerctl` (MPRIS) and `wpctl`/`pactl` for volume.
 - **Scratchpad** - notes saved to disk automatically (they survive restarts), with a Save button to write the note out as a .md or .txt file.
+
+Every widget can be **minimized to the dock** (hover for the button; it parks as a glyph tile and a click brings it back). In free-form mode widgets **stack**: clicking or dragging one raises it and the order is remembered; new web widgets open in the middle of the display. Text fields and web widgets have **spell checking and a right-click menu** (suggestions, add to dictionary, cut/copy/paste, link and image actions, back/forward/reload for web pages) - toggle it in Settings.
 
 ## AI assistant
 A chat widget that can **operate the desktop**: switch themes, change settings, read and
@@ -53,6 +56,24 @@ applications, create web widgets, and drive web frames (read the page, navigate,
 type, run JavaScript). Conversations are saved and can be revisited, renamed and deleted.
 Pin the widget (📌) to keep the sidebar above other windows while an agentic task runs.
 
+- **Providers:** Anthropic, OpenAI, Ollama, LM Studio, llama.cpp, the BE AI Engine fabric, a
+  running **BE-Code session** (its Application API over `~/.be-code/api/api.sock`, inference
+  only - register the app with `be-code apps add be-aero --tiers completions`; Linux/macOS),
+  or any OpenAI-compatible server on your machine or LAN.
+- **Context buffer:** every request stays inside a token budget (automatic per provider -
+  16k for local servers - or set your own). Old tool output is trimmed first, then the older
+  conversation is summarized by the model and carried forward; the saved history is never
+  deleted. `/compact` does it on demand; the status line shows how full the context is.
+- **Reconnection:** a local server that restarts, swaps models or drops a stream does not
+  cost you the turn - calls retry with backoff (Retry-After honoured; a rejected key never
+  retries), and if the server stays away the chat waits, polls and resumes the pending
+  message when it is back. The dot in the chat header shows the connection; click to check.
+- **Voice:** the microphone button dictates into the message box with the OS's offline
+  recognizer (Windows Speech Recognition; whisper.cpp on Linux when installed), optionally
+  sending each sentence as it is recognized; replies can be read aloud (voice and rate in
+  Settings). Nothing leaves the machine. The −/+ buttons scale the chat text.
+- **Media:** `media_status` / `media_control` play, pause, skip and set volume on whatever is
+  playing.
 - **Web access:** `web_search` returns results (no key or browser needed) and `fetch_url` reads
   a page as text; `open_web_search` hands a query to your default browser and engine.
 - **Driving apps and web frames:** focus/minimize/maximize/restore/close windows, send
@@ -200,10 +221,20 @@ want the tray too.
 Something off on your desktop? Run `be-aero-desktop --doctor` - it prints the session type,
 display map and capability report to paste into a bug report.
 
-Windows-only features degrade cleanly on Linux: the app dock and app-identity binding are
-Windows subsystems (Win32 window enumeration, Authenticode), so the dock shows only parked
-web widgets and the local API runs with token + pairing consent but without binary binding.
-deb/AppImage targets need a Linux build host; the tar.gz builds anywhere.
+**The dock on Linux** has three window sources, best available wins. On GNOME/Wayland the
+compositor is the only thing that can see other applications' windows, so the installer
+ships a small GNOME Shell helper (`be-aero-dock@be-ai-research`, no UI of its own) that
+exports the window list and focus/minimize/close over D-Bus; enable it once
+(`gnome-extensions enable be-aero-dock@be-ai-research`, then log out and back in) - Settings
+shows which source is active and can install it into your user profile too. X11 sessions use
+`wmctrl`/`xprop` (install them if missing). Without either, the dock shows running
+applications matched to their `.desktop` entries (no titles or window state). Telemetry reads
+disk usage from `/` (or any mount point you type into the drive field) and network rates
+from `/proc/net/dev`; the media controller needs `playerctl`.
+
+App-identity binding is a Windows subsystem (Authenticode), so the local API runs with
+token + pairing consent but without binary binding on Linux. deb/AppImage targets need a
+Linux build host; the tar.gz builds anywhere.
 
 ## Updates
 The app checks the project's GitHub releases a few times a day (and on demand from

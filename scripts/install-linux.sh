@@ -24,6 +24,7 @@ fi
 if [[ "${1:-}" == "--uninstall" ]]; then
   rm -rf "$APP_DIR"
   rm -f "$BIN_LINK" "$DESKTOP" "$ICON"
+  rm -rf /usr/share/gnome-shell/extensions/be-aero-dock@be-ai-research
   command -v update-desktop-database >/dev/null && update-desktop-database || true
   echo "BE-Aero Desktop removed."
   exit 0
@@ -96,6 +97,17 @@ DESK
 
 command -v update-desktop-database >/dev/null && update-desktop-database || true
 command -v gtk-update-icon-cache >/dev/null && gtk-update-icon-cache -f /usr/share/icons/hicolor 2>/dev/null || true
+
+# GNOME on Wayland: the dock can only mirror real windows through a Shell
+# extension. Install it system-wide; the user enables it once.
+EXT_UUID=be-aero-dock@be-ai-research
+if [ -d /usr/share/gnome-shell ] && [ -d "$APP_DIR/resources/gnome-extension/$EXT_UUID" ]; then
+  mkdir -p "/usr/share/gnome-shell/extensions/$EXT_UUID"
+  cp "$APP_DIR/resources/gnome-extension/$EXT_UUID/"* "/usr/share/gnome-shell/extensions/$EXT_UUID/"
+  chmod 644 "/usr/share/gnome-shell/extensions/$EXT_UUID/"*
+  echo "GNOME dock helper installed. Enable it (then log out and back in on Wayland):"
+  echo "    gnome-extensions enable $EXT_UUID"
+fi
 echo "Done. Launch 'BE-Aero Desktop' from your app menu, or run: be-aero-desktop"
 echo "Uninstall any time with: sudo bash install-linux.sh --uninstall"
 }

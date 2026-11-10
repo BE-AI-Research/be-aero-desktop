@@ -19,7 +19,7 @@
 
   function appNameFromExe(exe) {
     if (typeof exe !== 'string' || !exe) return 'App';
-    const base = exe.replace(/\\/g, '/').split('/').pop().replace(/\.exe$/i, '');
+    const base = exe.replace(/\\/g, '/').split('/').pop().replace(/\.exe$/i, '').replace(/\.desktop$/i, '');
     const key = base.toLowerCase();
     if (NAME_OVERRIDES[key]) return NAME_OVERRIDES[key];
     return base
@@ -81,7 +81,9 @@
       tiles.push({
         key,
         exe: wins[0].exe,
-        name: appNameFromExe(wins[0].exe),
+        // A window source that knows the application's real name (Linux
+        // .desktop entries) says so on each window.
+        name: wins[0].app || appNameFromExe(wins[0].exe),
         pinned: false,
         running: true,
         windows: wins

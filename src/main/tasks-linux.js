@@ -1,16 +1,52 @@
-// Process-based dock source for Linux.
+// Dock source for Linux: three tiers, best available wins.
 //
-// Wayland will not let one application enumerate another's windows (no
-// compositor API exists), but /proc shows which applications are RUNNING -
-// the task manager's view, which is exactly what the user asked the dock to
-// mirror. Processes are matched to .desktop entries, so tiles carry real
-// application names and icons. Limitations owned openly: no window titles
-// or counts, "focus" means re-activating the app (which raises the existing
-// window for single-instance applications - the common case on GNOME), and
-// close asks the process to terminate.
+// 1. GNOME Shell helper. Wayland lets no application enumerate another's
+//    windows, but the compositor can: the small extension shipped in
+//    resources/gnome-extension exports org.beaero.Dock on the session bus
+//    (list, activate, minimize, close, with focus and minimized state).
+// 2. X11 session: wmctrl + xprop give the same picture for every window.
+// 3. /proc: which applications are RUNNING (the task manager's view), matched
+//    to .desktop entries. No titles or window state; "focus" re-activates the
+//    app (single-instance apps raise their window) and close sends SIGTERM.
+//
+// Every tier reports TaskWindows' shape: {hwnd, pid, title, exe, min, fg, app}
+// where exe is the .desktop file (icons and grouping) and app the real name.
 const fs = require('fs');
 const path = require('path');
-const { spawn } = require('child_process');
+const os = require('os');
+const { spawn, execFile } = require('child_process');
+
+const EXT_UUID = 'be-aero-dock@be-ai-research';
+const BUS = ['--session', '--dest', 'org.gnome.Shell', '--object-path', '/org/beaero/Dock'];
+const PROBE_MS = 30 * 1000;   // how long a failed tier stays benched
+
+function run(cmd, args, timeout = 3000) {
+  return new Promise((resolve) => {
+    try {
+      execFile(cmd, args, { timeout, maxBuffer: 4 * 1024 * 1024 }, (err, stdout) => resolve(err ? null : String(stdout)));
+    } catch { resolve(null); }
+  });
+}
+
+// gdbus prints a GVariant tuple: ('<base64 json>',). The helper base64-encodes
+// its JSON so titles with quotes or escapes never meet gdbus's own quoting.
+function parseGdbusB64(out) {
+  const m = /\(\s*'([A-Za-z0-9+/=]*)'\s*,?\s*\)/.exec(String(out || '').trim());
+  if (!m) return null;
+  try { return JSON.parse(Buffer.from(m[1], 'base64').toString('utf8')); } catch { return null; }
+}
+
+// One line of `wmctrl -lpx`: id, desktop, pid, WM_CLASS, host, title.
+function parseWmctrl(text) {
+  const out = [];
+  for (const line of String(text || '').split(/\r?\n/)) {
+    const m = /^(0x[0-9a-fA-F]+)\s+(-?\d+)\s+(\d+)\s+(\S+)\s+(\S+)\s*(.*)$/.exec(line);
+    if (!m) continue;
+    const wmClass = m[4] === 'N/A' ? '' : m[4];
+    out.push({ id: parseInt(m[1], 16), desktop: Number(m[2]), pid: Number(m[3]), wmClass, title: m[6].trim() });
+  }
+  return out;
+}
 
 const HOME = require('os').homedir();
 const APP_ROOTS = [
@@ -93,12 +129,40 @@ function parseDesktopFile(file, text) {
   const isFlatpak = /(^|\/)flatpak(\s|$)/.test(exec.split(/\s+/)[0]) || /\bflatpak run\b/.test(exec);
   const isSnap = /^\/snap\/|\bsnap run\b/.test(exec);
   return {
-    name, file, exec,
+    name, file, exec, id,
     base: execBase(exec),
     flatpakId: isFlatpak ? id : null,
     snapName: isSnap ? id : null,
+    wmClass: get('StartupWMClass'),
     icon: get('Icon')
   };
+}
+
+// Resolve a compositor-reported window to a desktop entry: by desktop id
+// (what GNOME's window tracker hands back), then StartupWMClass, then the
+// WM_CLASS against the entry id or its command, then the owning process.
+function entryForWindow(win, entries, procs) {
+  const appId = String(win.app || '').replace(/\.desktop$/i, '').toLowerCase();
+  const cls = String(win.wmClass || '').split('.').pop().toLowerCase();
+  const clsAll = String(win.wmClass || '').toLowerCase().split('.');
+  if (appId) {
+    const e = entries.find((x) => x.id.toLowerCase() === appId);
+    if (e) return e;
+  }
+  if (cls) {
+    const byClass = entries.find((x) => x.wmClass && x.wmClass.toLowerCase() === cls)
+      || entries.find((x) => x.id.toLowerCase() === cls || clsAll.includes(x.id.toLowerCase()))
+      || entries.find((x) => x.base && (x.base === cls || clsAll.includes(x.base)));
+    if (byClass) return byClass;
+  }
+  if (win.pid && procs) {
+    const p = procs.find((x) => x.pid === win.pid);
+    if (p) {
+      const hit = matchProcesses([p], entries)[0];
+      if (hit) return entries.find((x) => x.file === hit.exe) || null;
+    }
+  }
+  return null;
 }
 
 class LinuxTasks {
@@ -107,6 +171,77 @@ class LinuxTasks {
     this.entriesAt = 0;
     this.lastList = [];
     this.iconCache = new Map();
+    this.source = 'proc';          // 'shell' | 'x11' | 'proc'
+    this.benched = { shell: 0, x11: 0 };
+    this.procsAt = 0;
+    this.procs = [];
+  }
+
+  // The window source in use and whether the GNOME helper could be installed.
+  status() {
+    const gnome = /gnome/i.test(process.env.XDG_CURRENT_DESKTOP || '') || /gnome/i.test(process.env.DESKTOP_SESSION || '');
+    const wayland = (process.env.XDG_SESSION_TYPE || '').toLowerCase() === 'wayland' || !!process.env.WAYLAND_DISPLAY;
+    return { source: this.source, gnome, wayland, helperUuid: EXT_UUID, helperInstalled: fs.existsSync(path.join(os.homedir(), '.local/share/gnome-shell/extensions', EXT_UUID)) || fs.existsSync(path.join('/usr/share/gnome-shell/extensions', EXT_UUID)) };
+  }
+
+  // Copy the shipped extension into the user's extensions directory and ask
+  // GNOME to enable it. On Wayland the shell loads it at the next login.
+  async installHelper(fromDir) {
+    const dest = path.join(os.homedir(), '.local/share/gnome-shell/extensions', EXT_UUID);
+    try {
+      fs.mkdirSync(dest, { recursive: true });
+      for (const f of fs.readdirSync(fromDir)) fs.copyFileSync(path.join(fromDir, f), path.join(dest, f));
+    } catch (err) { return { ok: false, error: err.message }; }
+    const enabled = await run('gnome-extensions', ['enable', EXT_UUID], 5000);
+    this.benched.shell = 0;
+    return { ok: true, enabled: enabled !== null, dest };
+  }
+
+  cachedProcs() {
+    if (Date.now() - this.procsAt > 5000) { this.procs = this.readProcesses(); this.procsAt = Date.now(); }
+    return this.procs;
+  }
+
+  toWindow(w, e) {
+    return {
+      hwnd: w.id, pid: w.pid, title: w.title || (e ? e.name : w.wmClass || 'Window'),
+      exe: e ? e.file : `${String(w.wmClass || 'app').split('.').pop().toLowerCase()}.desktop`,
+      app: e ? e.name : (String(w.wmClass || '').split('.').pop() || 'App'),
+      min: !!w.minimized, fg: !!w.focused
+    };
+  }
+
+  // Tier 1: the GNOME Shell helper.
+  async listShell() {
+    if (Date.now() < this.benched.shell) return null;
+    const out = await run('gdbus', ['call', ...BUS, '--method', 'org.beaero.Dock.List']);
+    const list = out && parseGdbusB64(out);
+    if (!Array.isArray(list)) { this.benched.shell = Date.now() + PROBE_MS; return null; }
+    const procs = this.cachedProcs();
+    return list.filter((w) => w && !SELF.test(String(w.wmClass || '')) && w.pid !== process.pid)
+      .map((w) => this.toWindow(w, entryForWindow(w, this.entries, procs)));
+  }
+
+  // Tier 2: an X11 session with wmctrl (+ xprop for state/focus).
+  async listX11() {
+    if (Date.now() < this.benched.x11) return null;
+    if (!process.env.DISPLAY || (process.env.XDG_SESSION_TYPE || '').toLowerCase() === 'wayland') return null;
+    const out = await run('wmctrl', ['-lpx']);
+    if (out === null) { this.benched.x11 = Date.now() + PROBE_MS; return null; }
+    const wins = parseWmctrl(out).filter((w) => w.pid !== process.pid && !SELF.test(w.wmClass));
+    const active = await run('xprop', ['-root', '_NET_ACTIVE_WINDOW']);
+    const am = /0x[0-9a-fA-F]+/.exec(active || '');
+    const activeId = am ? parseInt(am[0], 16) : -1;
+    const states = await Promise.all(wins.map((w) => run('xprop', ['-id', `0x${w.id.toString(16)}`, '_NET_WM_STATE', '_NET_WM_WINDOW_TYPE'], 2000)));
+    const procs = this.cachedProcs();
+    const list = [];
+    wins.forEach((w, i) => {
+      const st = states[i] || '';
+      if (/_NET_WM_WINDOW_TYPE_(DOCK|DESKTOP|TOOLBAR|MENU|SPLASH|NOTIFICATION|TOOLTIP)/.test(st)) return;
+      if (/_NET_WM_STATE_SKIP_TASKBAR/.test(st)) return;
+      list.push(this.toWindow({ ...w, minimized: /_NET_WM_STATE_HIDDEN/.test(st), focused: w.id === activeId }, entryForWindow(w, this.entries, procs)));
+    });
+    return list;
   }
 
   refreshEntries() {
@@ -152,9 +287,17 @@ class LinuxTasks {
   async list() {
     // The dock polls every couple of seconds; a /proc walk is cheap but there
     // is no reason to repeat it faster than applications come and go.
-    if (this.listAt && Date.now() - this.listAt < 1500) return this.lastList;
+    if (this.listAt && Date.now() - this.listAt < 1200) return this.lastList;
     this.refreshEntries();
-    this.lastList = matchProcesses(this.readProcesses(), this.entries);
+    let list = await this.listShell();
+    let source = 'shell';
+    if (!list) { list = await this.listX11(); source = 'x11'; }
+    if (!list) {
+      source = 'proc';
+      list = matchProcesses(this.readProcesses(), this.entries).map((w) => ({ ...w, app: w.title, min: false, fg: false }));
+    }
+    this.source = source;
+    this.lastList = list;
     this.listAt = Date.now();
     return this.lastList;
   }
@@ -176,14 +319,33 @@ class LinuxTasks {
     return true;
   }
 
-  // 'focus' re-activates the application (single-instance apps raise their
-  // window); 'close' asks the process to terminate. Window-level verbs do
-  // not exist without a window list.
-  action(name, pid) {
-    const w = this.lastList.find((x) => x.pid === pid);
+  // Window verbs. With a real window source (shell helper, X11) they act on
+  // the window; on the /proc tier 'activate' re-launches the application
+  // (single-instance apps raise their window) and 'close' sends SIGTERM.
+  async action(name, id) {
+    const w = this.lastList.find((x) => x.hwnd === id) || this.lastList.find((x) => x.pid === id);
     if (!w) return false;
-    if (name === 'focus') return this.launch(w.exe);
-    if (name === 'close') { try { process.kill(pid, 'SIGTERM'); return true; } catch { return false; } }
+    const verb = name === 'focus' || name === 'restore' ? 'activate' : name;
+    if (this.source === 'shell') {
+      const method = { activate: 'Activate', minimize: 'Minimize', close: 'Close', maximize: 'Activate' }[verb];
+      if (!method) return false;
+      const out = await run('gdbus', ['call', ...BUS, '--method', `org.beaero.Dock.${method}`, String(w.hwnd)]);
+      this.listAt = 0;
+      return out !== null && /true/.test(out);
+    }
+    if (this.source === 'x11') {
+      const hex = `0x${Number(w.hwnd).toString(16)}`;
+      let out = null;
+      if (verb === 'activate' || verb === 'maximize') out = await run('wmctrl', ['-ia', hex]);
+      else if (verb === 'minimize') {
+        out = await run('xdotool', ['windowminimize', hex]);
+        if (out === null) out = await run('wmctrl', ['-ir', hex, '-b', 'add,hidden']);
+      } else if (verb === 'close') out = await run('wmctrl', ['-ic', hex]);
+      this.listAt = 0;
+      return out !== null;
+    }
+    if (verb === 'activate') return this.launch(w.exe);
+    if (verb === 'close') { try { process.kill(w.pid, 'SIGTERM'); return true; } catch { return false; } }
     return false;
   }
 
@@ -229,4 +391,4 @@ class LinuxTasks {
   }
 }
 
-module.exports = { LinuxTasks, execBase, containerId, matchProcesses, parseDesktopFile };
+module.exports = { LinuxTasks, execBase, containerId, matchProcesses, parseDesktopFile, parseWmctrl, parseGdbusB64, entryForWindow, EXT_UUID };

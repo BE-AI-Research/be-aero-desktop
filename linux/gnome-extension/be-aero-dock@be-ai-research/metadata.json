@@ -1,0 +1,15 @@
+{
+  "uuid": "be-aero-dock@be-ai-research",
+  "name": "BE-Aero Dock helper",
+  "description": "Lets BE-Aero Desktop mirror your windows in its dock on Wayland: lists windows and activates, minimizes or closes them on request over D-Bus (org.beaero.Dock). Nothing is shown on screen.",
+  "shell-version": [
+    "45",
+    "46",
+    "47",
+    "48",
+    "49",
+    "50"
+  ],
+  "url": "https://github.com/BE-AI-Research/be-aero-desktop",
+  "version": 1
+}

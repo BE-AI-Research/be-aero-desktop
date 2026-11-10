@@ -96,10 +96,19 @@ const DEFAULTS = {
     weather: true,
     telemetry: true,
     tasks: true,
+    media: true,
     scratchpad: true,
     ai: true
   },
   scratchpad: '',
+  // Built-in widgets parked in the dock (id -> true). Web widgets and the
+  // AI chat carry their own minimized flags.
+  widgetMinimized: {},
+  // Spell checking for the sidebar's own inputs and for web widgets.
+  spellcheck: {
+    enabled: true,
+    languages: []        // empty = the OS / app locale
+  },
   // AI assistant: provider + model, key encrypted at rest (safeStorage),
   // what the model may do without asking, and the user's persona text.
   ai: {
@@ -110,7 +119,11 @@ const DEFAULTS = {
     model: '',
     permission: 'ask',       // ask | allow | deny  (reads are always allowed)
     systemPrompt: '',
-    maxSteps: 12
+    maxSteps: 12,
+    zoom: 1,             // chat text scale (0.8 - 1.6)
+    contextTokens: 0,    // request budget; 0 = default for the provider (local servers 16k)
+    compactWithModel: true,
+    voice: { speak: false, voiceName: '', rate: 1, autoSend: false }
   },
   notifications: {
     toast: true              // also show OS toasts for web-widget / AI notifications

@@ -197,6 +197,7 @@
     titleEl.textContent = isTasks ? 'Scheduled tasks' : (t ? t.title : '');
     if (isTasks) { renderTasks(); syncBusy(); return; }
     await renderConversation(t);
+    if (t.convId) loadContext(t.convId);
     listEl.value = t && t.convId ? t.convId : '';
     syncBusy();
   }
@@ -209,6 +210,13 @@
       const next = tabs[i] || tabs[i - 1] || null;
       if (next) activateTab(next.key); else newTab(null, null, true);
     } else renderTabs();
+  }
+
+  async function loadContext(convId) {
+    try {
+      const c = await aero.aiContext(convId);
+      if (c) { liveFor(convId).context = { tokens: c.tokens, budget: c.budget, compacted: !!c.compacted }; syncBusy(); }
+    } catch { /* fine */ }
   }
 
   async function renderConversation(tab) {
@@ -244,6 +252,12 @@
     scrollToEnd();
   }
 
+  function contextLine(lv) {
+    if (!lv || !lv.context || !lv.context.budget) return '';
+    const pct = Math.min(999, Math.round((lv.context.tokens / lv.context.budget) * 100));
+    return `context ${pct}%${lv.context.compacted ? ' · compacted' : ''}`;
+  }
+
   function syncBusy() {
     const t = activeTab();
     const lv = t && t.convId ? liveFor(t.convId) : null;
@@ -251,7 +265,35 @@
     root.classList.toggle('busy', on);
     stopBtn.hidden = !on;
     sendBtn.title = on ? 'Queue this message for after the current turn' : 'Send (Enter)';
-    statusEl.textContent = on ? 'Thinking…' : '';
+    if (lv && lv.offline) statusEl.textContent = lv.offlineText || 'Server offline - will resume when it is back.';
+    else if (on) statusEl.textContent = lv.retryText || 'Thinking…';
+    else statusEl.textContent = contextLine(lv);
+  }
+
+  // Connection dot in the header: probe on demand, poll while offline.
+  let probeTimer = null;
+  async function probe(quiet) {
+    const dot = root.querySelector('.ai-conn');
+    if (!dot) return null;
+    if (!quiet) { dot.className = 'ai-conn wait'; dot.title = 'Checking the server…'; }
+    let r = null;
+    try { r = await aero.aiProbe(); } catch { r = null; }
+    if (r && r.ok) { dot.className = 'ai-conn ok'; dot.title = `Connected${r.latencyMs != null ? ` (${r.latencyMs} ms)` : ''}${r.models ? ` · ${r.models} model${r.models === 1 ? '' : 's'}` : ''}`; }
+    else { dot.className = 'ai-conn bad'; dot.title = r && r.error ? `Offline: ${r.error}` : 'Offline'; }
+    return r;
+  }
+  function watchOffline(convId) {
+    clearInterval(probeTimer);
+    probeTimer = setInterval(async () => {
+      const r = await probe(true);
+      if (r && r.ok) {
+        clearInterval(probeTimer); probeTimer = null;
+        const lv = liveFor(convId);
+        lv.offline = false; lv.offlineText = '';
+        syncBusy();
+        aero.aiResume(convId);
+      }
+    }, 8000);
   }
 
   async function refreshList() {
@@ -274,8 +316,14 @@
     const msg = String(text || inputEl.value || '').trim();
     const files = pending.slice();
     if (!msg && !files.length) return;
+    if (/^\/compact\s*$/i.test(msg)) {
+      inputEl.value = ''; inputEl.style.height = '';
+      if (t.convId) { liveFor(t.convId).busy = true; syncBusy(); aero.aiCompact(t.convId); }
+      return;
+    }
     inputEl.value = ''; inputEl.style.height = '';
     pending = []; renderPending();
+    if (window.speechSynthesis) speechSynthesis.cancel();
     if (msgsEl.querySelector('.ai-hint')) msgsEl.innerHTML = '';
     const lv = t.convId ? liveFor(t.convId) : null;
     if (!(lv && lv.busy)) bubble('user', chipsBlock(files) + inline(msg).replace(/\n/g, '<br>'));
@@ -324,6 +372,7 @@
           if (lv.streamEl) lv.streamEl.innerHTML = md(ev.content || lv.streamText);
           else if (ev.content) bubble('assistant', md(ev.content));
         }
+        if (ev.content && (!ev.toolCalls || !ev.toolCalls.length)) speak(ev.content);
         lv.streamEl = null; lv.streamText = '';
         if (!isActive) tab.unread = true;
         break;
@@ -337,8 +386,28 @@
       case 'error':
         if (isActive) bubble('error', esc(ev.message || 'Something went wrong.'));
         break;
+      case 'retry':
+        // Whatever streamed before the failure is discarded; the call is
+        // being made again with the same state.
+        lv.streamText = '';
+        if (lv.streamEl) { lv.streamEl.innerHTML = ''; }
+        lv.retryText = `Backend error - retrying in ${Math.ceil((ev.delayMs || 0) / 1000)} s (${ev.attempt}/${ev.max}); nothing is lost.`;
+        if (isActive) statusEl.textContent = lv.retryText;
+        break;
+      case 'notice':
+        if (isActive) bubble('notice', esc(ev.text || ''));
+        break;
+      case 'context':
+        lv.context = { tokens: ev.tokens, budget: ev.budget, compacted: !!ev.compacted };
+        break;
+      case 'offline':
+        lv.offline = true;
+        lv.offlineText = `${ev.message || 'Server offline.'} Waiting for it to come back - your message is kept.`;
+        probe(true);
+        watchOffline(convId);
+        break;
       case 'done':
-        lv.busy = false; lv.streamEl = null; lv.streamText = '';
+        lv.busy = false; lv.streamEl = null; lv.streamText = ''; lv.retryText = '';
         if (!isActive) tab.unread = true;
         refreshList();
         break;
@@ -503,6 +572,12 @@
       pinBtn.classList.toggle('on', pinned);
       pinBtn.title = pinned ? 'Pinned above other windows - click to release' : 'Keep above other windows while the assistant works';
     });
+    micBtn = root.querySelector('.ai-mic');
+    if (micBtn) {
+      micBtn.addEventListener('click', toggleMic);
+      if (aero.onAiVoice) aero.onAiVoice(onVoice);
+      if (aero.aiVoiceAvailable) aero.aiVoiceAvailable().then((v) => { if (!(v && v.stt)) { micBtn.title = `Voice input unavailable: ${v && v.reason || ''}`; micBtn.classList.add('off'); } }).catch(() => {});
+    }
     root.querySelector('.ai-attach').addEventListener('click', async () => {
       const picked = await aero.aiPickFiles();
       for (const a of picked || []) if (!pending.some((p) => p.path === a.path)) pending.push(a);
@@ -562,6 +637,8 @@
 
     aero.onAiEvent(onEvent);
     aero.onAiAsk((text) => { root.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); send(text); });
+    const conn = root.querySelector('.ai-conn');
+    if (conn) { conn.addEventListener('click', () => probe(false)); setTimeout(() => probe(true), 1500); }
     aero.onAiTasks((list) => { taskList = list || []; renderTasks(); });
 
     // Restore tabs; fall back to one fresh chat.
@@ -581,5 +658,53 @@
     await activateTab(act ? act.key : tabs[0].key);
   }
 
-  window.AeroAi = { init, md };
+  // ------------------------------------------------------------ voice
+  let voiceCfg = {};
+  let listening = false;
+  let micBtn = null;
+  function setVoice(cfg) { voiceCfg = cfg || {}; if (!voiceCfg.speak && window.speechSynthesis) speechSynthesis.cancel(); }
+  function speakable(text) {
+    return String(text || '')
+      .replace(/```[\s\S]*?```/g, ' code block omitted. ')
+      .replace(/`[^`]*`/g, ' ')
+      .replace(/!\[[^\]]*\]\([^)]*\)/g, ' ')
+      .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+      .replace(/[*_#>|~]+/g, ' ')
+      .replace(/https?:\/\/\S+/g, ' link ')
+      .replace(/\s+/g, ' ').trim().slice(0, 4000);
+  }
+  function speak(text) {
+    if (!voiceCfg.speak || !window.speechSynthesis) return;
+    const t = speakable(text);
+    if (!t) return;
+    const u = new SpeechSynthesisUtterance(t);
+    u.rate = Math.max(0.5, Math.min(2, Number(voiceCfg.rate) || 1));
+    if (voiceCfg.voiceName) { const v = speechSynthesis.getVoices().find((x) => x.name === voiceCfg.voiceName); if (v) u.voice = v; }
+    speechSynthesis.speak(u);
+  }
+  function setListening(on) {
+    listening = on;
+    if (micBtn) { micBtn.classList.toggle('on', on); micBtn.title = on ? 'Listening - click to stop' : 'Voice input (offline speech recognition)'; }
+  }
+  function onVoice(ev) {
+    if (!ev) return;
+    if (ev.type === 'ready') { setListening(true); statusEl.textContent = 'Listening…'; return; }
+    if (ev.type === 'final' && ev.text) {
+      const cur = inputEl.value;
+      inputEl.value = (cur ? cur.replace(/\s*$/, ' ') : '') + ev.text;
+      inputEl.dispatchEvent(new Event('input'));
+      if (voiceCfg.autoSend) send();
+      return;
+    }
+    if (ev.type === 'error') { bubble('error', esc(ev.text || 'Voice input failed.')); }
+    if (ev.type === 'end' || ev.type === 'error') { setListening(false); syncBusy(); }
+  }
+  async function toggleMic() {
+    if (listening) { await aero.aiVoiceStop(); setListening(false); syncBusy(); return; }
+    if (window.speechSynthesis) speechSynthesis.cancel();
+    statusEl.textContent = 'Starting the microphone…';
+    await aero.aiVoiceStart();
+  }
+
+  window.AeroAi = { init, md, setVoice, speakable };
 })();

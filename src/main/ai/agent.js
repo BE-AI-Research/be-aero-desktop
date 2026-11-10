@@ -2,6 +2,8 @@
 // -> final answer. Provider-agnostic; permission decisions are delegated to
 // the caller, as is persistence. Emits events the chat UI renders live.
 const tools = require('./tools');
+const ctxbuf = require('./context');
+const { chatWithRetry, isRetryable } = require('./resilience');
 
 const MAX_CONTEXT_MESSAGES = 60;
 const MAX_TOOL_RESULT_CHARS = 20000;
@@ -16,7 +18,9 @@ function systemPrompt(ctx) {
   return [
     persona,
     memory ? `What you remember about this user and their work (global memory; keep it current with memory_remember / memory_forget):\n${memory}` : 'Your global memory is empty. When the user shares a lasting fact about themselves, their preferences or their work, save it with memory_remember.',
-    'You are the assistant built into BE-Aero Desktop, a widget-based desktop shell. You can observe and operate the desktop through tools: widgets, settings, themes, the scratchpad, the search index, running applications, and web widgets (embedded browser frames you can read, navigate, click and type into).',
+    ctx.noTools
+      ? 'You are the assistant built into BE-Aero Desktop, a widget-based desktop shell. In this configuration you answer from knowledge and the conversation only: no tools are available, so say so plainly when the user asks you to act on the desktop, and tell them what they can do themselves.'
+      : 'You are the assistant built into BE-Aero Desktop, a widget-based desktop shell. You can observe and operate the desktop through tools: widgets, settings, themes, the scratchpad, the search index, running applications, and web widgets (embedded browser frames you can read, navigate, click and type into).',
     'Prefer using tools over guessing. When the user asks for something a tool can do, do it, then confirm briefly. Use search() before launch() to find the exact path of an app or file.',
     'Web research: web_search for results, fetch_url to read a result. Browsing for the user happens in two places. (1) The OS browser: browser_open(url) opens a tab in their Chrome/Edge/Brave (a BE-Aero profile - they may need to sign in once) and returns the page; then browser_elements lists NUMBERED elements and browser_click / browser_type act by index; after anything that navigates, read again. browser_screenshot shows you the page when text is not enough. (2) Web widgets on the desktop: web_open(url), then web_elements -> web_click / web_type by index, web_screenshot to look. Use the OS browser when the user says "browser", wants to see it, or needs their logged-in sites; use widgets for things that should live on the desktop. Driving desktop apps: list_running_apps, focus_app, then send_keys; exec_capture runs command-line work and returns the output.',
     'Messages may arrive while you are working; they are delivered in order as new turns - finish the current step, then address them.',
@@ -40,25 +44,61 @@ function windowMessages(messages) {
     ? { ...m, results: m.results.map((r) => ({ ...r, images: undefined })) } : m));
 }
 
-async function runTurn({ provider, model, conversation, ctx, permit, emit, signal, maxSteps = 12 }) {
-  const defs = tools.definitions();
+// Summarize the older part of the conversation with the model and record
+// the compaction on the conversation (ctx.compact persists it). False when
+// there is nothing to compact or the model returned no summary.
+async function compactConversation({ provider, model, conversation, ctx, emit, signal, keepTail = ctxbuf.KEEP_TAIL }) {
+  const from = Math.max(0, Number(conversation.compactedAt) || 0);
+  let base = conversation.messages.slice(from);
+  let skipped = 0;
+  while (base.length && base[0].role === 'tool') { base = base.slice(1); skipped++; }
+  // A short conversation that is already over budget (huge messages, tiny
+  // window) still compacts: keep less of the tail rather than nothing.
+  let split = null;
+  for (const keep of [keepTail, 2, 1]) { split = ctxbuf.splitForCompaction(base, keep); if (split) break; }
+  if (!split) return false;
+  const req = ctxbuf.summaryRequest(conversation.summary || '', split.head);
+  const res = await chatWithRetry(provider, { model, system: req.system, messages: req.messages, tools: [], signal, maxTokens: 1500 }, { emit, signal });
+  const summary = String(res && res.text || '').trim();
+  if (!summary) return false;
+  ctx.compact(summary, from + skipped + split.head.length);
+  return true;
+}
+
+async function runTurn({ provider, model, conversation, ctx, permit, emit, signal, maxSteps = 12, context = {} }) {
+  const defs = ctx.noTools ? [] : tools.definitions();
   const system = systemPrompt(ctx);
+  const budget = Number(context.budget) > 0 ? Number(context.budget) : ctxbuf.DEFAULT_BUDGETS.local;
+  const calibration = context.calibration || new ctxbuf.Calibration();
   let steps = 0;
   for (;;) {
     if (signal && signal.aborted) return { stopped: true };
     steps++;
     let res;
     try {
-      res = await provider.chat({
-        model, system, tools: defs, signal,
-        messages: windowMessages(conversation.messages),
+      // The context buffer: collapse old tool traffic, then summarize with
+      // the model, then trim - the ladder BE-Code uses for small windows.
+      let prep = ctxbuf.prepare(conversation, { budget, cpt: calibration.cpt, system });
+      if (prep.needsCompaction && context.compactWithModel !== false) {
+        emit({ type: 'notice', text: `Context at about ${prep.tokens.toLocaleString()} of ${budget.toLocaleString()} tokens - summarizing the older part of this conversation.` });
+        let ok = false;
+        try { ok = await compactConversation({ provider, model, conversation, ctx, emit, signal }); } catch (err) { if (signal && signal.aborted) return { stopped: true }; ok = false; }
+        prep = ctxbuf.prepare(conversation, { budget, cpt: calibration.cpt, system });
+        emit({ type: 'notice', text: ok ? `Compacted to about ${prep.tokens.toLocaleString()} tokens.` : 'The model returned no summary; continuing with the newest messages only.' });
+      }
+      let messages = prep.messages;
+      if (prep.needsCompaction) messages = windowMessages(messages).slice(-12);
+      res = await chatWithRetry(provider, {
+        model, system, tools: defs, signal, messages,
         onText: (delta) => emit({ type: 'delta', text: delta })
-      });
+      }, { emit, signal });
+      if (res && res.usage && res.usage.input) calibration.observe(ctxbuf.totalChars(messages, system), res.usage.input);
+      emit({ type: 'context', tokens: ctxbuf.estimateTokens(messages, system, calibration.cpt), budget, compacted: !!conversation.summary });
     } catch (err) {
       if (signal && signal.aborted) return { stopped: true };
       const message = provider.describeError ? provider.describeError(err) : String(err && err.message || err);
       emit({ type: 'error', message });
-      return { error: message };
+      return { error: message, retryable: isRetryable(err) };
     }
 
     const assistant = { role: 'assistant', content: res.text || '' };
@@ -115,4 +155,4 @@ async function runTurn({ provider, model, conversation, ctx, permit, emit, signa
   }
 }
 
-module.exports = { runTurn, systemPrompt, windowMessages };
+module.exports = { runTurn, systemPrompt, windowMessages, compactConversation };

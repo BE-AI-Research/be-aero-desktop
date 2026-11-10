@@ -56,6 +56,13 @@
   AeroTasks.init({
     aero,
     onRestoreWidget: async (id) => {
+      if (typeof id === 'string' && id.startsWith('__w:')) {
+        const wid = id.slice(4);
+        await aero.setSettings({ widgetMinimized: { [wid]: false } });
+        const el = document.querySelector(`.widget[data-widget="${wid}"]`);
+        if (el) setTimeout(() => el.scrollIntoView({ block: 'nearest', behavior: 'smooth' }), 100);
+        return;
+      }
       if (id === '__ai__') {
         await aero.setSettings({ ai: { minimized: false } });
         const w = document.querySelector('.ai-widget');
@@ -75,6 +82,7 @@
   // Plugin widgets and app panes are real widgets: as each one appears, hand it
   // to the layout system so it gets a resize grip and remembered geometry.
   if (window.AeroAi) AeroAi.init({ aero });
+  if (window.AeroMedia) AeroMedia.init({ aero });
   if (window.AeroNotify) AeroNotify.init({
     aero,
     focusWebWidget: (id) => {
@@ -240,6 +248,8 @@
   // ---------------------------------------------------------------
   // Search widget: typing hands off to the Spotlight launcher window
   // ---------------------------------------------------------------
+  const WIDGET_GLYPH = { search: '\uD83D\uDD0D', clock: '\uD83D\uDD52', weather: '\u26C5', telemetry: '\uD83D\uDCCA', media: '\uD83C\uDFB5', scratchpad: '\uD83D\uDCDD' };
+  const WIDGET_NAME = { search: 'Search', clock: 'Chronometer', weather: 'Weather', telemetry: 'System telemetry', media: 'Media controller', scratchpad: 'Scratchpad' };
   const searchInput = $('search-input');
   async function refreshHotkeyLabel() {
     const hk = await aero.searchHotkey();
@@ -335,12 +345,33 @@
     const aiCfg = s.ai || {};
     const aiEl = document.querySelector('.ai-widget');
     if (aiEl) aiEl.classList.toggle('hidden', s.widgets.ai === false || aiCfg.enabled === false || !!aiCfg.minimized);
+    if (aiEl) aiEl.style.setProperty('--ai-zoom', String(Math.max(0.8, Math.min(1.6, Number(aiCfg.zoom) || 1))));
+    // Built-in widgets parked in the dock.
+    const parkedIds = Object.entries(s.widgetMinimized || {}).filter(([, v]) => v).map(([k]) => k);
+    for (const el of document.querySelectorAll('#sidebar > .widget[data-widget]')) {
+      const wid = el.dataset.widget;
+      if (wid === 'ai') continue;
+      if (parkedIds.includes(wid) && s.widgets[wid] !== false) el.classList.add('hidden');
+    }
+    if (window.AeroExtensions && AeroExtensions.setParkedWidgets) {
+      AeroExtensions.setParkedWidgets(parkedIds.filter((id) => s.widgets[id] !== false && WIDGET_GLYPH[id]).map((id) => ({ id, name: WIDGET_NAME[id] || id, glyph: WIDGET_GLYPH[id] })));
+    }
+    $('set-spellcheck').checked = (s.spellcheck || {}).enabled !== false;
+    $('scratchpad').spellcheck = (s.spellcheck || {}).enabled !== false;
     if (window.AeroExtensions && AeroExtensions.setAiMinimized) AeroExtensions.setAiMinimized(!!aiCfg.minimized && aiCfg.enabled !== false && s.widgets.ai !== false);
     $('set-ai-enabled').checked = aiCfg.enabled !== false;
     if (document.activeElement !== $('set-ai-persona')) $('set-ai-persona').value = aiCfg.systemPrompt || '';
     $('set-ai-permission').value = aiCfg.permission || 'ask';
     if (document.activeElement !== $('set-ai-steps')) $('set-ai-steps').value = Number(aiCfg.maxSteps) || 12;
+    if (document.activeElement !== $('set-ai-context')) $('set-ai-context').value = Number(aiCfg.contextTokens) || '';
+    $('set-ai-compact').checked = aiCfg.compactWithModel !== false;
     $('set-ai-memory').checked = aiCfg.memoryEnabled !== false;
+    const vc = aiCfg.voice || {};
+    $('set-ai-voice-autosend').checked = !!vc.autoSend;
+    $('set-ai-voice-speak').checked = !!vc.speak;
+    $('set-ai-voice-rate').value = Number(vc.rate) || 1;
+    fillVoices(vc.voiceName || '');
+    if (window.AeroAi && AeroAi.setVoice) AeroAi.setVoice(vc);
     $('set-notify-toast').checked = (s.notifications || {}).toast !== false;
     refreshAiStatus();
     if (!recordingDockHotkey && s.appDock && s.appDock.hotkey) {
@@ -410,6 +441,50 @@
   }
   aero.onOpenSettings(openSettings);
   $('btn-settings').addEventListener('click', () => panel.classList.contains('hidden') ? openSettings() : closeSettings());
+
+  // Every built-in widget can be parked in the dock (the AI chat and web
+  // widgets have their own buttons; the dock itself stays).
+  for (const el of document.querySelectorAll('#sidebar > .widget[data-widget]')) {
+    const wid = el.dataset.widget;
+    if (wid === 'ai' || wid === 'tasks' || !WIDGET_GLYPH[wid]) continue;
+    const b = document.createElement('button');
+    b.className = 'icon-btn widget-min';
+    b.title = 'Minimize to the dock';
+    b.textContent = '\u2014';
+    b.addEventListener('click', (e) => { e.stopPropagation(); aero.setSettings({ widgetMinimized: { [wid]: true } }); });
+    el.appendChild(b);
+  }
+
+  // AI chat text zoom.
+  const aiZoom = async (delta) => {
+    const cur = Number(((await aero.getSettings()).ai || {}).zoom) || 1;
+    const next = Math.round(Math.max(0.8, Math.min(1.6, cur + delta)) * 10) / 10;
+    aero.setSettings({ ai: { zoom: next } });
+  };
+  const zi = document.querySelector('.ai-zoom-in'); const zo = document.querySelector('.ai-zoom-out');
+  if (zi) zi.addEventListener('click', () => aiZoom(0.1));
+  if (zo) zo.addEventListener('click', () => aiZoom(-0.1));
+  $('set-spellcheck').addEventListener('change', (e) => aero.setSettings({ spellcheck: { enabled: e.target.checked } }));
+
+  // Linux: say which window source the dock runs on and offer the GNOME helper.
+  async function refreshDockHelper() {
+    if (aero.platform !== 'linux' || !aero.taskSource) return;
+    const st = await aero.taskSource();
+    const row = $('dock-helper-row');
+    row.classList.remove('hidden');
+    const words = { shell: 'GNOME Shell helper (windows, focus, minimize)', x11: 'X11 window list (wmctrl)', proc: 'running applications only (no window list on Wayland without the helper)' };
+    $('dock-helper-status').textContent = `Dock window source: ${words[st.source] || st.source}.`
+      + (st.source === 'proc' && st.gnome ? (st.helperInstalled ? ' Helper installed - enable it in Extensions and log out and back in.' : ' Install the helper to mirror real windows.') : '');
+    $('btn-dock-helper').classList.toggle('hidden', st.source === 'shell' || !st.gnome);
+    $('btn-dock-helper').textContent = st.helperInstalled ? 'Reinstall GNOME dock helper' : 'Install GNOME dock helper';
+  }
+  $('btn-dock-helper').addEventListener('click', async () => {
+    const r = await aero.installDockHelper();
+    $('dock-helper-status').textContent = r.ok
+      ? `Helper copied to ${r.dest}. ${r.enabled ? 'Enabled.' : 'Enable "BE-Aero Dock helper" in the Extensions app.'} On Wayland, log out and back in for GNOME Shell to load it.`
+      : `Could not install the helper: ${r.error}`;
+  });
+  refreshDockHelper();
   // The full app menu, in-window: desktops without a tray (stock GNOME)
   // would otherwise lose every tray-only control.
   $('btn-menu').addEventListener('click', () => aero.openMenu());
@@ -497,7 +572,7 @@
     const preset = aiPresets.find((p) => p.id === st.provider) || {};
     if (document.activeElement !== $('set-ai-url')) $('set-ai-url').value = st.baseUrl || '';
     $('set-ai-url').disabled = st.provider === 'anthropic';
-    $('set-ai-url').placeholder = st.provider === 'anthropic' ? 'Default Anthropic endpoint' : 'Server URL (e.g. http://localhost:11434/v1)';
+    $('set-ai-url').placeholder = st.provider === 'anthropic' ? 'Default Anthropic endpoint' : st.provider === 'becode' ? 'unix://~/.be-code/api/api.sock' : 'Server URL (e.g. http://localhost:11434/v1)';
     if (document.activeElement !== $('set-ai-model')) $('set-ai-model').value = st.model || '';
     $('set-ai-key').placeholder = st.hasKey ? 'API key saved (enter a new one to replace)' : (preset.needsKey ? 'API key (required)' : 'API key (optional)');
     const line = !st.enabled ? 'AI assistant is disabled.'
@@ -505,7 +580,11 @@
       : !st.model ? `${st.presetLabel}: choose a model (Fetch models lists what is available).`
       : `Ready: ${st.presetLabel} · ${st.model}${st.permission === 'allow' ? ' · acts without asking' : st.permission === 'deny' ? ' · read-only' : ''}`;
     $('ai-status').textContent = line;
+    $('ai-provider-hint').textContent = st.hint || '';
+    $('ai-context-hint').textContent = `Current budget: ${Number(st.contextBudget || 0).toLocaleString()} tokens${st.contextTokens ? '' : ' (automatic for this provider)'}. Old tool output is trimmed first, then the older conversation is summarized and carried forward; the chat history itself is never deleted. Type /compact in a chat to do it now.`;
   }
+  $('set-ai-context').addEventListener('change', (e) => aero.setSettings({ ai: { contextTokens: Math.max(0, Number(e.target.value) || 0) } }).then(refreshAiStatus));
+  $('set-ai-compact').addEventListener('change', (e) => aero.setSettings({ ai: { compactWithModel: e.target.checked } }));
   $('set-ai-enabled').addEventListener('change', (e) => aero.setSettings({ ai: { enabled: e.target.checked } }));
   let personaTimer = null;
   $('set-ai-persona').addEventListener('input', (e) => {
@@ -566,6 +645,28 @@
     }
   }
   $('set-ai-memory').addEventListener('change', (e) => aero.setSettings({ ai: { memoryEnabled: e.target.checked } }));
+  // Voice: dictation availability from main, speech voices from the renderer.
+  function fillVoices(selected) {
+    const sel = $('set-ai-voice-name');
+    const voices = window.speechSynthesis ? speechSynthesis.getVoices() : [];
+    if (!voices.length) { if (!sel.options.length) { const o = document.createElement('option'); o.value = ''; o.textContent = 'System default voice'; sel.appendChild(o); } return; }
+    sel.innerHTML = '';
+    const d = document.createElement('option'); d.value = ''; d.textContent = 'System default voice'; sel.appendChild(d);
+    for (const v of voices) { const o = document.createElement('option'); o.value = v.name; o.textContent = `${v.name} (${v.lang})`; sel.appendChild(o); }
+    sel.value = voices.some((v) => v.name === selected) ? selected : '';
+  }
+  if (window.speechSynthesis) speechSynthesis.addEventListener('voiceschanged', () => fillVoices($('set-ai-voice-name').value));
+  $('set-ai-voice-autosend').addEventListener('change', (e) => aero.setSettings({ ai: { voice: { autoSend: e.target.checked } } }));
+  $('set-ai-voice-speak').addEventListener('change', (e) => aero.setSettings({ ai: { voice: { speak: e.target.checked } } }));
+  $('set-ai-voice-name').addEventListener('change', (e) => aero.setSettings({ ai: { voice: { voiceName: e.target.value } } }));
+  $('set-ai-voice-rate').addEventListener('change', (e) => aero.setSettings({ ai: { voice: { rate: Number(e.target.value) || 1 } } }));
+  if (aero.aiVoiceAvailable) {
+    aero.aiVoiceAvailable().then((v) => {
+      $('ai-voice-info').textContent = v && v.stt
+        ? `Dictation: ${v.engine}. Click the microphone in the chat and speak; the text lands in the message box.`
+        : `Dictation unavailable: ${v && v.reason || 'unknown'}`;
+    }).catch(() => {});
+  }
   $('btn-ai-memory-add').addEventListener('click', async () => {
     const v = $('ai-memory-new').value.trim();
     if (!v) return;
@@ -730,9 +831,12 @@
     el.addEventListener('change', () => telSet({ colors: { [el.dataset.metricColor]: el.value } }));
   }
   $('set-tel-drive').addEventListener('change', (e) => {
-    const v = e.target.value.trim().toUpperCase();
+    const raw = e.target.value.trim();
+    const v = raw.toUpperCase();
     if (/^[A-Z]:?$/.test(v)) telSet({ drive: v[0] + ':' });
+    else if (raw.startsWith('/')) telSet({ drive: raw.replace(/\/+$/, '') || '/' });
   });
+  if (aero.platform !== 'win32') { $('set-tel-drive').maxLength = 128; $('set-tel-drive').placeholder = '/'; }
   $('set-tel-cores').addEventListener('change', (e) => telSet({ showCores: e.target.checked }));
   $('set-tel-values').addEventListener('change', (e) => telSet({ showValues: e.target.checked }));
   $('set-tel-footer').addEventListener('change', (e) => telSet({ showFooter: e.target.checked }));
