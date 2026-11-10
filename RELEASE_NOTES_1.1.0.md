@@ -10,11 +10,14 @@ Installed Windows copies update automatically.
   a player), with cover art, progress, play/pause, previous/next and volume up/down/mute.
   Windows reads the system media session; Linux uses `playerctl` (MPRIS) and
   `wpctl`/`pactl`. The assistant gets `media_status` and `media_control`.
-- **Voice mode for the assistant.** A microphone button dictates into the message box with
-  the OS's offline speech recognizer (Windows Speech Recognition; whisper.cpp on Linux when
-  installed), optionally sending each sentence as it is recognized, and replies can be read
-  aloud with a voice and rate of your choice. Settings has a microphone picker with a
-  level test and a speaker picker with a test sentence. Nothing leaves the machine.
+- **Voice mode for the assistant.** A microphone button dictates into the message box.
+  Transcription uses **Whisper** (whisper.cpp), downloaded once from Settings > Voice input
+  in three sizes, checked against pinned checksums and run on your computer; Windows
+  Speech Recognition is the basic fallback. **Auto send** sends the dictated message after
+  a silence you choose (1-30 s), with an on/off button right on the chat widget. A new
+  **Text to speech** section reads replies aloud on the speaker you pick, with voice,
+  rate, volume, pitch and a test line. Microphone picker with a level test. Nothing
+  leaves the machine.
 - **Context buffer.** Conversations stay inside a token budget the way BE-Code keeps small
   local models honest: old tool output is trimmed first, then the older conversation is
   summarized by the model and carried forward, and the chat history itself is never

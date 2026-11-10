@@ -323,6 +323,7 @@
     }
     inputEl.value = ''; inputEl.style.height = '';
     pending = []; renderPending();
+    clearTimeout(autoTimer); clearInterval(autoTick); autoTimer = null; autoTick = null;
     if (window.speechSynthesis) speechSynthesis.cancel();
     if (msgsEl.querySelector('.ai-hint')) msgsEl.innerHTML = '';
     const lv = t.convId ? liveFor(t.convId) : null;
@@ -572,6 +573,9 @@
       pinBtn.classList.toggle('on', pinned);
       pinBtn.title = pinned ? 'Pinned above other windows - click to release' : 'Keep above other windows while the assistant works';
     });
+    autoBtn = root.querySelector('.ai-autosend');
+    if (autoBtn) { autoBtn.addEventListener('click', toggleAutoSend); syncAutoBtn(); }
+    inputEl.addEventListener('keydown', () => { if (autoTimer) armAutoSend(); });
     micBtn = root.querySelector('.ai-mic');
     if (micBtn) {
       micBtn.addEventListener('click', toggleMic);
@@ -673,6 +677,47 @@
   function setVoice(cfg) {
     voiceCfg = cfg || {};
     if (!voiceCfg.speak) stopSpeaking();
+    syncAutoBtn();
+    if (!voiceCfg.autoSend) cancelAutoSend();
+  }
+
+  // ---- Auto send: after the dictated text has been quiet for
+  // autoSendDelay seconds, send it. Speech or typing restarts the clock.
+  let autoBtn = null;
+  let autoTimer = null;
+  let autoTick = null;
+  let autoDeadline = 0;
+  const autoDelayMs = () => Math.max(1, Math.min(30, Number(voiceCfg.autoSendDelay) || 3)) * 1000;
+  function syncAutoBtn() {
+    if (!autoBtn) return;
+    const on = !!voiceCfg.autoSend;
+    autoBtn.classList.toggle('on', on);
+    autoBtn.title = on
+      ? `Auto send: on - dictated messages send after ${autoDelayMs() / 1000} s of silence (click to turn off)`
+      : 'Auto send: off - click to send dictated messages automatically';
+  }
+  function cancelAutoSend() {
+    clearTimeout(autoTimer); clearInterval(autoTick); autoTimer = null; autoTick = null;
+    if (listening && statusEl && /^Sending in/.test(statusEl.textContent)) statusEl.textContent = 'Listening…';
+  }
+  function armAutoSend() {
+    if (!voiceCfg.autoSend || !inputEl.value.trim()) return;
+    cancelAutoSend();
+    autoDeadline = Date.now() + autoDelayMs();
+    const show = () => { const s = Math.max(0, Math.ceil((autoDeadline - Date.now()) / 1000)); statusEl.textContent = `Sending in ${s} s… (keep talking or type to wait)`; };
+    show();
+    autoTick = setInterval(show, 250);
+    autoTimer = setTimeout(() => {
+      clearInterval(autoTick); autoTick = null; autoTimer = null;
+      if (inputEl.value.trim()) { send(); if (listening) statusEl.textContent = 'Listening…'; }
+    }, autoDelayMs());
+  }
+  async function toggleAutoSend() {
+    const on = !voiceCfg.autoSend;
+    voiceCfg = { ...voiceCfg, autoSend: on };
+    syncAutoBtn();
+    if (!on) cancelAutoSend(); else armAutoSend();
+    await aero.setSettings({ ai: { voice: { autoSend: on } } });
   }
 
   // Float32 at any sample rate -> Int16 at 16 kHz (linear interpolation).
@@ -738,12 +783,15 @@
 
   function onVoice(ev) {
     if (!ev) return;
-    if (ev.type === 'ready') { if (listening) statusEl.textContent = 'Listening…'; return; }
+    if (ev.type === 'loading') { if (listening) statusEl.textContent = 'Loading Whisper… (speak - nothing is lost)'; return; }
+    if (ev.type === 'ready') { if (listening && !autoTimer) statusEl.textContent = 'Listening…'; return; }
+    if (ev.type === 'working') { if (listening && !autoTimer) statusEl.textContent = 'Transcribing…'; return; }
     if (ev.type === 'final' && ev.text) {
       const cur = inputEl.value;
       inputEl.value = (cur ? cur.replace(/\s*$/, ' ') : '') + ev.text;
       inputEl.dispatchEvent(new Event('input'));
-      if (voiceCfg.autoSend) send();
+      if (voiceCfg.autoSend) armAutoSend();
+      else if (listening) statusEl.textContent = 'Listening…';
       return;
     }
     if (ev.type === 'error') bubble('error', esc(ev.text || 'Voice input failed.'));
@@ -752,13 +800,15 @@
 
   async function startMic() {
     if (listening) return;
-    stopSpeaking();
+    if (voiceCfg.interrupt !== false) stopSpeaking();
     statusEl.textContent = 'Starting the microphone…';
     try {
       capture = await openMic((pcm, rms) => {
         if (!listening) return;
         aero.aiVoiceFeed(new Uint8Array(pcm.buffer));
         if (micBtn) micBtn.style.setProperty('--level', String(Math.min(1, rms * 6)));
+        // Talking again pushes the auto-send deadline out.
+        if (autoTimer && rms > 0.03) armAutoSend();
       });
     } catch (err) {
       bubble('error', `Microphone unavailable: ${esc(err && err.message || err)}`);
@@ -773,6 +823,8 @@
 
   async function stopMic() {
     if (capture) { closeMic(capture); capture = null; }
+    // A pending auto send still fires once the last phrase lands.
+    if (!autoTimer) cancelAutoSend();
     const was = listening;
     setListening(false);
     if (was) { try { await aero.aiVoiceStop(); } catch { /* fine */ } }
@@ -793,6 +845,8 @@
   }
 
   function stopSpeaking() {
+    speakQueue = Promise.resolve();
+    speakGen++;
     if (player) { try { player.pause(); } catch { /* fine */ } player = null; }
     if (window.speechSynthesis) speechSynthesis.cancel();
   }
@@ -803,9 +857,11 @@
     const t = speakable(text);
     if (!t) return;
     let wav = null;
-    try { wav = await aero.aiVoiceSpeak(t, { voice: voiceCfg.voiceName || '', rate: Number(voiceCfg.rate) || 1 }); } catch { wav = null; }
+    try { wav = await aero.aiVoiceSpeak(t, { voice: voiceCfg.voiceName || '', rate: Number(voiceCfg.rate) || 1, pitch: Number(voiceCfg.pitch) || 0 }); } catch { wav = null; }
+    const vol = voiceCfg.volume == null ? 1 : Math.max(0, Math.min(1, Number(voiceCfg.volume) / 100));
     if (wav) {
       const a = new Audio(`data:audio/wav;base64,${wav}`);
+      a.volume = vol;
       player = a;
       if (voiceCfg.speakerId && typeof a.setSinkId === 'function') { try { await a.setSinkId(voiceCfg.speakerId); } catch { /* default device */ } }
       await new Promise((res) => { a.onended = res; a.onerror = res; a.play().catch(res); });
@@ -816,14 +872,18 @@
     await new Promise((res) => {
       const u = new SpeechSynthesisUtterance(t);
       u.rate = Math.max(0.5, Math.min(2, Number(voiceCfg.rate) || 1));
+      u.volume = vol;
+      u.pitch = Math.max(0, Math.min(2, 1 + (Number(voiceCfg.pitch) || 0) / 50));
       if (voiceCfg.voiceName) { const v = speechSynthesis.getVoices().find((x) => x.name === voiceCfg.voiceName); if (v) u.voice = v; }
       u.onend = res; u.onerror = res;
       speechSynthesis.speak(u);
     });
   }
+  let speakGen = 0;
   function speak(text, force) {
     if (!force && !voiceCfg.speak) return;
-    speakQueue = speakQueue.then(() => speakNow(text)).catch(() => {});
+    const gen = speakGen;
+    speakQueue = speakQueue.then(() => (gen === speakGen ? speakNow(text) : null)).catch(() => {});
     return speakQueue;
   }
 
@@ -845,6 +905,6 @@
     return peak;
   }
 
-  window.AeroAi = { init, md, setVoice, speakable, speak: (t) => speak(t, true), stopSpeaking, audioDevices, micTest, startMic, stopMic };
+  window.AeroAi = { init, md, setVoice, speakable, speak: (t) => speak(t, true), stopSpeaking, audioDevices, micTest, startMic, stopMic, onVoice };
 
 })();
