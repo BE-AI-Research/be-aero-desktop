@@ -81,6 +81,32 @@ class Conversations {
     return c;
   }
 
+  // The turn that starts at user message `index`: [index, next user message).
+  turnRange(id, index) {
+    const c = this.get(id);
+    const i = Number(index);
+    if (!Number.isInteger(i) || !c.messages[i] || c.messages[i].role !== 'user') throw new Error('not a user message');
+    let end = i + 1;
+    while (end < c.messages.length && c.messages[end].role !== 'user') end++;
+    return { start: i, end };
+  }
+
+  // Remove messages [from, to). A compaction summary that covered any of
+  // them is dropped (it would still describe what was deleted); the next
+  // turn rebuilds context from the full history and compacts again if needed.
+  removeRange(id, from, to) {
+    const c = this.get(id);
+    const a = Math.max(0, Math.min(c.messages.length, Number(from) || 0));
+    const b = Math.max(a, Math.min(c.messages.length, Number(to) || 0));
+    if (b === a) return c;
+    c.messages.splice(a, b - a);
+    if (c.summary && a < (c.compactedAt || 0)) { c.summary = ''; c.compactedAt = 0; }
+    else if (c.compactedAt && a < c.compactedAt) c.compactedAt = Math.max(0, c.compactedAt - (b - a));
+    c.updatedAt = Date.now();
+    this.save(c);
+    return c;
+  }
+
   rename(id, title) {
     const c = this.get(id);
     c.title = titleFrom(title);

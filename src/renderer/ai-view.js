@@ -123,6 +123,119 @@
     return b;
   }
 
+  // ---- Message actions: edit / resend / delete on your messages, delete on
+  // replies. Each acts on the conversation on disk, then redraws it.
+  const ICON = {
+    edit: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M13.5 6.5l4 4" stroke="currentColor" stroke-width="1.8"/></svg>',
+    resend: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.4-5.7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M20 4v5h-5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    trash: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v6M14 11v6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+  };
+  function actionBtn(parent, kind, title) {
+    const b = document.createElement('button');
+    b.className = `ai-act ai-act-${kind}`;
+    b.dataset.act = kind;
+    b.title = title;
+    b.innerHTML = ICON[kind === 'delete' || kind === 'delete-reply' ? 'trash' : kind];
+    parent.appendChild(b);
+    return b;
+  }
+  function userBubble(content, atts, index) {
+    const b = bubble('user', chipsBlock(atts) + inline(content).replace(/\n/g, '<br>'));
+    b.dataset.idx = String(index);
+    b.dataset.raw = String(content || '');
+    userActions(b, index);
+    return b;
+  }
+  function userActions(b, index) {
+    if (!b || b.querySelector(':scope > .ai-actions')) return;
+    if (!b.dataset.raw) b.dataset.raw = b.textContent;
+    const bar = document.createElement('div');
+    bar.className = 'ai-actions';
+    actionBtn(bar, 'edit', 'Edit and resend');
+    const rs = actionBtn(bar, 'resend', 'Resend this message');
+    rs.insertAdjacentHTML('beforeend', '<span class="ai-act-label">Resend</span>');
+    actionBtn(bar, 'delete', 'Delete this message and its reply');
+    b.appendChild(bar);
+  }
+  function replyActions(b, turn) {
+    if (!b || turn < 0) return b;
+    b.dataset.turn = String(turn);
+    if (b.querySelector(':scope > .ai-actions')) return b;
+    const bar = document.createElement('div');
+    bar.className = 'ai-actions ai-actions-reply';
+    actionBtn(bar, 'delete-reply', 'Delete this reply');
+    b.appendChild(bar);
+    return b;
+  }
+  function editInline(b) {
+    if (b.classList.contains('editing')) return;
+    const idx = Number(b.dataset.idx);
+    const t = activeTab();
+    b.classList.add('editing');
+    const keep = b.innerHTML;
+    b.innerHTML = '';
+    const ta = document.createElement('textarea');
+    ta.className = 'ai-edit-box';
+    ta.value = b.dataset.raw || '';
+    b.appendChild(ta);
+    const row = document.createElement('div');
+    row.className = 'ai-edit-row';
+    row.innerHTML = '<button class="btn ai-edit-save">Save &amp; resend</button><button class="btn ai-edit-cancel">Cancel</button>';
+    b.appendChild(row);
+    const grow = () => { ta.style.height = 'auto'; ta.style.height = Math.min(220, ta.scrollHeight + 2) + 'px'; };
+    grow(); ta.addEventListener('input', grow);
+    ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length);
+    const cancel = () => { b.classList.remove('editing'); b.innerHTML = keep; };
+    const save = async () => {
+      const text = ta.value.trim();
+      if (!text) return;
+      const r = await aero.aiResend(t.convId, idx, text);
+      if (r && r.error && !r.conversationId) { bubble('error', esc(r.error)); cancel(); }
+    };
+    row.querySelector('.ai-edit-cancel').addEventListener('click', cancel);
+    row.querySelector('.ai-edit-save').addEventListener('click', save);
+    ta.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); save(); }
+      if (e.key === 'Escape') { e.preventDefault(); cancel(); }
+    });
+  }
+  async function onAction(btn) {
+    const t = activeTab();
+    if (!t || !t.convId) return;
+    const lv = liveFor(t.convId);
+    if (lv && lv.busy) return;
+    const b = btn.closest('.ai-msg');
+    const kind = btn.dataset.act;
+    if (kind === 'edit') { editInline(b); return; }
+    if (kind === 'resend') {
+      // Drop what followed this message from view right away; the redraw follows.
+      let n = b.nextElementSibling;
+      while (n) { const nx = n.nextElementSibling; n.remove(); n = nx; }
+      b.classList.remove('unanswered');
+      const r = await aero.aiResend(t.convId, Number(b.dataset.idx));
+      if (r && r.error && !r.conversationId) bubble('error', esc(r.error));
+      return;
+    }
+    if (kind === 'delete') {
+      if (!btn.classList.contains('confirm')) {
+        btn.classList.add('confirm'); btn.title = 'Click again to delete';
+        setTimeout(() => { btn.classList.remove('confirm'); btn.title = 'Delete this message and its reply'; }, 2500);
+        return;
+      }
+      await aero.aiDeleteMessage(t.convId, Number(b.dataset.idx), 'turn');
+    } else if (kind === 'delete-reply') {
+      if (!btn.classList.contains('confirm')) {
+        btn.classList.add('confirm'); btn.title = 'Click again to delete';
+        setTimeout(() => { btn.classList.remove('confirm'); btn.title = 'Delete this reply'; }, 2500);
+        return;
+      }
+      await aero.aiDeleteMessage(t.convId, Number(b.dataset.turn), 'reply');
+    }
+    const top = msgsEl.scrollTop;
+    await renderConversation(t);
+    msgsEl.scrollTop = top;
+  }
+
   // Speaker button on a finished assistant reply: reads that reply aloud
   // with the Text to speech settings; a second click stops it.
   const SAY_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9h4l5-4v14l-5-4H4z" fill="currentColor"/><path d="M16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>';
@@ -259,11 +372,22 @@
     if (!conv) { hint(); renderTabs(); return; }
     tab.title = conv.title || 'Conversation';
     titleEl.textContent = tab.title;
-    for (const m of conv.messages || []) {
-      if (m.role === 'user') bubble('user', chipsBlock(m.attachments) + inline(m.content).replace(/\n/g, '<br>'));
-      else if (m.role === 'assistant') { if (m.content) finishReply(bubble('assistant', md(m.content)), m.content); }
-      else if (m.role === 'tool') for (const r of m.results || []) toolRow(r.name, !r.isError, null, String(r.content || '').slice(0, 400), r.images && r.images[0] ? `data:${r.images[0].mime};base64,${r.images[0].data}` : null);
-    }
+    let turn = -1;
+    let lastUser = null;
+    let answered = false;
+    (conv.messages || []).forEach((m, i) => {
+      if (m.role === 'user') {
+        turn = i;
+        lastUser = userBubble(m.content, m.attachments, i);
+        answered = false;
+      } else if (m.role === 'assistant') {
+        if (m.content) { replyActions(finishReply(bubble('assistant', md(m.content)), m.content), turn); answered = true; }
+      } else if (m.role === 'tool') {
+        for (const r of m.results || []) toolRow(r.name, !r.isError, null, String(r.content || '').slice(0, 400), r.images && r.images[0] ? `data:${r.images[0].mime};base64,${r.images[0].data}` : null);
+      }
+    });
+    // A question with no answer (stopped, failed, server away): offer Resend.
+    if (lastUser && !answered && !(liveFor(tab.convId) || {}).busy) lastUser.classList.add('unanswered');
     if (!(conv.messages || []).length) hint();
     const lv = liveFor(tab.convId);
     if (lv) {
@@ -391,6 +515,14 @@
     switch (ev.type) {
       case 'user':
         lv.busy = true;
+        lv.turn = Number.isInteger(ev.index) ? ev.index : lv.turn;
+        if (isActive && Number.isInteger(ev.index)) {
+          if (ev.replay) userBubble(ev.content, ev.attachments, ev.index);
+          else {
+            const pending = [...msgsEl.querySelectorAll('.ai-msg.ai-user:not([data-idx])')].pop();
+            if (pending) { pending.dataset.idx = String(ev.index); userActions(pending, ev.index); }
+          }
+        }
         if (ev.title) { tab.title = ev.title; if (isActive) titleEl.textContent = ev.title; }
         if (!isActive) tab.unread = true;
         break;
@@ -404,8 +536,8 @@
         break;
       case 'assistant':
         if (isActive) {
-          if (lv.streamEl) { lv.streamEl.innerHTML = md(ev.content || lv.streamText); finishReply(lv.streamEl, ev.content || lv.streamText); }
-          else if (ev.content) finishReply(bubble('assistant', md(ev.content)), ev.content);
+          if (lv.streamEl) { lv.streamEl.innerHTML = md(ev.content || lv.streamText); replyActions(finishReply(lv.streamEl, ev.content || lv.streamText), Number.isInteger(lv.turn) ? lv.turn : -1); }
+          else if (ev.content) replyActions(finishReply(bubble('assistant', md(ev.content)), ev.content), Number.isInteger(lv.turn) ? lv.turn : -1);
         }
         if (ev.content && (!ev.toolCalls || !ev.toolCalls.length)) speak(ev.content);
         lv.streamEl = null; lv.streamText = '';
@@ -444,6 +576,7 @@
       case 'done':
         lv.busy = false; lv.streamEl = null; lv.streamText = ''; lv.retryText = '';
         if (!isActive) tab.unread = true;
+        else if (!lv.queued || !lv.queued.length) renderConversation(tab).then(scrollToEnd);
         refreshList();
         break;
       default: break;
@@ -677,6 +810,8 @@
     msgsEl.addEventListener('click', async (e) => {
       const a = e.target.closest('a[data-ext]');
       if (a) { e.preventDefault(); aero.openExternal(a.href); return; }
+      const act = e.target.closest('.ai-act');
+      if (act) { e.stopPropagation(); onAction(act); return; }
       const say = e.target.closest('.ai-say');
       if (say) { e.stopPropagation(); sayBubble(say.closest('.ai-msg')); return; }
       const c = e.target.closest('.ai-copy');
