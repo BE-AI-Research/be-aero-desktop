@@ -98,6 +98,10 @@ the final answer.
   It only listens - GNOME still shows its own pop-ups. Settings > Notifications turns it off.
 - **The notification panel is readable on any background.** It had no background at all
   (a broken style), so it disappeared over matching wallpaper; it's now a frosted pane.
+- **Chat scrolling stays where you put it.** At the bottom, the chat follows new replies; scroll
+  up and it stays put (a "New messages" button appears) until you come back down or send a
+  message. Each tab keeps its place, and so does the chat after being minimized - it used to
+  jump back to the top, or open partway up instead of at the latest message.
 - **Chat:** the edit / resend / delete buttons under messages are visible again.
 - **Linux:** the per-core CPU heatmap no longer flickers between 0% and 100%.
 

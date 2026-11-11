@@ -1214,6 +1214,11 @@ webview.plugin-frame { background: #fff; }
 
 /* Chat performance: skip layout/paint of bubbles scrolled far out of view */
 .ai-messages > .ai-msg { content-visibility: auto; contain-intrinsic-size: auto 64px; }
+.ai-messages.exact > .ai-msg { content-visibility: visible; }   /* while a reader's place is restored */
+/* "New messages" pill: shown when content arrives while the reader is scrolled up */
+.ai-jump { align-self: center; margin: -34px auto 6px; position: relative; z-index: 6; padding: 4px 12px; border-radius: 999px; border: 1px solid color-mix(in srgb, var(--accent) 60%, transparent);
+  background: color-mix(in srgb, var(--accent) 35%, rgba(var(--glass-rgb), .92)); color: #fff; font: inherit; font-size: 11px; cursor: pointer; box-shadow: 0 4px 14px rgba(0,0,0,.35); }
+.ai-jump:hover { background: color-mix(in srgb, var(--accent) 55%, rgba(var(--glass-rgb), .92)); }
 /* content-visibility clips whatever lies outside the bubble and keeps its
    z-index inside it, which hid the action row (edit / resend / delete) that
    hangs below the bubble. The bubble being used is drawn normally, above its

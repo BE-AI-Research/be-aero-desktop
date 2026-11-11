@@ -114,27 +114,146 @@
     if (parent) parent.appendChild(e);
     return e;
   }
-  // One scroll per frame, however many bubbles were added; `soft` scrolls
-  // only when the reader is already near the bottom (streaming text must not
-  // yank someone reading earlier messages).
-  let scrollRaf = 0;
-  let scrollHard = false;
-  const nearBottom = () => msgsEl.scrollHeight - msgsEl.scrollTop - msgsEl.clientHeight < 120;
-  const scrollToEnd = (soft) => {
-    if (!soft) scrollHard = true;
-    if (scrollRaf) return;
-    const wasNear = nearBottom();
-    scrollRaf = requestAnimationFrame(() => {
-      scrollRaf = 0;
-      if (scrollHard || wasNear) msgsEl.scrollTop = msgsEl.scrollHeight;
-      scrollHard = false;
-    });
-  };
+  // Scrolling: the reader decides. `stick` is on while they are at the
+  // bottom - new content then keeps them there (auto-scroll). Scrolling up
+  // turns it off and nothing moves them again until they come back to the
+  // bottom, press "New messages", or send a message. Only real input (wheel,
+  // touch, keys, dragging the scrollbar) changes `stick`; layout shifts and
+  // our own scrolls never do. Bubbles use content-visibility, so their real
+  // heights arrive over a few frames after they are drawn: following the
+  // bottom is re-applied for a short while (settle) instead of once.
+  let stick = true;
+  let lastInput = 0;
+  let dragging = false;
+  let savedAnchor = null;     // { index, offset }: the message at the top edge while visible
+  let wasHidden = false;
+  let jumpEl = null;
+  const nearBottom = () => msgsEl.scrollHeight - msgsEl.scrollTop - msgsEl.clientHeight < 48;
+  let settleRaf = 0;
+  let settleFrames = 0;
+  let settleTimers = [];
+  function settle() {
+    const toEnd = () => { if (stick && msgsEl.clientHeight > 0) msgsEl.scrollTop = msgsEl.scrollHeight; };
+    toEnd();                  // now, so the first paint is already at the bottom
+    settleFrames = 15;
+    if (!settleRaf) {
+      const step = () => {
+        settleRaf = 0;
+        toEnd();
+        if (--settleFrames > 0) settleRaf = requestAnimationFrame(step);
+      };
+      settleRaf = requestAnimationFrame(step);
+    }
+    // Animation frames pause while the desktop window is covered by other
+    // windows (Chromium occlusion); timers keep the bottom in reach anyway.
+    for (const t of settleTimers) clearTimeout(t);
+    settleTimers = [60, 250, 700].map((ms) => setTimeout(toEnd, ms));
+  }
+  function showJump(on) {
+    if (!jumpEl) return;
+    jumpEl.classList.toggle('hidden', !on);
+  }
+  // New content arrived: follow it if the reader is at the bottom, else
+  // leave them where they are and offer the jump.
+  const followEnd = () => { if (stick) settle(); else showJump(true); };
+  // The reader asked for the bottom (sent a message, pressed the jump).
+  const jumpToEnd = () => { stick = true; showJump(false); settle(); };
+  // A place is remembered as "this message, this far from the top edge", not
+  // as a pixel offset: hidden bubbles forget their heights (content-
+  // visibility), so pixel offsets point somewhere else after a hide or a
+  // re-render.
+  // The element itself while it is still on screen (hide/show); after a
+  // redraw (tab switch, edit), the message with the same text nearest its old
+  // position - a redraw shows only the latest page, so positions shift when
+  // messages arrive, and long replies can share their opening text.
+  const keyOf = (el) => `${el.className.replace(/\s*(saying|unanswered|editing)/g, '')}|${el.textContent.slice(0, 120)}`;
+  function anchorNow() {
+    const top = msgsEl.getBoundingClientRect().top;
+    const kids = msgsEl.children;
+    for (let i = 0; i < kids.length; i++) {
+      const r = kids[i].getBoundingClientRect();
+      if (r.bottom > top + 1) return { el: kids[i], key: keyOf(kids[i]), index: i, fromEnd: kids.length - i, offset: r.top - top };
+    }
+    return null;
+  }
+  function findAnchor(a) {
+    if (a.el && a.el.isConnected && a.el.parentElement === msgsEl) return a.el;
+    const kids = msgsEl.children;
+    // New messages arrive at the end, older ones drop off the top: the
+    // distance from the end is the steadier guide.
+    const guess = kids.length - a.fromEnd;
+    let best = null;
+    let dist = Infinity;
+    for (let i = 0; i < kids.length; i++) {
+      if (keyOf(kids[i]) !== a.key) continue;
+      const d = Math.min(Math.abs(i - guess), Math.abs(i - a.index));
+      if (d < dist) { best = kids[i]; dist = d; }
+    }
+    return best || kids[Math.max(0, Math.min(kids.length - 1, guess))] || null;
+  }
+  // Freshly drawn bubbles have placeholder heights until painted (content-
+  // visibility), so a jump to a message far up lands on estimates that then
+  // grow underneath it. While a place is restored, bubbles are laid out at
+  // their real size ('exact'); once painted they keep it, so turning the
+  // optimisation back on afterwards moves nothing.
+  let exactTimer = 0;
+  function restoreAnchor(a) {
+    if (!a) return;
+    msgsEl.classList.add('exact');
+    clearTimeout(exactTimer);
+    const apply = () => {
+      const k = findAnchor(a);
+      if (!k || stick || msgsEl.clientHeight === 0) return;
+      msgsEl.scrollTop += (k.getBoundingClientRect().top - msgsEl.getBoundingClientRect().top) - a.offset;
+    };
+    apply();
+    requestAnimationFrame(() => { apply(); requestAnimationFrame(apply); });
+    for (const ms of [60, 250, 700]) setTimeout(apply, ms);
+    exactTimer = setTimeout(() => { apply(); msgsEl.classList.remove('exact'); requestAnimationFrame(apply); }, 900);
+  }
+  function rememberScroll() {
+    const t = activeTab();
+    if (t && msgsEl.clientHeight > 0) t.scroll = { stick, anchor: stick ? null : anchorNow() };
+  }
+  function wireScroll() {
+    const input = () => { lastInput = Date.now(); };
+    for (const ev of ['wheel', 'touchmove', 'keydown']) msgsEl.addEventListener(ev, input, { passive: true });
+    msgsEl.addEventListener('pointerdown', () => { dragging = true; input(); });
+    window.addEventListener('pointerup', () => { if (dragging) { dragging = false; input(); } });
+    msgsEl.addEventListener('scroll', () => {
+      // Hidden, or just shown and not yet put back: this is the browser's
+      // reset to 0, not the reader - it must not overwrite their place.
+      if (msgsEl.clientHeight === 0 || wasHidden) return;
+      if (dragging || Date.now() - lastInput < 700) {
+        stick = nearBottom();
+        if (stick) showJump(false);
+      }
+      if (!stick) savedAnchor = anchorNow();
+      rememberScroll();
+    }, { passive: true });
+    // Hidden (minimized, the Tasks tab, a collapsed sidebar) and shown again:
+    // browsers reset scrollTop to 0 - put the reader back.
+    new ResizeObserver(() => {
+      const hidden = msgsEl.clientHeight === 0;
+      if (hidden) { wasHidden = true; return; }
+      if (wasHidden) {
+        wasHidden = false;
+        if (stick) settle(); else restoreAnchor(savedAnchor);
+      } else if (stick) settle();                           // resized while following
+    }).observe(msgsEl);
+    jumpEl = document.createElement('button');
+    jumpEl.className = 'ai-jump hidden';
+    jumpEl.type = 'button';
+    jumpEl.textContent = '↓ New messages';
+    jumpEl.title = 'Back to the latest message';
+    jumpEl.addEventListener('click', () => jumpToEnd());
+    msgsEl.insertAdjacentElement('afterend', jumpEl);
+  }
 
   function bubble(role, html) {
     const b = el('div', `ai-msg ai-${role}`, msgsEl);
     b.innerHTML = html;
-    scrollToEnd();
+    followEnd();
     return b;
   }
 
@@ -246,9 +365,8 @@
       }
       await aero.aiDeleteMessage(t.convId, Number(b.dataset.turn), 'reply');
     }
-    const top = msgsEl.scrollTop;
+    rememberScroll();            // the redraw puts the reader back at this message
     await renderConversation(t);
-    msgsEl.scrollTop = top;
   }
 
   // ---- Streaming render: coalesce chunks to one Markdown render per frame.
@@ -265,7 +383,7 @@
       streamRaf = 0;
       for (const x of streamQueue) paintStream(x);
       streamQueue.clear();
-      scrollToEnd(true);
+      followEnd();
     });
   }
 
@@ -325,7 +443,7 @@
     if (!window.AeroVisuals) return null;
     const card = AeroVisuals.card(v, aero);
     msgsEl.appendChild(card);
-    scrollToEnd();
+    followEnd();
     return card;
   }
 
@@ -337,7 +455,7 @@
     sum.textContent = `${ok ? '⚙' : '⚠'} ${name}`;
     el('div', 'ai-tool-body', row).textContent = `${JSON.stringify(input || {}, null, 1)}\n→ ${result || ''}`;
     if (image) { const im = el('img', 'ai-tool-shot', row); im.src = image; im.alt = 'screenshot'; }
-    scrollToEnd();
+    followEnd();
   }
 
   function chipHtml(a, removable, i) {
@@ -393,6 +511,7 @@
   }
 
   async function activateTab(key) {
+    rememberScroll();
     activeKey = key;
     const t = activeTab();
     if (t) t.unread = false;
@@ -470,6 +589,9 @@
   }
 
   async function renderConversation(tab) {
+    const keep = tab && tab.scroll && !tab.scroll.stick && tab.scroll.anchor ? tab.scroll.anchor : null;
+    stick = keep === null;
+    showJump(false);
     msgsEl.innerHTML = '';
     if (!tab) return;
     const conv = tab.convId ? await aero.aiConversationView(tab.convId, HISTORY_PAGE) : null;
@@ -492,6 +614,8 @@
       renderQueue(lv);
     }
     renderTabs();
+    if (keep !== null) { savedAnchor = keep; restoreAnchor(keep); showJump(false); }
+    else settle();
   }
 
   function renderQueue(lv) {
@@ -501,7 +625,7 @@
       b.innerHTML = `<span class="q-tag">queued</span> ${esc(text)} <button class="q-x" title="Remove from queue">✕</button>`;
       b.querySelector('.q-x').addEventListener('click', () => { const t = activeTab(); if (t && t.convId) aero.aiUnqueue(t.convId, i); });
     });
-    scrollToEnd();
+    followEnd();
   }
 
   let voiceOffHint = false;   // shown in the status line after a one-shot dictation
@@ -582,6 +706,7 @@
     if (window.speechSynthesis) speechSynthesis.cancel();
     if (msgsEl.querySelector('.ai-hint')) msgsEl.innerHTML = '';
     const lv = t.convId ? liveFor(t.convId) : null;
+    jumpToEnd();
     if (!(lv && lv.busy)) bubble('user', chipsBlock(files) + inline(msg).replace(/\n/g, '<br>'));
     t.awaiting = true;   // only THIS tab may adopt the conversation id that comes back
     const res = await aero.aiSend(t.convId, msg, files);
@@ -892,6 +1017,7 @@
     statusEl = root.querySelector('.ai-status');
     attachEl = root.querySelector('.ai-attachments');
     composeEl = root.querySelector('.ai-compose');
+    wireScroll();
 
     sendBtn.addEventListener('click', () => send());
     stopBtn.addEventListener('click', () => { const t = activeTab(); if (t && t.convId) aero.aiStop(t.convId); });
