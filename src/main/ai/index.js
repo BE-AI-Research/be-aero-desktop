@@ -54,6 +54,23 @@ class AiService {
     // AI bus: assistants on paired devices talking (bus.js). Attached to
     // the mesh by main when device connections are on.
     this.busHops = new Map();       // conversation id -> hop count of the bus message it is handling
+    // Shared inference servers: which server + model each paired device uses
+    // (shared-server.js) - to follow a loaded model and not evict each other.
+    const { SharedServers, serverKey } = require('./shared-server');
+    this.serverKey = serverKey;
+    this.shared = new SharedServers({
+      local: () => {
+        const out = [];
+        for (const which of ['chat', 'task']) {
+          const ep = this.endpoint(which);
+          if (!ep.preset.local) continue;
+          const model = which === 'task' ? this.taskModel(null) : String(this.config().model || ep.preset.model || '');
+          const server = serverKey(ep.baseUrl);
+          if (server && model && !out.some((m) => m.server === server && m.model === model)) out.push({ server, model });
+        }
+        return { models: out };
+      }
+    });
     this.bus = new (require('./bus').AiBus)({
       dir: path.join(deps.userDataDir, 'ai', 'bus'),
       getMesh: () => (deps.getMesh ? deps.getMesh() : null),
@@ -268,6 +285,13 @@ class AiService {
     if (!be) return;
     const st = await be.b.status(run.model, { fresh: true });
     if (!st || st.loaded || !st.others || !st.others.length || !run.stalled) return;
+    const busy = this.shared.inUse(this.serverKey(run.ep.baseUrl), st.others);
+    if (busy.length && busy.length === st.others.length) {
+      run.blockedShown = true;
+      const who = [...new Set(busy.map((b) => b.device))].join(', ');
+      emit({ type: 'notice', text: `${busy.map((b) => b.model).join(', ')} is ${busy.some((b) => b.running) ? 'in use' : 'recently used'} by ${who}'s assistant on this shared server - waiting for it rather than unloading it.` });
+      return;
+    }
     let mode = this.config().evictBlocking || 'ask';
     if (mode === 'never') return;
     // Nobody is watching a scheduled task to press the button.
@@ -291,7 +315,11 @@ class AiService {
     const st = await be.b.status(run.model, { fresh: true });
     const emit = (ev) => this.emit(convId, ev);
     if (st && st.loaded) return { ok: true, unloaded: [], note: `${run.model} is loaded now` };
-    const others = (st && st.others) || [];
+    const allOthers = (st && st.others) || [];
+    // Never unload a model one of my other devices is using.
+    const busy = new Set(this.shared.inUse(this.serverKey(run.ep.baseUrl), allOthers).map((b) => b.model));
+    const others = allOthers.filter((m) => !busy.has(m));
+    if (allOthers.length && !others.length) return { ok: false, error: 'that model is in use by one of your other devices; waiting for it instead' };
     if (!others.length) return { ok: false, error: 'no other model is loaded on the server' };
     const done = [];
     for (const m of others) if (await be.b.unload(m)) done.push(m);
@@ -824,7 +852,25 @@ class AiService {
     const c = this.config();
     const ep = this.endpoint(opts.endpoint);
     const preset = ep.preset;
-    const model = String(opts.model || c.model || preset.model || '').trim();
+    let model = String(opts.model || c.model || preset.model || '').trim();
+    const emitEarly = (ev) => this.emit(conv.id, ev);
+    const server = preset.local ? this.serverKey(ep.baseUrl) : '';
+    // A server shared with my other devices: when my model is not loaded but
+    // one of theirs is, use theirs for this turn instead of swapping.
+    if (server && c.followSharedModel !== false) {
+      try {
+        const be = this.backend(ep);
+        const st = be ? await be.b.status(model, { fresh: true }) : null;
+        if (st && !st.loaded && st.others && st.others.length) {
+          const pick = this.shared.choose(server, model, st.others);
+          if (pick) {
+            emitEarly({ type: 'notice', text: `Using ${pick.model} - it is already loaded on the shared server for ${pick.device} - instead of swapping it out for ${model}.` });
+            model = pick.model;
+          }
+        }
+      } catch { /* status unavailable: carry on with our model */ }
+    }
+    if (server) this.shared.announce(server, model, true);
     const controller = new AbortController();
     if (opts.signal) {
       if (opts.signal.aborted) controller.abort();
@@ -862,6 +908,7 @@ class AiService {
       return { conversationId: conv.id, error: err.message };
     } finally {
       clearTimeout(run.autoTimer);
+      if (server) this.shared.announce(server, model, false);
       this.runInfo.delete(conv.id);
       this.runs.delete(conv.id);
       // Next queued message becomes the next turn, in order.

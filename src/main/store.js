@@ -138,6 +138,7 @@ const DEFAULTS = {
     browser: '',          // '' = the default browser; or chrome | msedge | brave | chromium | firefox
     folder: '',           // the assistant's own folder ('' = ~/BE-Aero AI); uploads are copied into Uploads/
     busOperateDesktop: false,   // AI bus: may other devices' assistants use desktop-driving tools here?
+    followSharedModel: true,    // shared local server: use a model my other devices already have loaded instead of swapping
     browserMode: 'main',  // browser_open: main = the user's own browser/profile (interaction uses the assistant profile) | assistant = always the assistant profile
     toolCalls: 'auto',   // auto (by model family, with fallback) | native (JSON tools field) | compat (text tool calls)    // local servers (Ollama): keep the model loaded this long after a reply; '0' = don't
     taskMaxRuntimeMin: 30,

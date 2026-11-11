@@ -221,7 +221,8 @@
           <option value="auto">Unload it automatically after a wait</option>
           <option value="never">Never unload other models</option>
         </select>
-        <div class="hint-text">Ollama servers. Unloading frees the server's memory for other models and programs; whoever uses a model next waits for it to load again.</div>
+        <label class="check"><input id="set-ai-follow-shared" type="checkbox"> On a server shared with my other devices, use the model they already have loaded instead of swapping</label>
+        <div class="hint-text">Ollama servers. Unloading frees the server's memory for other models and programs; whoever uses a model next waits for it to load again. A model one of your paired devices is using is never unloaded for this one.</div>
         <label class="check"><input id="set-ai-bus-desktop" type="checkbox"> Let other devices' assistants operate this desktop (type, click, open apps, use the browser)</label>
         <div class="hint-text">Off: work requested by another device's assistant (Settings &gt; Devices, "AI requests") can read, search, use files and run tasks here, but never takes over the screen you or this assistant are using.</div>
         <label class="field-label">Browser the assistant uses</label>

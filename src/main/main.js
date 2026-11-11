@@ -2089,7 +2089,7 @@ app.whenReady().then(() => {
   });
   deviceService = new (require('./mesh/service').DeviceService)({
     userDataDir: app.getPath('userData'), store, getWindow: () => win,
-    onStart: (mesh) => { poolSync.attach(mesh); poolSync.start(); remoteFiles.attach(mesh); if (aiService) aiService.bus.attach(mesh); },
+    onStart: (mesh) => { poolSync.attach(mesh); poolSync.start(); remoteFiles.attach(mesh); if (aiService) { aiService.bus.attach(mesh); aiService.shared.attach(mesh); } },
     onStop: () => { poolSync.stop(); poolSync.mesh = null; }
   });
   deviceService.registerIpc();
@@ -2135,6 +2135,7 @@ app.whenReady().then(() => {
       else if (!store.get('alwaysOnTop')) { win.setAlwaysOnTop(false); sinkToDesktop(); }
     }
   });
+  if (deviceService && deviceService.mesh) { aiService.bus.attach(deviceService.mesh); aiService.shared.attach(deviceService.mesh); }
   spotlight.aiEnabled = () => aiService.enabled();
   spotlight.askAi = (q) => aiService.askFromSearch(q);
 

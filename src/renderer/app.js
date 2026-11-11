@@ -440,6 +440,7 @@
     $('set-ai-evict').value = aiCfg.evictBlocking || 'ask';
     $('set-ai-browser').value = aiCfg.browserMode || 'main';
     $('set-ai-bus-desktop').checked = !!aiCfg.busOperateDesktop;
+    $('set-ai-follow-shared').checked = aiCfg.followSharedModel !== false;
     fillBrowsers(aiCfg.browser || '');
     $('set-ai-memory').checked = aiCfg.memoryEnabled !== false;
     const vc = aiCfg.voice || {};
@@ -672,6 +673,7 @@
   $('set-ai-evict').addEventListener('change', (e) => aero.setSettings({ ai: { evictBlocking: e.target.value } }));
   $('set-ai-browser').addEventListener('change', (e) => aero.setSettings({ ai: { browserMode: e.target.value } }));
   $('set-ai-bus-desktop').addEventListener('change', (e) => aero.setSettings({ ai: { busOperateDesktop: e.target.checked } }));
+  $('set-ai-follow-shared').addEventListener('change', (e) => aero.setSettings({ ai: { followSharedModel: e.target.checked } }));
 
   // "Browser the assistant uses": the installed browsers (listed once).
   let browserList = null;
