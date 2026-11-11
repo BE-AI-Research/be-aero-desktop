@@ -27,6 +27,10 @@ class AiService {
     this.conversations.defaultLocal = () => (this.d.store.get('devices') || {}).newConversationsLocal === true;
     this.runs = new Map();          // conversationId -> AbortController
     this.queues = new Map();        // conversationId -> [text] waiting for the current turn
+    // Task runs in progress (conversation id -> task name). While one runs,
+    // chat and AI-bus messages wait in their conversation's queue, so they
+    // never compete with the task for the model or the server.
+    this.taskRuns = new Map();
     this.pendingWebOps = new Map(); // opId -> { resolve, timer }
     this.pinned = false;
     this.calibrations = new Map();  // provider|model -> chars-per-token learned from usage
@@ -218,7 +222,7 @@ class AiService {
     // Model: the task's own choice, else the Tasks model in Settings, else
     // the chat model.
     const model = this.taskModel(task);
-    const result = await this.send(convId, header + task.prompt, [], { permission, source: scheduled ? 'schedule' : 'task', signal, model, endpoint: 'task', maxSteps: taskSteps });
+    const result = await this.send(convId, header + task.prompt, [], { permission, source: scheduled ? 'schedule' : 'task', taskName: task.name, signal, model, endpoint: 'task', maxSteps: taskSteps });
     try {
       const conv = this.conversations.get(convId);
       const last = [...conv.messages].reverse().find((m) => m.role === 'assistant' && m.content);
@@ -871,12 +875,20 @@ class AiService {
       try { conv = this.conversations.get(conversationId); } catch { conv = null; }
     }
     if (!conv) conv = this.conversations.create();
-    if (this.runs.has(conv.id)) {
+    const isTask = opts.source === 'schedule' || opts.source === 'task';
+    const taskBusy = !isTask && this.taskRuns.size > 0;
+    if (this.runs.has(conv.id) || taskBusy) {
       const q = this.queues.get(conv.id) || [];
-      q.push({ text: content, attachments: files, opts });
+      const item = { text: content, attachments: files, opts: { ...opts, requeue: undefined } };
+      // A message taken off the queue that has to wait again keeps its place.
+      if (opts.requeue) q.unshift(item); else q.push(item);
       this.queues.set(conv.id, q);
       this.emit(conv.id, { type: 'queue', items: q.map((x) => x.text || `(${(x.attachments || []).length} file${(x.attachments || []).length === 1 ? '' : 's'})`) });
-      return { queued: true, position: q.length, conversationId: conv.id };
+      if (taskBusy && !this.runs.has(conv.id) && !opts.requeue) {
+        const names = [...new Set(this.taskRuns.values())].map((n) => `"${n}"`).join(', ');
+        this.emit(conv.id, { type: 'notice', text: `Queued: the scheduled task ${names} is running. Your message is sent as soon as it finishes.` });
+      }
+      return { queued: true, position: q.length, conversationId: conv.id, waitingForTask: taskBusy };
     }
 
     const c = this.config();
@@ -936,6 +948,7 @@ class AiService {
       else opts.signal.addEventListener('abort', () => controller.abort(), { once: true });
     }
     this.runs.set(conv.id, controller);
+    if (opts.source === 'schedule' || opts.source === 'task') this.taskRuns.set(conv.id, String(opts.taskName || 'task'));
     const emit = (ev) => this.emit(conv.id, ev);
     const run = { ep, model, restart: null, stalled: false, blockedShown: false, autoTimer: null, unattended: opts.source === 'schedule' || opts.source === 'task' };
     this.runInfo.set(conv.id, run);
@@ -975,8 +988,20 @@ class AiService {
       if (q && q.length) {
         const next = q.shift();
         this.emit(conv.id, { type: 'queue', items: q.map((x) => x.text || '(files)') });
-        setImmediate(() => this.send(conv.id, next.text, next.attachments, next.opts || {}));
+        setImmediate(() => this.send(conv.id, next.text, next.attachments, { ...(next.opts || {}), requeue: true }));
       }
+      // The last task run finished: messages that waited for it go now.
+      if (this.taskRuns.delete(conv.id) && !this.taskRuns.size) this.releaseQueued();
+    }
+  }
+
+  // Start the next waiting message in every idle conversation.
+  releaseQueued() {
+    for (const [id, q] of this.queues) {
+      if (!q || !q.length || this.runs.has(id)) continue;
+      const next = q.shift();
+      this.emit(id, { type: 'queue', items: q.map((x) => x.text || '(files)') });
+      setImmediate(() => this.send(id, next.text, next.attachments, { ...(next.opts || {}), requeue: true }));
     }
   }
 
