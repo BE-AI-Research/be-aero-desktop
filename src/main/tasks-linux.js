@@ -58,6 +58,59 @@ const APP_ROOTS = [
   '/var/lib/snapd/desktop/applications'
 ];
 const DESKTOP_CACHE_MS = 5 * 60 * 1000;
+
+// ------------------------------------------------------------ icon themes
+// Icons live in themes: <data dir>/icons/<theme>/<size>/<category>/<name>.
+// An index of every icon file in the themes that matter (the current one,
+// Adwaita, hicolor) is built once per session; per name it keeps the best
+// file - scalable SVG first, then the largest PNG up to 256 px.
+const ICON_DATA_DIRS = () => {
+  const xdg = (process.env.XDG_DATA_DIRS || '/usr/local/share:/usr/share').split(':').filter(Boolean);
+  return [path.join(HOME, '.local', 'share'), ...xdg, '/var/lib/flatpak/exports/share', path.join(HOME, '.local', 'share', 'flatpak', 'exports', 'share')];
+};
+function currentIconTheme() {
+  try {
+    const out = require('child_process').execFileSync('gsettings', ['get', 'org.gnome.desktop.interface', 'icon-theme'], { encoding: 'utf8', timeout: 2000, stdio: ['ignore', 'pipe', 'ignore'] });
+    return out.trim().replace(/^'|'$/g, '') || null;
+  } catch { return null; }
+}
+// "256x256" -> 256, "scalable" -> Infinity (preferred), "32x32@2" -> 64.
+function sizeRank(dir) {
+  if (/scalable/i.test(dir)) return 1e6;
+  const m = /(\d+)x\d+(?:@(\d+))?/.exec(dir);
+  if (!m) return 0;
+  const px = Number(m[1]) * (Number(m[2]) || 1);
+  return px > 256 ? 256 - (px - 256) / 1000 : px;          // over 256: allowed, just below 256
+}
+function buildIconIndex(themes, dataDirs, fsImpl = fs) {
+  const best = new Map();                                     // name -> { file, rank }
+  const consider = (name, file, rank) => {
+    const cur = best.get(name);
+    if (!cur || rank > cur.rank) best.set(name, { file, rank });
+  };
+  for (const theme of themes) {
+    for (const d of dataDirs) {
+      const root = path.join(d, 'icons', theme);
+      let sizes;
+      try { sizes = fsImpl.readdirSync(root); } catch { continue; }
+      for (const size of sizes) {
+        let cats;
+        try { cats = fsImpl.readdirSync(path.join(root, size)); } catch { continue; }
+        for (const cat of cats) {
+          let files;
+          try { files = fsImpl.readdirSync(path.join(root, size, cat)); } catch { continue; }
+          for (const f of files) {
+            const m = /^(.+)\.(svg|png)$/i.exec(f);
+            if (!m || /-symbolic$/.test(m[1])) continue;
+            // Earlier themes win ties: + a small bonus per theme position.
+            consider(m[1], path.join(root, size, cat, f), sizeRank(size) + (m[2].toLowerCase() === 'svg' ? 0.5 : 0) + (themes.length - themes.indexOf(theme)) * 0.001);
+          }
+        }
+      }
+    }
+  }
+  return best;
+}
 const SELF = /^be-aero-desktop/i;
 
 // First real command word of an Exec= line: wrappers (env, VAR=x) and field
@@ -114,7 +167,15 @@ function matchProcesses(procs, entries) {
 }
 
 function parseDesktopFile(file, text) {
-  const section = String(text).split(/\n\[/)[0];
+  // The [Desktop Entry] group, wherever it starts: many files open with
+  // comment lines (LibreOffice, vim, xterm), and taking "everything before
+  // the first [" read only those comments - the whole app was dropped.
+  const t = String(text);
+  const start = t.search(/^\[Desktop Entry\][ \t]*$/m);
+  if (start < 0) return null;
+  const body = t.slice(t.indexOf('\n', start) + 1);
+  const next = body.search(/^\[/m);
+  const section = next < 0 ? body : body.slice(0, next);
   const get = (k) => {
     const m = new RegExp('^' + k + '=(.*)$', 'm').exec(section);
     return m ? m[1].trim() : '';
@@ -352,38 +413,47 @@ class LinuxTasks {
   // Icon for a .desktop entry: an absolute Icon= path, else the hicolor
   // theme and pixmaps directories. SVGs ship as data: urls - the renderer
   // may draw them, nativeImage cannot.
+  // The icon theme index, built on first use (a few thousand files).
+  themeIndex() {
+    if (!this.iconIndex) {
+      const themes = [...new Set([currentIconTheme(), 'Adwaita', 'hicolor'].filter(Boolean))];
+      this.iconIndex = buildIconIndex(themes, ICON_DATA_DIRS());
+    }
+    return this.iconIndex;
+  }
+
+  // An Icon= value -> a file: an absolute path, a themed name (with or
+  // without an extension), /usr/share/pixmaps; else the theme's generic
+  // application icon rather than nothing.
+  iconFile(iconName) {
+    const name = String(iconName || '').trim();
+    if (!name) return null;
+    if (name.startsWith('/')) { try { if (fs.statSync(name).isFile()) return name; } catch { /* missing */ } }
+    const bare = path.basename(name).replace(/\.(png|svg|xpm)$/i, '');
+    const idx = this.themeIndex();
+    if (idx.has(bare)) return idx.get(bare).file;
+    for (const ext of ['png', 'svg']) {
+      const p = `/usr/share/pixmaps/${bare}.${ext}`;
+      try { if (fs.statSync(p).isFile()) return p; } catch { /* next */ }
+    }
+    return null;
+  }
+
   icon(file) {
     if (this.iconCache.has(file)) return this.iconCache.get(file);
     const e = this.entryFor(file);
     let url = null;
-    if (e && e.icon) {
-      const candidates = [];
-      if (e.icon.startsWith('/')) candidates.push(e.icon);
-      else {
-        for (const size of ['256x256', '128x128', '64x64', '48x48', 'scalable']) {
-          candidates.push(`/usr/share/icons/hicolor/${size}/apps/${e.icon}.png`);
-          candidates.push(`/usr/share/icons/hicolor/${size}/apps/${e.icon}.svg`);
-        }
-        candidates.push(`/usr/share/pixmaps/${e.icon}.png`, `/usr/share/pixmaps/${e.icon}.svg`);
-        if (e.flatpakId) {
-          for (const base of ['/var/lib/flatpak/exports/share/icons/hicolor', path.join(HOME, '.local/share/flatpak/exports/share/icons/hicolor')]) {
-            for (const size of ['256x256', '128x128', '64x64', 'scalable']) {
-              candidates.push(`${base}/${size}/apps/${e.icon}.png`);
-              candidates.push(`${base}/${size}/apps/${e.icon}.svg`);
-            }
-          }
-        }
-      }
-      for (const c of candidates) {
-        try {
-          const buf = fs.readFileSync(c);
-          if (!buf.length || buf.length > 512 * 1024) continue;
-          url = c.endsWith('.svg')
-            ? `data:image/svg+xml;base64,${buf.toString('base64')}`
-            : `data:image/png;base64,${buf.toString('base64')}`;
-          break;
-        } catch { /* next candidate */ }
-      }
+    const idx = this.themeIndex();
+    const generic = idx.get('application-x-executable') || idx.get('applications-other');
+    for (const f of [e && this.iconFile(e.icon), generic && generic.file].filter(Boolean)) {
+      try {
+        const buf = fs.readFileSync(f);
+        if (!buf.length || buf.length > 2 * 1024 * 1024) continue;
+        url = f.toLowerCase().endsWith('.svg')
+          ? `data:image/svg+xml;base64,${buf.toString('base64')}`
+          : `data:image/png;base64,${buf.toString('base64')}`;
+        break;
+      } catch { /* next */ }
     }
     if (this.iconCache.size > 200) this.iconCache.clear();
     this.iconCache.set(file, url);
@@ -391,4 +461,4 @@ class LinuxTasks {
   }
 }
 
-module.exports = { LinuxTasks, execBase, containerId, matchProcesses, parseDesktopFile, parseWmctrl, parseGdbusB64, entryForWindow, EXT_UUID };
+module.exports = { LinuxTasks, execBase, containerId, matchProcesses, parseDesktopFile, parseWmctrl, parseGdbusB64, entryForWindow, EXT_UUID, buildIconIndex, sizeRank };

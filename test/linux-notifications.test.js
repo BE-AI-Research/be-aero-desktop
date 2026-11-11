@@ -75,3 +75,30 @@ test('watcher: our own toasts are skipped and quick repeats are folded', () => {
   w.deliver({ app: 'Slack', title: '', body: '' });
   assert.deepStrictEqual(got, [{ app: 'Slack', title: 'Sam', body: 'hi' }]);
 });
+
+test('linux dock: .desktop files with leading comments are read, and themed icons are found', () => {
+  const { parseDesktopFile, buildIconIndex, sizeRank } = require('../src/main/tasks-linux');
+  const calc = '#\n# This file is part of the LibreOffice project.\n#\n[Desktop Entry]\nName=LibreOffice Calc\nExec=libreoffice --calc %U\nIcon=libreoffice-calc\nType=Application\n\n[Desktop Action NewDocument]\nName=New Spreadsheet\nIcon=document-new\n';
+  const e = parseDesktopFile('/usr/share/applications/libreoffice-calc.desktop', calc);
+  assert.ok(e, 'parsed despite the comments');
+  assert.strictEqual(e.name, 'LibreOffice Calc');
+  assert.strictEqual(e.icon, 'libreoffice-calc', 'the action group\'s Icon= is not taken');
+  assert.strictEqual(parseDesktopFile('/x.desktop', '# only a comment\n'), null);
+
+  // A fake icon tree: hicolor PNGs in several sizes, Adwaita SVG under devices/.
+  const tree = {
+    '/d/icons/hicolor': ['16x16', '128x128', 'scalable'],
+    '/d/icons/hicolor/16x16': ['apps'], '/d/icons/hicolor/16x16/apps': ['libreoffice-calc.png'],
+    '/d/icons/hicolor/128x128': ['apps'], '/d/icons/hicolor/128x128/apps': ['libreoffice-calc.png', 'gvim.png'],
+    '/d/icons/hicolor/scalable': ['apps'], '/d/icons/hicolor/scalable/apps': ['gvim.svg', 'gvim-symbolic.svg'],
+    '/d/icons/Adwaita': ['scalable'], '/d/icons/Adwaita/scalable': ['devices'], '/d/icons/Adwaita/scalable/devices': ['input-keyboard.svg']
+  };
+  const fakeFs = { readdirSync: (p) => { const k = p.replace(/\\/g, '/'); if (!tree[k]) throw new Error('ENOENT'); return tree[k]; } };
+  const idx = buildIconIndex(['Adwaita', 'hicolor'], ['/d'], fakeFs);
+  const f = (n) => (idx.get(n) || {}).file.replace(/\\/g, '/');
+  assert.strictEqual(f('libreoffice-calc'), '/d/icons/hicolor/128x128/apps/libreoffice-calc.png', 'largest PNG wins');
+  assert.strictEqual(f('gvim'), '/d/icons/hicolor/scalable/apps/gvim.svg', 'scalable wins');
+  assert.strictEqual(f('input-keyboard'), '/d/icons/Adwaita/scalable/devices/input-keyboard.svg', 'any category, any theme');
+  assert.ok(!idx.has('gvim-symbolic'), 'symbolic icons skipped');
+  assert.ok(sizeRank('scalable') > sizeRank('256x256') && sizeRank('256x256') > sizeRank('512x512') && sizeRank('32x32@2') === 64);
+});
