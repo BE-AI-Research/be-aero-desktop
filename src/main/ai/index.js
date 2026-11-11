@@ -37,6 +37,16 @@ class AiService {
     this.runInfo = new Map();       // conversation id -> { ep, model, restart, ... } while a turn runs
     this.memory = new Memory(path.join(deps.userDataDir, 'ai', 'memory.json'));
     this.visuals = new (require('./visuals').Visuals)(path.join(deps.userDataDir, 'ai', 'visuals'));
+    // AI widgets: desktop widgets the assistant writes (AI Folder/AI Widgets).
+    // Site approvals live in the app's data, out of the assistant's reach.
+    this.widgets = new (require('./widgets').AiWidgets)({
+      folder: () => require('../files').ensureAiFolder(deps.store),
+      approvalsFile: path.join(deps.userDataDir, 'ai', 'widget-approvals.json'),
+      approve: (w, hosts) => this.approveWidgetHosts(w, hosts),
+      onChange: (list) => { const win = this.d.getWindow(); if (win && !win.isDestroyed()) win.webContents.send('ai:widgets', list); },
+      log: (m) => console.log('[widgets]', m)
+    });
+    this.widgets.load().then(() => this.widgets.watch()).catch((err) => console.log('[widgets]', err.message));
     this.browser = new BrowserController({
       profileDir: path.join(deps.userDataDir, 'ai', 'browser-profile'),
       preferred: () => String(this.config().browser || ''),
@@ -550,6 +560,12 @@ class AiService {
       webOpen: (url, name) => this.webOpen(url, name),
       browser: (op, args) => this.browserOp(op, args),
       memory: this.memory,
+      widgets: {
+        create: (args) => this.widgets.create(args),
+        update: (id, args) => this.widgets.update(id, args),
+        remove: (id) => this.widgets.remove(id, (dir) => require('electron').shell.trashItem(dir)),
+        list: () => this.widgets.list()
+      },
       visuals: {
         show: (args) => { const rec = this.visuals.save({ ...args, conversationId }); this.visualsChanged(); this.exportVisual(rec.id).catch(() => {}); return rec; },
         close: (id) => { const ok = this.visuals.remove(id); this.visualsChanged(); return ok; },
@@ -1062,7 +1078,16 @@ class AiService {
     const { ensureAiFolder, freeName } = require('../files');
     const p = require('path');
     const fsp = require('fs/promises');
-    const dir = p.join(await ensureAiFolder(this.d.store), 'Visuals');
+    const base = await ensureAiFolder(this.d.store);
+    const dir = p.join(base, 'AI Artifacts');
+    // Before 1.3.0 this folder was "Visuals": move it over once.
+    try { await fsp.access(dir); } catch {
+      try { await fsp.rename(p.join(base, 'Visuals'), dir); } catch { /* there was none */ }
+      for (const v of this.visuals.list()) {
+        if (v.exportedAs && p.dirname(v.exportedAs) === p.join(base, 'Visuals')) { const r = this.visuals.get(v.id); r.exportedAs = p.join(dir, p.basename(v.exportedAs)); }
+      }
+      this.visuals.saveIndex();
+    }
     await fsp.mkdir(dir, { recursive: true });
     let file = v.exportedAs && p.dirname(v.exportedAs) === dir ? v.exportedAs : null;
     if (!file) {
@@ -1074,6 +1099,18 @@ class AiService {
     const html = String(page).replace(/<head>/i, `<head><meta charset="utf-8"><title>${String(v.title || 'Visual').replace(/[<&]/g, '')}</title>`);
     await fsp.writeFile(file, html, 'utf8');
     return file;
+  }
+
+  // A widget wants to reach sites: ask the user (native dialog).
+  async approveWidgetHosts(w, hosts) {
+    const { dialog } = require('electron');
+    const win = this.d.getWindow();
+    const r = await dialog.showMessageBox(win && !win.isDestroyed() ? win : undefined, {
+      type: 'question', buttons: ['Allow', 'Block'], defaultId: 1, cancelId: 1, noLink: true,
+      title: 'AI widget', message: `Allow the widget "${w.title}" to reach these sites?`,
+      detail: `${hosts.map((h) => `  ${h}`).join('\n')}\n\nThe assistant made this widget. Without approval it still shows, but cannot load anything from these sites. You can revoke this in Settings > AI assistant > AI widgets.`
+    });
+    return r.response === 0;
   }
 
   visualsChanged() {
@@ -1162,6 +1199,19 @@ class AiService {
     ipcMain.handle('ai:unqueue', (_e, id, index) => this.unqueue(id, Number(index)));
     ipcMain.handle('ai:pin', (_e, on) => this.setPinned(on));
     ipcMain.handle('ai:probe', () => this.probe());
+    ipcMain.handle('ai:widgets', () => this.widgets.list());
+    ipcMain.handle('ai:widget-bridge', async (_e, id, op, args) => {
+      try {
+        if (op === 'load') return { result: await this.widgets.getState(String(id)) };
+        if (op === 'save') return { result: await this.widgets.setState(String(id), args) };
+        if (op === 'fetch') return { result: await this.widgets.fetch(String(id), args || {}) };
+        return { error: 'unknown request' };
+      } catch (err) { return { error: err.message }; }
+    });
+    ipcMain.handle('ai:widget-remove', (_e, id) => this.widgets.remove(String(id), (dir) => require('electron').shell.trashItem(dir)));
+    ipcMain.handle('ai:widget-folder', (_e, id) => { const w = this.widgets.get(String(id)); if (w) require('electron').shell.openPath(w.dir); return !!w; });
+    ipcMain.handle('ai:widget-approve', async (_e, id) => { const w = this.widgets.get(String(id)); if (!w) return null; await this.widgets.askHosts(w); this.widgets.onChange(this.widgets.list()); return this.widgets.list().find((x) => x.id === w.id); });
+    ipcMain.handle('ai:widget-revoke', (_e, id) => { this.widgets.revoke(String(id)); return true; });
     ipcMain.handle('ai:visuals', () => this.visuals.list().filter((v) => v.where === 'desktop'));
     ipcMain.handle('ai:visual-delete', (_e, id) => { const ok = this.visuals.remove(String(id || '')); this.visualsChanged(); return ok; });
     ipcMain.handle('ai:visual-where', async (_e, id, where) => {

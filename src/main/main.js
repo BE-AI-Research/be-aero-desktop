@@ -88,6 +88,10 @@ protocol.registerSchemesAsPrivileged([{
   // Assistant-made visuals (charts, tables, dashboards); see ai/visuals.js.
   scheme: 'aero-visual',
   privileges: { standard: true, secure: true }
+}, {
+  // Assistant-made desktop widgets; see ai/widgets.js.
+  scheme: 'aero-widget',
+  privileges: { standard: true, secure: true }
 }]);
 
 // Only one sidebar at a time: a second launch just shows the existing one.
@@ -1941,6 +1945,15 @@ app.whenReady().then(() => {
     if (!page) return new Response('no such visual', { status: 404 });
     const { VISUAL_CSP } = require('./ai/visuals');
     return new Response(page, { headers: { 'content-type': 'text/html; charset=utf-8', 'content-security-policy': VISUAL_CSP, 'cache-control': 'no-store' } });
+  });
+  // aero-widget://<id>/ - an AI widget, with a CSP that opens only the
+  // sites the user approved for it.
+  protocol.handle('aero-widget', (request) => {
+    const id = new URL(request.url).hostname;
+    const w = aiService && aiService.widgets;
+    const page = w ? w.page(id) : null;
+    if (!page) return new Response('no such widget', { status: 404 });
+    return new Response(page, { headers: { 'content-type': 'text/html; charset=utf-8', 'content-security-policy': w.csp(id), 'cache-control': 'no-store' } });
   });
   refreshPlugins();
   startApi();

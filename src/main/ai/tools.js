@@ -506,6 +506,49 @@ const TOOLS = [
     }
   },
   {
+    name: 'create_widget', category: 'control',
+    description: 'Make a desktop widget the user asked for (a countdown, a to-do list, a dashboard for an API, a converter, a clock for another city...). Write one self-contained HTML page with inline CSS and JS; it shows as its own widget on the desktop and stays there across restarts. It lives in your AI folder under "AI Widgets/<title>/" (index.html), so the user can edit it. The page runs sandboxed: no access to the app or files. Saving state: call await aeroWidget.load() and await aeroWidget.save(value) (JSON, 256 KB). Network: blocked unless you list the sites in hosts (e.g. ["api.coingecko.com", "http://192.168.1.38:8123"]) and the user approves them; then use await aeroWidget.fetch(url, {method, headers, body}) which returns {status, ok, text} (works even where the site refuses browser requests). Libraries may load from cdn.jsdelivr.net, cdnjs.cloudflare.com or unpkg.com. Dark transparent background and light text by default; the title is shown above it. Returns the widget id.',
+    input_schema: obj({
+      title: str('Widget title'),
+      html: str('The widget page: an HTML fragment or a full document'),
+      hosts: { type: 'array', items: { type: 'string' }, description: 'Sites the widget needs to reach (the user approves them)' },
+      width: { type: 'number', description: 'Width in px (default 320)' },
+      height: { type: 'number', description: 'Height in px (default 240)' }
+    }, ['title', 'html']),
+    run: async (input, ctx) => {
+      if (!ctx.widgets) return { error: 'widgets are not available' };
+      const r = await ctx.widgets.create(input);
+      const pending = r.hosts.filter((h) => !r.approvedHosts.includes(h));
+      return { ok: true, widget: r.id, folder: r.folder, ...(pending.length ? { blockedHosts: pending, note: 'The user did not approve these sites; the widget cannot reach them.' } : {}) };
+    }
+  },
+  {
+    name: 'update_widget', category: 'control',
+    description: 'Change a widget made with create_widget: new html, title, hosts or size. Only pass what changes.',
+    input_schema: obj({
+      id: str('Widget id'), title: str('New title'), html: str('New page'),
+      hosts: { type: 'array', items: { type: 'string' }, description: 'The full list of sites it needs' },
+      width: { type: 'number', description: 'Width in px' }, height: { type: 'number', description: 'Height in px' }
+    }, ['id']),
+    run: async (input, ctx) => {
+      if (!ctx.widgets) return { error: 'widgets are not available' };
+      const { id, ...rest } = input;
+      return { ok: true, ...(await ctx.widgets.update(id, rest)) };
+    }
+  },
+  {
+    name: 'list_widgets', category: 'read',
+    description: 'List the widgets made with create_widget (id, title, folder, approved and blocked sites).',
+    input_schema: obj({}),
+    run: async (_in, ctx) => ({ widgets: ctx.widgets ? ctx.widgets.list().map((w) => ({ id: w.id, title: w.title, folder: w.dir, approvedHosts: w.approvedHosts, blockedHosts: w.pendingHosts })) : [] })
+  },
+  {
+    name: 'remove_widget', category: 'control',
+    description: 'Remove a widget made with create_widget (its folder goes to the Recycle Bin / Trash).',
+    input_schema: obj({ id: str('Widget id') }, ['id']),
+    run: async (input, ctx) => ({ ok: !!(ctx.widgets && await ctx.widgets.remove(input.id)) })
+  },
+  {
     name: 'close_visual', category: 'read',
     description: 'Remove a visual made with show_visual (from the chat card store or the desktop).',
     input_schema: obj({ id: str('Visual id') }, ['id']),

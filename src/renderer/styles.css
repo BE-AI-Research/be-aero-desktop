@@ -1356,6 +1356,8 @@ webview.plugin-frame { background: #fff; }
 .visual-widget { display: flex; flex-direction: column; padding: 8px 10px 10px; }
 .visual-widget .visual-frame { flex: 1; min-height: 0; border-radius: 8px; }
 .visual-widget .webw-btn.confirm { background: rgba(248,113,113,.35); }
+.aiw-widget .aiw-blocked { font-size: 10.5px; padding: 4px 8px; margin: 0 0 6px; border-radius: 6px; background: rgba(251,191,36,.14); color: rgba(var(--text-rgb), .85); display: flex; gap: 6px; align-items: center; }
+.aiw-widget .aiw-blocked button { margin-left: auto; font-size: 10.5px; padding: 1px 8px; }
 
 /* Tasks: when field preview, state, errors */
 .ai-task-form [name=when] { flex: 1; min-width: 0; font-family: Consolas, 'Cascadia Mono', monospace; }
