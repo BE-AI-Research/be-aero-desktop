@@ -120,7 +120,7 @@ contextBridge.exposeInMainWorld('aero', {
   filesTransfer: (paths, dest, move) => ipcRenderer.invoke('files:transfer', paths, dest, move),
   filesToPool: (paths) => ipcRenderer.invoke('files:to-pool', paths),
   filesPreview: (p) => ipcRenderer.invoke('files:preview', p),
-  filesIcon: (p) => ipcRenderer.invoke('files:icon', p),
+  filesIcon: (p, size) => ipcRenderer.invoke('files:icon', p, size),
   filesPool: () => ipcRenderer.invoke('files:pool'),
   filesSearch: (q) => ipcRenderer.invoke('files:search', q),
   filesNetConnect: (opts) => ipcRenderer.invoke('files:net-connect', opts),

@@ -20,6 +20,9 @@
   let back = [];
   let forward = [];
   let filter = '';
+  let view = 'list';              // list | grid (tiles)
+  let tileObserver = null;
+  const iconCache = new Map();    // path -> data URL ('' = none)
   let found = [];                 // index matches elsewhere on this PC
   let searchTimer = null;
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -194,6 +197,8 @@
   function renderList() {
     const rows = visible();
     listEl.innerHTML = '';
+    listEl.classList.toggle('grid', view === 'grid');
+    if (tileObserver) tileObserver.disconnect();
     const extraNow = filter.length >= 2 ? found.filter((f) => !rows.some((x) => x.path === f.path)) : [];
     if (!rows.length && !extraNow.length) {
       const e = document.createElement('div');
@@ -215,17 +220,73 @@
       r.className = `files-row${selected.has(e.path) ? ' sel' : ''}${e.hidden ? ' hidden-file' : ''}${clip && clip.cut && clip.paths.includes(e.path) ? ' cut' : ''}`;
       r.dataset.path = e.path;
       r.draggable = true;
-      r.title = e.name;
+      r.title = e.found ? `${e.name}\n${e.where}` : e.name;
+      if (view === 'grid') {
+        r.classList.add('tile');
+        r.dataset.kind = e.kind;
+        r.innerHTML = `<div class="ti">${GLYPH[e.kind] || GLYPH.file}</div><div class="tn">${esc(e.name)}</div>`;
+        if (e.found) r.classList.add('found');
+        listEl.appendChild(r);
+        continue;
+      }
       r.innerHTML = e.found
         ? `<span class="g">${GLYPH[e.kind] || GLYPH.file}</span><span class="n">${esc(e.name)}<small class="files-where">${esc(e.where)}</small></span>`
         : `<span class="g">${GLYPH[e.kind] || GLYPH.file}</span><span class="n">${esc(e.name)}</span><span class="s">${e.dir ? '' : human(e.size)}</span><span class="t">${when(e.mtime)}</span>`;
       if (e.found) r.classList.add('found');
       listEl.appendChild(r);
     }
+    if (view === 'grid') observeTiles();
     const n = rows.length;
     if (filter.length >= 2) { status(`${n} here · ${extra.length} elsewhere${selected.size ? ` · ${selected.size} selected` : ''}`); renderPreview(); return; }
     status(`${n} item${n === 1 ? '' : 's'}${selected.size ? ` · ${selected.size} selected` : ''}${cur && cur.truncated ? ' · showing the first 5000' : ''}`);
     renderPreview();
+  }
+
+  // Tiles fetch their real picture as they scroll into view: a thumbnail
+  // for images, the system's icon for other files (folders keep the glyph).
+  function observeTiles() {
+    if (!tileObserver) {
+      tileObserver = new IntersectionObserver((hits) => {
+        for (const h of hits) {
+          if (!h.isIntersecting) continue;
+          tileObserver.unobserve(h.target);
+          loadTileIcon(h.target);
+        }
+      }, { root: listEl, rootMargin: '120px' });
+    }
+    for (const t of listEl.querySelectorAll('.files-row.tile')) {
+      if (t.dataset.kind === 'folder' || t.dataset.kind === 'share') continue;
+      const cached = iconCache.get(t.dataset.path);
+      if (cached) { setTileIcon(t, cached); continue; }
+      if (cached === '') continue;
+      tileObserver.observe(t);
+    }
+  }
+  function setTileIcon(tile, url) {
+    const ti = tile.querySelector('.ti');
+    if (!ti || !url) return;
+    ti.innerHTML = `<img src="${url}" alt="" draggable="false">`;
+  }
+  async function loadTileIcon(tile) {
+    const p = tile.dataset.path;
+    let url = '';
+    try {
+      if (tile.dataset.kind === 'image') {
+        const r = await aero.filesPreview(p);
+        if (r && r.ok && r.result.kind === 'image') url = r.result.dataUrl;
+      }
+      if (!url) url = (await aero.filesIcon(p, 'large')) || '';
+    } catch { url = ''; }
+    if (iconCache.size > 800) iconCache.clear();
+    iconCache.set(p, url);
+    if (tile.isConnected) setTileIcon(tile, url);
+  }
+
+  function setView(v) {
+    view = v === 'grid' ? 'grid' : 'list';
+    const b = root.querySelector('.files-view');
+    if (b) { b.textContent = view === 'grid' ? '☰' : '▦'; b.title = view === 'grid' ? 'Show as a list' : 'Show as tiles'; }
+    renderList();
   }
 
   async function renderPreview() {
@@ -288,7 +349,7 @@
   function renameInline(path) {
     const row = listEl.querySelector(`.files-row[data-path="${CSS.escape(path)}"]`);
     if (!row) return;
-    const n = row.querySelector('.n');
+    const n = row.querySelector('.n, .tn');
     const old = n.textContent;
     const input = document.createElement('input');
     input.className = 'files-rename';
@@ -384,10 +445,14 @@
       if (k === 'Backspace' || (e.altKey && k === 'ArrowUp')) { if (cur.parent) go(cur.parent); e.preventDefault(); return; }
       if (k === 'F2' && paths.length === 1) { renameInline(paths[0]); return; }
       if (k === 'Delete' && paths.length) { act('trash', paths); return; }
-      if (k === 'ArrowDown' || k === 'ArrowUp') {
+      if (k === 'ArrowDown' || k === 'ArrowUp' || (view === 'grid' && (k === 'ArrowLeft' || k === 'ArrowRight'))) {
         e.preventDefault();
         const i = rows.findIndex((x) => x.path === anchor);
-        const next = rows[Math.max(0, Math.min(rows.length - 1, i + (k === 'ArrowDown' ? 1 : -1)))];
+        // In the tile grid, up/down move a whole row.
+        const first = listEl.querySelector('.files-row.tile');
+        const cols = view === 'grid' && first ? Math.max(1, Math.floor(listEl.clientWidth / (first.getBoundingClientRect().width + 4))) : 1;
+        const step = k === 'ArrowDown' ? cols : k === 'ArrowUp' ? -cols : k === 'ArrowRight' ? 1 : -1;
+        const next = rows[Math.max(0, Math.min(rows.length - 1, i < 0 ? 0 : i + step))];
         if (next) { selectRow(next.path, e.shiftKey ? { shiftKey: true } : null); const el = listEl.querySelector(`.files-row[data-path="${CSS.escape(next.path)}"]`); if (el) el.scrollIntoView({ block: 'nearest' }); }
       }
     });
@@ -415,6 +480,7 @@
     root.querySelector('.files-up').addEventListener('click', () => { if (cur && cur.parent) go(cur.parent); });
     root.querySelector('.files-new').addEventListener('click', () => act('mkdir', []));
     root.querySelector('.files-pool').addEventListener('click', async () => { const r = await aero.filesPool(); if (r && r.ok) go(r.result); });
+    root.querySelector('.files-view').addEventListener('click', () => { setView(view === 'grid' ? 'list' : 'grid'); aero.setSettings({ files: { view } }); });
     // Search: the current folder narrows as you type; after a pause the
     // whole-PC index (Spotlight's) adds matches from everywhere else.
     crumbsEl.addEventListener('click', (e) => { if (!e.target.closest('.files-crumb')) editAddress(); });
@@ -460,6 +526,8 @@
     wire();
     const s = (await aero.getSettings()).files || {};
     showHidden = !!s.showHidden;
+    view = s.view === 'grid' ? 'grid' : 'list';
+    setView(view);
     const pr = await aero.filesPlaces();
     places = pr && pr.ok ? pr.result : [];
     const home = (places.find((p) => p.id === 'home') || places[1] || {}).path;

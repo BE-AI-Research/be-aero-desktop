@@ -1948,7 +1948,7 @@ app.whenReady().then(() => {
   ipcMain.handle('files:transfer', fileCall((_e, paths, dest, move) => fileService.transfer(paths, dest, { move: !!move })));
   ipcMain.handle('files:to-pool', fileCall(async (_e, paths) => fileService.transfer(paths, await fileService.ensurePool())));
   ipcMain.handle('files:preview', fileCall((_e, p) => fileService.preview(p)));
-  ipcMain.handle('files:icon', async (_e, p) => fileService.icon(p));
+  ipcMain.handle('files:icon', async (_e, p, size) => fileService.icon(p, size));
   ipcMain.handle('files:pool', fileCall(() => fileService.ensurePool()));
   // Network drives (SMB): connect / disconnect through the OS (smb.js).
   ipcMain.handle('files:net-connect', fileCall((_e, opts) => smbService.connect(opts || {})));

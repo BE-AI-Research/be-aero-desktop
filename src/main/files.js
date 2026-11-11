@@ -237,8 +237,11 @@ class FileService {
     return { kind: 'file', size: st.size };
   }
 
-  async icon(p) {
-    try { const img = await require('electron').app.getFileIcon(path.resolve(p), { size: 'small' }); return img.toDataURL(); } catch { return null; }
+  async icon(p, size = 'small') {
+    try {
+      const img = await require('electron').app.getFileIcon(path.resolve(p), { size: ['small', 'normal', 'large'].includes(size) ? size : 'small' });
+      return img.isEmpty() ? null : img.toDataURL();
+    } catch { return null; }
   }
 }
 
