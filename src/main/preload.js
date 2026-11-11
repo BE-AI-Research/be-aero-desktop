@@ -148,6 +148,8 @@ contextBridge.exposeInMainWorld('aero', {
   devicesPerms: (id, perms) => ipcRenderer.invoke('devices:perms', id, perms),
   devicesPing: (id) => ipcRenderer.invoke('devices:ping', id),
   devicesCopyId: () => ipcRenderer.invoke('devices:copy-id'),
+  devicesShareAdd: (id) => ipcRenderer.invoke('devices:share-add', id),
+  devicesShareRemove: (id, p) => ipcRenderer.invoke('devices:share-remove', id, p),
   onDevicesChanged: (cb) => subscribe('devices:changed', cb),
   notifyCapture: (on) => ipcRenderer.invoke('notifications:capture', !!on),
   notifyCaptureStatus: () => ipcRenderer.invoke('notifications:capture-status'),

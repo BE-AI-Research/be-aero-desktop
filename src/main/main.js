@@ -1952,7 +1952,14 @@ app.whenReady().then(() => {
 
   // File browser + File Pool (src/main/files.js).
   const smbService = new (require('./smb').SmbService)();
-  const fileService = new (require('./files').FileService)({ getPath: (n) => app.getPath(n), store, shell, nativeImage, smb: smbService });
+  // Other devices' shared folders (step 3): served and browsed over the mesh.
+  const remoteFiles = new (require('./remote-files').RemoteFiles)({
+    getMesh: () => (deviceService && deviceService.mesh) || null,
+    poolDir: () => fileService.poolDir(),
+    cacheDir: path.join(app.getPath('userData'), 'remote-cache'),
+    shareStore: { get: (peerId) => { const m = deviceService && deviceService.mesh; const p = m && m.peers.get(peerId); return (p && p.shares) || []; } }
+  });
+  const fileService = new (require('./files').FileService)({ getPath: (n) => app.getPath(n), store, shell, nativeImage, smb: smbService, remote: remoteFiles });
   const fileCall = (fn) => async (...args) => { try { return { ok: true, result: await fn(...args) }; } catch (err) { return { error: String(err && err.message || err) }; } };
   ipcMain.handle('files:places', fileCall(() => fileService.places()));
   ipcMain.handle('files:list', async (_e, dir) => {
@@ -1977,7 +1984,7 @@ app.whenReady().then(() => {
   ipcMain.handle('files:watch', (_e, dir) => {
     if (viewWatch) { try { viewWatch.close(); } catch { /* closed */ } viewWatch = null; }
     const d = String(dir || '');
-    if (!d || /^(\\\\|smb:)/i.test(d)) return false;              // network folders: no watching
+    if (!d || /^(\\\\|smb:|aero:)/i.test(d)) return false;        // network and device folders: no watching
     try {
       viewWatch = require('fs').watch(d, () => {
         clearTimeout(viewTimer);
@@ -2035,18 +2042,18 @@ app.whenReady().then(() => {
     const item = (label, id, extra = {}) => ({ label, click: () => { chosen = id; }, ...extra });
     const template = c.count ? [
       item(one && c.dir ? 'Open' : 'Open', 'open'),
-      item(process.platform === 'win32' ? 'Show in Explorer' : 'Show in Files', 'reveal', { enabled: one }),
+      item(process.platform === 'win32' ? 'Show in Explorer' : 'Show in Files', 'reveal', { enabled: one && !c.readOnly }),
       { type: 'separator' },
       item('Copy', 'copy'), item('Cut', 'cut'),
       item('Paste here', 'paste', { enabled: !!c.canPaste && one && c.dir }),
       ...(c.inPool ? [] : [item('Copy to File Pool', 'to-pool')]),
       { type: 'separator' },
-      item('Rename…', 'rename', { enabled: one }),
-      item(process.platform === 'win32' ? 'Delete (Recycle Bin)' : 'Move to Trash', 'trash'),
+      item('Rename…', 'rename', { enabled: one && !c.readOnly }),
+      item(process.platform === 'win32' ? 'Delete (Recycle Bin)' : 'Move to Trash', 'trash', { enabled: !c.readOnly }),
       { type: 'separator' },
       item('Copy path', 'copy-path', { enabled: one })
     ] : [
-      item('New folder', 'mkdir'),
+      item('New folder', 'mkdir', { enabled: !c.readOnly }),
       item('Paste', 'paste', { enabled: !!c.canPaste }),
       { type: 'separator' },
       item(process.platform === 'win32' ? 'Open in Explorer' : 'Open in Files', 'reveal-here'),
@@ -2082,7 +2089,7 @@ app.whenReady().then(() => {
   });
   deviceService = new (require('./mesh/service').DeviceService)({
     userDataDir: app.getPath('userData'), store, getWindow: () => win,
-    onStart: (mesh) => { poolSync.attach(mesh); poolSync.start(); },
+    onStart: (mesh) => { poolSync.attach(mesh); poolSync.start(); remoteFiles.attach(mesh); },
     onStop: () => { poolSync.stop(); poolSync.mesh = null; }
   });
   deviceService.registerIpc();

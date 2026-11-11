@@ -201,6 +201,17 @@ class Mesh extends EventEmitter {
     return true;
   }
 
+  // Folders shared with one device (besides the File Pool).
+  setShares(peerId, shares) {
+    const p = this.peers.get(peerId);
+    if (!p) return false;
+    p.shares = (Array.isArray(shares) ? shares : []).filter((s) => s && typeof s.path === 'string').slice(0, 50)
+      .map((s) => ({ path: s.path, name: String(s.name || '').slice(0, 80) }));
+    this.savePeers();
+    this.changed();
+    return true;
+  }
+
   rename(peerId, name) {
     const p = this.peers.get(peerId);
     if (!p) return false;

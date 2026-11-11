@@ -61,9 +61,10 @@ async function ensureAiFolder(store) {
 }
 
 class FileService {
-  // { getPath(name), store, shell, nativeImage, smb }
-  constructor({ getPath, store, shell, nativeImage, smb }) {
+  // { getPath(name), store, shell, nativeImage, smb, remote }
+  constructor({ getPath, store, shell, nativeImage, smb, remote }) {
     this.smb = smb || null;
+    this.remote = remote || null;          // other devices (remote-files.js)
     this.getPath = getPath;
     this.store = store;
     this.shell = shell;
@@ -114,10 +115,12 @@ class FileService {
       }
     }
     for (const n of net) out.push({ id: `net-${n.remote}`, name: n.letter ? `${n.name} (${n.letter})` : n.name, path: n.path, remote: n.remote, status: n.status, kind: 'network' });
+    for (const d of (this.remote ? this.remote.devices() : [])) out.push({ id: `dev-${d.id}`, name: d.name, path: `aero://${d.id}`, kind: 'device' });
     return out;
   }
 
   async list(dir) {
+    if (this.remote && require('./remote-files').isRemote(dir)) return this.remote.list(dir);
     // A server on its own (\\server, smb://server): its shares, as folders.
     const net = this.smb ? require('./smb').parseAddress(dir) : null;
     if (net && !net.share) {
@@ -165,10 +168,19 @@ class FileService {
     return { path: abs, parent: parent !== abs ? parent : null, entries, truncated: dirents.length > MAX_ENTRIES, inPool: within(this.poolDir(), abs) };
   }
 
-  open(p) { return this.shell.openPath(path.resolve(p)); }          // '' on success, else an error string
+  // '' on success, else an error string. A file on another device is
+  // fetched to a local cache first.
+  async open(p) {
+    if (this.remote && require('./remote-files').isRemote(p)) {
+      try { return this.shell.openPath(await this.remote.cached(p)); } catch (err) { return String(err.message || err); }
+    }
+    return this.shell.openPath(path.resolve(p));
+  }
+  readOnly(p) { if (this.remote && require('./remote-files').isRemote(p)) throw new Error('Folders on other devices are read-only from here. Copy files to this computer, or use the File Pool.'); }
   reveal(p) { this.shell.showItemInFolder(path.resolve(p)); return true; }
 
   async mkdir(dir, name) {
+    this.readOnly(dir);
     const n = String(name || 'New folder').replace(/[\\/:*?"<>|]/g, '').trim() || 'New folder';
     const target = path.join(path.resolve(dir), await freeName(path.resolve(dir), n));
     await fsp.mkdir(target);
@@ -176,6 +188,7 @@ class FileService {
   }
 
   async rename(p, name) {
+    this.readOnly(p);
     const n = String(name || '').trim();
     if (!n || /[\\/]/.test(n) || (process.platform === 'win32' && /[:*?"<>|]/.test(n))) throw new Error('That name is not allowed.');
     const target = path.join(path.dirname(path.resolve(p)), n);
@@ -186,6 +199,7 @@ class FileService {
   }
 
   async trash(paths) {
+    for (const p of [].concat(paths || [])) this.readOnly(p);
     const done = [];
     for (const p of [].concat(paths || [])) { await this.shell.trashItem(path.resolve(p)); done.push(p); }
     return done;
@@ -193,9 +207,16 @@ class FileService {
 
   // Copy (or move) each source into destDir, never overwriting.
   async transfer(paths, destDir, { move = false } = {}) {
+    this.readOnly(destDir);
     const dest = path.resolve(destDir);
     const results = [];
     for (const src of [].concat(paths || [])) {
+      // From another device: download (always a copy, never a move).
+      if (this.remote && require('./remote-files').isRemote(src)) {
+        const name = decodeURIComponent(String(src).split('/').pop() || 'file');
+        results.push(await this.remote.download(src, path.join(dest, await freeName(dest, name))));
+        continue;
+      }
       const from = path.resolve(src);
       if (within(from, dest)) throw new Error(`Cannot put "${path.basename(from)}" inside itself.`);
       if (path.dirname(from) === dest && move) { results.push(from); continue; }       // already there
@@ -216,6 +237,7 @@ class FileService {
 
   // Small preview: an image thumbnail (data URL) or the start of a text file.
   async preview(p) {
+    if (this.remote && require('./remote-files').isRemote(p)) return this.remote.preview(p, this.nativeImage);
     const abs = path.resolve(p);
     const st = await fsp.stat(abs);
     if (st.isDirectory()) return { kind: 'folder' };
@@ -238,6 +260,7 @@ class FileService {
   }
 
   async icon(p, size = 'small') {
+    if (require('./remote-files').isRemote(p)) return null;
     try {
       const img = await require('electron').app.getFileIcon(path.resolve(p), { size: ['small', 'normal', 'large'].includes(size) ? size : 'small' });
       return img.isEmpty() ? null : img.toDataURL();

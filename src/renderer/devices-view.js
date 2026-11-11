@@ -81,8 +81,11 @@
           <button class="btn dev-ping" title="Check the connection">Ping</button>
           <button class="btn dev-remove" title="Unpair this device">Remove</button></div>
         <div class="dev-item-sub">${p.online ? 'Connected' : `Last seen ${ago(p.lastSeen)}`} · ${esc((p.id || '').split('-').slice(0, 2).join('-'))}… ${p.addresses && p.addresses[0] ? `· ${esc(p.addresses[0])}` : ''} <span class="dev-ping-out"></span></div>
-        <div class="dev-perms">${PERMS.map(([k, label, tip]) => `<label title="${esc(tip)}"><input type="checkbox" data-perm="${k}"${p.perms && p.perms[k] ? ' checked' : ''}> ${label}</label>`).join('')}</div>`;
+        <div class="dev-perms">${PERMS.map(([k, label, tip]) => `<label title="${esc(tip)}"><input type="checkbox" data-perm="${k}"${p.perms && p.perms[k] ? ' checked' : ''}> ${label}</label>`).join('')}</div>
+        <div class="dev-shares"><span class="dev-shares-label" title="What ${esc(p.label || p.name)} can browse here (with Browse files on)">Shared with it:</span> <span class="dev-share">File Pool</span>${(p.shares || []).map((s) => `<span class="dev-share" title="${esc(s.path)}">${esc(s.name)} <button class="dev-share-x" data-path="${esc(s.path)}" title="Stop sharing">✕</button></span>`).join('')} <button class="btn dev-share-add">Share a folder…</button></div>`;
       item.querySelectorAll('input[data-perm]').forEach((c) => c.addEventListener('change', () => aero.devicesPerms(p.id, { [c.dataset.perm]: c.checked })));
+      item.querySelector('.dev-share-add').addEventListener('click', () => aero.devicesShareAdd(p.id));
+      item.querySelectorAll('.dev-share-x').forEach((b) => b.addEventListener('click', () => aero.devicesShareRemove(p.id, b.dataset.path)));
       item.querySelector('.dev-ping').addEventListener('click', async () => {
         const out = item.querySelector('.dev-ping-out');
         out.textContent = '· pinging…';

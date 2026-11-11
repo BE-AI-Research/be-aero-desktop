@@ -1184,6 +1184,13 @@ webview.plugin-frame { background: #fff; }
 .dev-perms label { display: inline-flex; align-items: center; gap: 4px; }
 .dev-item .btn.confirm { background: rgba(248,113,113,.35); }
 
+.dev-shares { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin: 6px 0 0 16px; font-size: 11px; }
+.dev-shares-label { opacity: .6; }
+.dev-share { display: inline-flex; align-items: center; gap: 3px; padding: 1px 7px; border-radius: 999px; background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.12); }
+.dev-share-x { border: none; background: transparent; color: inherit; cursor: pointer; padding: 0 0 0 2px; opacity: .6; font-size: 10px; }
+.dev-share-x:hover { opacity: 1; }
+.dev-share-add { font-size: 11px; padding: 1px 8px; }
+
 /* UAC shield tile (dock) */
 .uac-tile .dock-ico { color: rgba(var(--text-rgb), .55); }
 .uac-tile.uac-open .dock-ico, .uac-tile.uac-busy .dock-ico { color: #fbbf24; }

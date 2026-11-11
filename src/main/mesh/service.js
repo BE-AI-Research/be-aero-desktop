@@ -180,6 +180,24 @@ class DeviceService {
       const t = Date.now();
       try { await this.mesh.request(String(id), 'ping', {}, 8000); return { ok: true, ms: Date.now() - t }; } catch (err) { return { error: String(err.message || err) }; }
     });
+    ipcMain.handle('devices:share-add', async (_e, id) => {
+      if (!this.mesh) return { error: 'Turn on device connections first.' };
+      const peer = this.mesh.peers.get(String(id));
+      if (!peer) return { error: 'No such device.' };
+      const w = this.getWindow();
+      const r = await dialog.showOpenDialog(w && !w.isDestroyed() ? w : undefined, { title: `Share a folder with ${peer.label || peer.name}`, properties: ['openDirectory'] });
+      if (r.canceled || !r.filePaths[0]) return { cancelled: true };
+      const shares = (peer.shares || []).filter((s) => s.path !== r.filePaths[0]);
+      shares.push({ path: r.filePaths[0], name: require('path').basename(r.filePaths[0]) || r.filePaths[0] });
+      this.mesh.setShares(peer.id, shares);
+      return { ok: true };
+    });
+    ipcMain.handle('devices:share-remove', (_e, id, p) => {
+      if (!this.mesh) return false;
+      const peer = this.mesh.peers.get(String(id));
+      if (!peer) return false;
+      return this.mesh.setShares(peer.id, (peer.shares || []).filter((s) => s.path !== p));
+    });
     ipcMain.handle('devices:copy-id', () => { try { clipboard.writeText(this.ensureIdentity().id); return true; } catch { return false; } });
     ipcMain.handle('devices:normalize-id', (_e, id) => normalizeId(id));
   }

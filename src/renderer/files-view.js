@@ -23,10 +23,12 @@
   let view = 'list';              // list | grid (tiles)
   let tileObserver = null;
   const iconCache = new Map();    // path -> data URL ('' = none)
-  let found = [];                 // index matches elsewhere on this PC
+  let found = [];
+  const lastRoots = {};           // device id -> { rootIndex: name } for crumbs                 // index matches elsewhere on this PC
   let searchTimer = null;
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-  const GLYPH = { folder: '📁', image: '🖼️', text: '📄', file: '📦', pool: '🌊', ai: '🤖', drive: '💽', network: '🖧', share: '🗂️' };
+  const GLYPH = { folder: '📁', image: '🖼️', text: '📄', file: '📦', pool: '🌊', ai: '🤖', drive: '💽', network: '🖧', share: '🗂️', device: '💻' };
+  const isRemote = (p) => /^aero:\/\//i.test(String(p || ''));
   const IS_WIN = navigator.userAgent.includes('Windows');
 
   function human(n) {
@@ -54,7 +56,15 @@
   function renderPlaces() {
     placesEl.innerHTML = '';
     let netHeader = false;
+    let devHeader = false;
     for (const p of places) {
+      if (p.kind === 'device' && !devHeader) {
+        devHeader = true;
+        const h = document.createElement('div');
+        h.className = 'files-place-head';
+        h.textContent = 'Devices';
+        placesEl.appendChild(h);
+      }
       if (p.kind === 'network' && !netHeader) {
         netHeader = true;
         const h = document.createElement('div');
@@ -173,6 +183,25 @@
     if (!cur) return;
     const sep = cur.path.includes('\\') ? '\\' : '/';
     // Network paths start with the server: \\server\share\dir or smb://server/share/dir.
+    if (isRemote(cur.path)) {
+      const m = /^aero:\/\/([^/]+)(?:\/(\d+))?(?:\/(.*))?$/.exec(cur.path);
+      const segs = [[cur.deviceName || 'Device', `aero://${m[1]}`]];
+      if (m[2] !== undefined) {
+        const rootName = (lastRoots[m[1]] || {})[m[2]] || 'Shared';
+        segs.push([rootName, `aero://${m[1]}/${m[2]}`]);
+        let acc2 = `aero://${m[1]}/${m[2]}`;
+        for (const part of (m[3] || '').split('/').filter(Boolean)) { acc2 += `/${part}`; segs.push([part, acc2]); }
+      }
+      for (const [label, target] of segs) {
+        const b = document.createElement('button');
+        b.className = 'files-crumb';
+        b.textContent = label;
+        b.title = `${cur.deviceName || 'Device'}: ${label}`;
+        b.addEventListener('click', () => go(target));
+        crumbsEl.appendChild(b);
+      }
+      return;
+    }
     const unc = /^\\\\([^\\]+)(.*)$/.exec(cur.path);
     const smbUri = /^smb:\/\/([^/]+)(.*)$/i.exec(cur.path);
     const net = unc || smbUri;
@@ -314,6 +343,10 @@
     }
     if (push && cur && cur.path !== r.result.path) { back.push(cur.path); forward = []; }
     cur = r.result;
+    if (isRemote(cur.path) && /^aero:\/\/[^/]+$/.test(cur.path)) {
+      const dev = cur.path.slice(7);
+      lastRoots[dev] = Object.fromEntries(cur.entries.map((e) => [e.path.split('/').pop(), e.name]));
+    }
     selected = new Set();
     anchor = null;
     filter = '';
@@ -444,7 +477,7 @@
       if (row && !selected.has(row.dataset.path)) selectRow(row.dataset.path, null);
       const paths = row ? [...selected] : [];
       const firstEntry = paths.length === 1 && entryOf(paths[0]);
-      const action = await aero.filesMenu({ count: paths.length, dir: !!(firstEntry && firstEntry.dir), inPool: cur.inPool, canPaste: !!(clip && clip.paths.length), showHidden });
+      const action = await aero.filesMenu({ count: paths.length, dir: !!(firstEntry && firstEntry.dir), inPool: cur.inPool, canPaste: !!(clip && clip.paths.length) && !isRemote(cur.path), showHidden, readOnly: isRemote(cur.path) });
       if (action) act(action, paths);
     });
     listEl.addEventListener('keydown', (e) => {
