@@ -64,3 +64,30 @@ test('files: list, copy (no overwrite), move, rename rules, trash, the pool', as
     assert.match(prev.text, /File Pool/);
   } finally { done(); }
 });
+
+test('files: typed addresses - ~, environment variables, quotes, file URLs, bare drives', () => {
+  const { expandPath } = require('../src/main/files');
+  assert.strictEqual(expandPath('~'), os.homedir());
+  assert.strictEqual(expandPath('~/Documents'), path.join(os.homedir(), 'Documents'));
+  process.env.AERO_TEST_DIR = path.join(os.tmpdir(), 'aero-x');
+  assert.strictEqual(expandPath('$AERO_TEST_DIR/sub'), path.join(os.tmpdir(), 'aero-x', 'sub'));
+  assert.strictEqual(expandPath('${AERO_TEST_DIR}'), path.join(os.tmpdir(), 'aero-x'));
+  if (process.platform === 'win32') {
+    assert.strictEqual(expandPath('%AERO_TEST_DIR%\\sub'), path.join(os.tmpdir(), 'aero-x', 'sub'));
+    assert.strictEqual(expandPath('"C:\\Windows"'), 'C:\\Windows');
+    assert.strictEqual(expandPath('file:///C:/Users'), 'C:\\Users');
+    assert.strictEqual(expandPath('D:'), 'D:\\');
+  } else {
+    assert.strictEqual(expandPath('file:///tmp'), '/tmp');
+  }
+  assert.strictEqual(expandPath(''), os.homedir());
+});
+
+test('files: a typed address that is missing or a file says so', async () => {
+  const { dir, svc, done } = setup();
+  try {
+    fs.writeFileSync(path.join(dir, 'f.txt'), 'x');
+    await assert.rejects(svc.list(path.join(dir, 'nope')), /was not found/);
+    await assert.rejects(svc.list(path.join(dir, 'f.txt')), /is a file, not a folder/);
+  } finally { done(); }
+});

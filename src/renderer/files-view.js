@@ -59,7 +59,38 @@
     }
   }
 
+  // The path bar is editable, like Explorer's: click its empty space (or
+  // Ctrl+L / Alt+D / F4) to type or paste a path; Enter goes, Esc returns.
+  let editing = false;
+  function editAddress() {
+    if (editing || !cur) return;
+    editing = true;
+    crumbsEl.innerHTML = '';
+    const input = document.createElement('input');
+    input.className = 'files-address';
+    input.type = 'text';
+    input.spellcheck = false;
+    input.value = cur.path;
+    crumbsEl.appendChild(input);
+    crumbsEl.classList.add('editing');
+    input.focus();
+    input.select();
+    const done = () => { editing = false; crumbsEl.classList.remove('editing'); renderCrumbs(); };
+    input.addEventListener('keydown', async (e) => {
+      e.stopPropagation();
+      if (e.key === 'Escape') { done(); listEl.focus(); }
+      if (e.key === 'Enter') {
+        const target = input.value.trim();
+        if (!target) return;
+        const ok = await go(target, { fromAddress: true });
+        if (ok) { done(); listEl.focus(); } else { input.select(); }
+      }
+    });
+    input.addEventListener('blur', () => setTimeout(() => { if (editing && document.activeElement !== input) done(); }, 120));
+  }
+
   function renderCrumbs() {
+    if (editing) return;
     crumbsEl.innerHTML = '';
     if (!cur) return;
     const sep = cur.path.includes('\\') ? '\\' : '/';
@@ -131,7 +162,7 @@
 
   async function go(dir, { push = true } = {}) {
     const r = await aero.filesList(dir);
-    if (!r || !r.ok) { status(r && r.error ? r.error.replace(/^.*?:\s/, '') : 'Cannot open that folder.', true); return; }
+    if (!r || !r.ok) { status(r && r.error ? r.error.replace(/^Error:\s*/, '') : 'Cannot open that folder.', true); return false; }
     if (push && cur && cur.path !== r.result.path) { back.push(cur.path); forward = []; }
     cur = r.result;
     selected = new Set();
@@ -140,6 +171,7 @@
     filterEl.value = '';
     renderPlaces(); renderCrumbs(); renderList();
     aero.setSettings({ files: { last: cur.path } });
+    return true;
   }
   const refresh = () => (cur ? go(cur.path, { push: false }).then(() => {}) : null);
 
@@ -297,6 +329,11 @@
     root.querySelector('.files-pool').addEventListener('click', async () => { const r = await aero.filesPool(); if (r && r.ok) go(r.result); });
     // Search: the current folder narrows as you type; after a pause the
     // whole-PC index (Spotlight's) adds matches from everywhere else.
+    crumbsEl.addEventListener('click', (e) => { if (!e.target.closest('.files-crumb')) editAddress(); });
+    crumbsEl.title = 'Click to type a path (Ctrl+L)';
+    root.addEventListener('keydown', (e) => {
+      if (((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'l') || (e.altKey && e.key.toLowerCase() === 'd') || e.key === 'F4') { e.preventDefault(); editAddress(); }
+    });
     filterEl.addEventListener('input', () => {
       filter = filterEl.value.trim();
       renderList();

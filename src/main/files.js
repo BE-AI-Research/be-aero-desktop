@@ -26,6 +26,18 @@ async function freeName(dir, name) {
   throw new Error('too many files with that name');
 }
 
+// A typed address -> an absolute path: "~", %VAR% (Windows), $VAR / ${VAR},
+// file:/// URLs and surrounding quotes are understood.
+function expandPath(input) {
+  let p = String(input || '').trim().replace(/^"(.*)"$/, '$1');
+  if (/^file:\/\//i.test(p)) { try { p = require('url').fileURLToPath(p); } catch { /* leave it */ } }
+  if (p === '~' || p.startsWith('~/') || p.startsWith('~\\')) p = path.join(os.homedir(), p.slice(1));
+  p = p.replace(/%([A-Za-z0-9_()]+)%/g, (m, k) => (process.env[k] !== undefined ? process.env[k] : m));
+  p = p.replace(/\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?/g, (m, k) => (process.env[k] !== undefined ? process.env[k] : m));
+  if (/^[a-z]:$/i.test(p)) p += '\\';                    // "D:" means the drive's root
+  return path.resolve(p || os.homedir());
+}
+
 // True when `child` is `parent` or inside it.
 function within(parent, child) {
   const rel = path.relative(path.resolve(parent), path.resolve(child));
@@ -80,7 +92,10 @@ class FileService {
   }
 
   async list(dir) {
-    const abs = path.resolve(String(dir || os.homedir()));
+    const abs = expandPath(dir || os.homedir());
+    let st;
+    try { st = await fsp.stat(abs); } catch { throw new Error(`"${String(dir).trim()}" was not found.`); }
+    if (!st.isDirectory()) throw new Error(`"${path.basename(abs)}" is a file, not a folder.`);
     if (within(this.poolDir(), abs)) await this.ensurePool();
     const dirents = await fsp.readdir(abs, { withFileTypes: true });
     const entries = [];
@@ -179,4 +194,4 @@ class FileService {
   }
 }
 
-module.exports = { FileService, freeName, within };
+module.exports = { FileService, freeName, within, expandPath };
