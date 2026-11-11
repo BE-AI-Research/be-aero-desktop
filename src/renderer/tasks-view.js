@@ -77,6 +77,8 @@
   // keeps plain clicks as clicks.
   function startPinDrag(e, t, tile) {
     if (e.button !== 0) return;
+    // Locked dock (right-click > Lock in place, or all widgets locked): the icons stay put too.
+    if (window.AeroLayout && AeroLayout.isLocked && AeroLayout.isLocked('tasks')) return;
     const sx = e.clientX;
     const sy = e.clientY;
     const onMove = (ev) => {
@@ -84,6 +86,7 @@
         if (Math.hypot(ev.clientX - sx, ev.clientY - sy) < 6) return;
         drag = { tile, el: t, marker: el('div', 'dock-drop-marker', barEl), index: -1 };
         t.classList.add('dragging');
+        if (window.AeroLayout && AeroLayout.setDragging) AeroLayout.setDragging(true);
         try { t.setPointerCapture(ev.pointerId); } catch { /* fine */ }
       }
       ev.preventDefault();
@@ -109,6 +112,7 @@
       if (!drag) return;
       const d = drag;
       drag = null;
+      if (window.AeroLayout && AeroLayout.setDragging) AeroLayout.setDragging(false);
       suppressClick = true;
       setTimeout(() => { suppressClick = false; }, 0);
       d.marker.remove();
@@ -156,7 +160,7 @@
       if (tile.pinned) {
         t.classList.add('pinned');
         t.dataset.exe = tile.exe || '';
-        t.title += String.fromCharCode(10) + 'Drag to reorder';
+        if (!(window.AeroLayout && AeroLayout.isLocked && AeroLayout.isLocked('tasks'))) t.title += String.fromCharCode(10) + 'Drag to reorder';
         t.addEventListener('pointerdown', (e) => startPinDrag(e, t, tile));
       }
       t.addEventListener('click', () => { if (!suppressClick) onTileClick(tile); });

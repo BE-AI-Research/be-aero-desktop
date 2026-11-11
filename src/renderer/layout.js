@@ -310,7 +310,10 @@
         e.preventDefault();
         const k = keyOf(el);
         const r = await aero.widgetMenu({ key: k, free: isFree(), locked: lockedOne(k), allLocked: !!settings.locked });
-        if (r === 'lock' || r === 'unlock') { save('free', k, { locked: r === 'lock' }); flushSave(); apply(); }
+        if (r === 'lock' || r === 'unlock') {
+          save('free', k, { locked: r === 'lock' }); flushSave(); apply();
+          if (k === 'tasks' && window.AeroTasks && AeroTasks.refresh) AeroTasks.refresh(true);   // icon tooltips follow
+        }
       });
       el.addEventListener('pointerdown', (e) => {
         if (!isFree() || e.button !== 0) return;
@@ -343,5 +346,8 @@
     update(s);
   }
 
-  window.AeroLayout = { init, adopt, update, reset, positionSettings };
+  // For widgets with their own drags (the dock's pinned icons): honour the
+  // lock, and keep the window taking the mouse while dragging.
+  const setDragging = (on) => { if (hooks && hooks.setDragging) hooks.setDragging(!!on); };
+  window.AeroLayout = { init, adopt, update, reset, positionSettings, isLocked: (k) => !!settings && isLocked(k), setDragging };
 })();
