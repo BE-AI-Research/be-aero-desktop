@@ -69,9 +69,23 @@
     const x = settings.freeFrom === 'left' ? home.x + GAP : home.x + home.w - COL_W - GAP;
     let y = home.y + 16;
     let cascade = 0;
+    // Once the user has arranged anything, a widget appearing for the first
+    // time (turned on, restored from the dock, a new plugin) opens in the
+    // middle of the display - not at the end of a column that may be off
+    // screen. A fresh install with nothing arranged still gets the column.
+    const savedFree = layoutOf('free');
+    const arranged = Object.keys(savedFree).some((k) => k !== '_z');
     for (const el of items()) {
       if (el.classList.contains('hidden')) continue;
       const k = keyOf(el);
+      if (arranged && !savedFree[k] && k !== 'toolbar' && !k.startsWith('web:') && !k.startsWith('visual:')) {
+        const w = Math.max(COL_W, (MIN[k] || [0])[0]);
+        const h = (layoutOf('docked')[k] || {}).h || DEFAULT_H[k] || 200;
+        out[k] = { x: Math.round(home.x + (home.w - w) / 2 + cascade * 28), y: Math.round(home.y + Math.max(GAP, (home.h - h) / 2) + cascade * 28), w, h };
+        cascade++;
+        save('free', k, out[k]);          // it stays where it opened until moved
+        continue;
+      }
       if (k.startsWith('web:') || k.startsWith('visual:')) {
         const w = Math.min(WEB_W, Math.max(320, Math.floor(home.w * 0.45)));
         const h = Math.min(WEB_H, Math.max(240, Math.floor(home.h * 0.45)));
