@@ -91,7 +91,7 @@
       del.innerHTML = '<svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>';
       del.title = 'Delete this visual';
       const close = el('button', 'icon-btn webw-btn visual-close', controls, '✕');
-      close.title = 'Close (it stays in the chat)';
+      close.title = 'Close - kept in its chat, and saved to AI Folder > Visuals';
       const f = frame(v.id, v.updatedAt);
       section.appendChild(f);
       reload.addEventListener('click', () => { f.src = srcFor(v.id, Date.now()); });

@@ -320,7 +320,22 @@
     filterEl.value = '';
     renderPlaces(); renderCrumbs(); renderList();
     aero.setSettings({ files: { last: cur.path } });
+    if (aero.filesWatch) aero.filesWatch(cur.path);
     return true;
+  }
+
+  // The folder changed on disk (here, another app, or File Pool sync):
+  // reload it in place - selection, scroll position and search kept.
+  async function softRefresh() {
+    if (!cur || editing || root.querySelector('.files-rename')) return;
+    const r = await aero.filesList(cur.path);
+    if (!r || !r.ok) return;
+    const top = listEl.scrollTop;
+    const paths = new Set(r.result.entries.map((e) => e.path));
+    cur = r.result;
+    selected = new Set([...selected].filter((p) => paths.has(p)));
+    renderList();
+    listEl.scrollTop = top;
   }
   const refresh = () => (cur ? go(cur.path, { push: false }).then(() => {}) : null);
 
@@ -524,6 +539,7 @@
     statusEl = root.querySelector('.files-status');
     previewEl = root.querySelector('.files-preview');
     wire();
+    if (aero.onFilesChanged) aero.onFilesChanged(({ dir }) => { if (cur && dir === cur.path) softRefresh(); });
     const s = (await aero.getSettings()).files || {};
     showHidden = !!s.showHidden;
     view = s.view === 'grid' ? 'grid' : 'list';

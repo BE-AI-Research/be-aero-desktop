@@ -1970,6 +1970,23 @@ app.whenReady().then(() => {
   ipcMain.handle('files:preview', fileCall((_e, p) => fileService.preview(p)));
   ipcMain.handle('files:icon', async (_e, p, size) => fileService.icon(p, size));
   ipcMain.handle('files:pool', fileCall(() => fileService.ensurePool()));
+  // The folder the file browser shows is watched; any change (made here,
+  // by another app, or by File Pool sync) refreshes it.
+  let viewWatch = null;
+  let viewTimer = null;
+  ipcMain.handle('files:watch', (_e, dir) => {
+    if (viewWatch) { try { viewWatch.close(); } catch { /* closed */ } viewWatch = null; }
+    const d = String(dir || '');
+    if (!d || /^(\\\\|smb:)/i.test(d)) return false;              // network folders: no watching
+    try {
+      viewWatch = require('fs').watch(d, () => {
+        clearTimeout(viewTimer);
+        viewTimer = setTimeout(() => { if (win && !win.isDestroyed()) win.webContents.send('files:changed', { dir: d }); }, 300);
+      });
+      viewWatch.on('error', () => { try { viewWatch.close(); } catch { /* */ } viewWatch = null; });
+      return true;
+    } catch { return false; }
+  });
   // Search bar drop-down: recent files and recent apps (recent.js).
   const recentService = new (require('./recent').RecentService)({ store, shell, indexEntries: () => (spotlight ? spotlight.index.entries : []) });
   ipcMain.handle('search:recent', async () => { try { return await recentService.recent(); } catch { return { files: [], apps: [] }; } });
@@ -2046,8 +2063,27 @@ app.whenReady().then(() => {
   ipcMain.handle('files:copy-path', (_e, p) => { require('electron').clipboard.writeText(String(p || '')); return true; });
 
   // Devices: identity, pairing and the mesh (src/main/mesh). Off by default.
+  // File Pool sync rides on the mesh: it runs while device connections are on.
+  const poolSync = new (require('./pool-sync').PoolSync)({
+    poolDir: () => fileService.poolDir(),
+    indexFile: path.join(app.getPath('userData'), 'mesh', 'pool-index.json'),
+    deviceName: () => String((store.get('devices') || {}).name || require('os').hostname()),
+    trash: (p) => shell.trashItem(p),
+    log: (m) => console.log('[pool]', m),
+    onChange: (info) => {
+      if (!info || info.local || !notifyCenter) return;
+      const n = (info.received || []).length;
+      const parts = [];
+      if (n) parts.push(`${n} file${n === 1 ? '' : 's'} received`);
+      if ((info.deleted || []).length) parts.push(`${info.deleted.length} removed`);
+      if ((info.conflicts || []).length) parts.push(`${info.conflicts.length} kept as conflict copies`);
+      if (parts.length) notifyCenter.add({ source: 'system', sourceName: 'File Pool', title: `File Pool: ${parts.join(', ')} from ${info.from}`, body: (info.received || []).slice(0, 5).join(', '), toast: false });
+    }
+  });
   deviceService = new (require('./mesh/service').DeviceService)({
-    userDataDir: app.getPath('userData'), store, getWindow: () => win
+    userDataDir: app.getPath('userData'), store, getWindow: () => win,
+    onStart: (mesh) => { poolSync.attach(mesh); poolSync.start(); },
+    onStop: () => { poolSync.stop(); poolSync.mesh = null; }
   });
   deviceService.registerIpc();
   if ((store.get('devices') || {}).enabled) deviceService.start();

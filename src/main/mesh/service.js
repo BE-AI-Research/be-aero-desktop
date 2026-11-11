@@ -30,8 +30,10 @@ function safeStorageProtect() {
 }
 
 class DeviceService {
-  // { userDataDir, store, getWindow, log }
-  constructor({ userDataDir, store, getWindow, log = (m) => console.log('[devices]', m) }) {
+  // { userDataDir, store, getWindow, log, onStart(mesh), onStop() }
+  constructor({ userDataDir, store, getWindow, log = (m) => console.log('[devices]', m), onStart = () => {}, onStop = () => {} }) {
+    this.onStart = onStart;
+    this.onStop = onStop;
     this.dir = path.join(userDataDir, 'mesh');
     this.store = store;
     this.getWindow = getWindow;
@@ -82,6 +84,7 @@ class DeviceService {
       this.mesh.on('change', () => this.broadcast());
       await this.mesh.start();
       this.log(`listening on port ${this.mesh.port} as ${identity.id}`);
+      try { this.onStart(this.mesh); } catch (err) { this.log(`start hook: ${err.message}`); }
     } catch (err) {
       this.error = err && err.code === 'EADDRINUSE'
         ? `Port ${this.settings().port || DEFAULT_PORT} is in use by another program.`
@@ -95,7 +98,7 @@ class DeviceService {
   }
 
   stop() {
-    if (this.mesh) { this.mesh.stop(); this.mesh = null; }
+    if (this.mesh) { try { this.onStop(); } catch { /* */ } this.mesh.stop(); this.mesh = null; }
     this.broadcast();
   }
 

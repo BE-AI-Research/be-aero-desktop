@@ -404,7 +404,7 @@ class AiService {
       browser: (op, args) => this.browserOp(op, args),
       memory: this.memory,
       visuals: {
-        show: (args) => { const rec = this.visuals.save({ ...args, conversationId }); this.visualsChanged(); return rec; },
+        show: (args) => { const rec = this.visuals.save({ ...args, conversationId }); this.visualsChanged(); this.exportVisual(rec.id).catch(() => {}); return rec; },
         close: (id) => { const ok = this.visuals.remove(id); this.visualsChanged(); return ok; },
         list: () => this.visuals.list()
       },
@@ -844,6 +844,31 @@ class AiService {
 
   isPinned() { return this.pinned; }
 
+  // A visual as a standalone page in the AI folder (Visuals/<title>.html),
+  // kept current: the same file is rewritten when the visual changes. The
+  // page is the one the widget shows (same CSP: no network but CDN scripts).
+  async exportVisual(id) {
+    const v = this.visuals.get(id);
+    if (!v) return null;
+    const page = this.visuals.page(id);
+    if (!page) return null;
+    const { ensureAiFolder, freeName } = require('../files');
+    const p = require('path');
+    const fsp = require('fs/promises');
+    const dir = p.join(await ensureAiFolder(this.d.store), 'Visuals');
+    await fsp.mkdir(dir, { recursive: true });
+    let file = v.exportedAs && p.dirname(v.exportedAs) === dir ? v.exportedAs : null;
+    if (!file) {
+      const safe = String(v.title || 'Visual').replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 80) || 'Visual';
+      file = p.join(dir, await freeName(dir, `${safe}.html`));
+      v.exportedAs = file;
+      this.visuals.saveIndex();
+    }
+    const html = String(page).replace(/<head>/i, `<head><meta charset="utf-8"><title>${String(v.title || 'Visual').replace(/[<&]/g, '')}</title>`);
+    await fsp.writeFile(file, html, 'utf8');
+    return file;
+  }
+
   visualsChanged() {
     const win = this.d.getWindow();
     if (win && !win.isDestroyed()) win.webContents.send('ai:visuals', this.visuals.list().filter((v) => v.where === 'desktop'));
@@ -908,14 +933,17 @@ class AiService {
     ipcMain.handle('ai:probe', () => this.probe());
     ipcMain.handle('ai:visuals', () => this.visuals.list().filter((v) => v.where === 'desktop'));
     ipcMain.handle('ai:visual-delete', (_e, id) => { const ok = this.visuals.remove(String(id || '')); this.visualsChanged(); return ok; });
-    ipcMain.handle('ai:visual-where', (_e, id, where) => {
+    ipcMain.handle('ai:visual-where', async (_e, id, where) => {
       const v = this.visuals.get(String(id || ''));
       if (!v) return false;
       v.where = where === 'desktop' ? 'desktop' : 'chat';
       v.updatedAt = Date.now();
       this.visuals.saveIndex();
       this.visualsChanged();
-      return true;
+      // Closing a desktop visual keeps it for later: a page in AI Folder/Visuals.
+      let saved = null;
+      if (v.where === 'chat') { try { saved = await this.exportVisual(v.id); } catch { saved = null; } }
+      return { ok: true, saved };
     });
     ipcMain.handle('ai:delete-message', (_e, id, index, which) => this.deleteMessage(String(id || ''), Number(index), which === 'reply' ? 'reply' : 'turn'));
     ipcMain.handle('ai:resend', (_e, id, index, text) => this.resendFrom(String(id || ''), Number(index), typeof text === 'string' ? text : undefined));

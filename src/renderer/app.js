@@ -526,7 +526,10 @@
     b.title = 'Minimize to the dock';
     b.textContent = '\u2014';
     b.addEventListener('click', (e) => { e.stopPropagation(); aero.setSettings({ widgetMinimized: { [wid]: true } }); });
-    el.appendChild(b);
+    // A widget with its own header row (the file browser) gets the button
+    // as the last one in that row, not floating over its other buttons.
+    const head = el.querySelector(':scope > .files-head');
+    if (head) head.appendChild(b); else el.appendChild(b);
   }
 
   // AI chat text zoom.
