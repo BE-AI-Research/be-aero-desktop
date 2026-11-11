@@ -954,7 +954,7 @@ webview.plugin-frame { background: #fff; }
 .notify-tile { position: relative; }
 .notify-tile .ticon { display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; opacity: .75; }
 .notify-tile.has-unread .ticon { opacity: 1; color: var(--accent); }
-.notify-tile .count { position: absolute; top: 2px; right: 4px; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px; background: var(--accent); color: #fff; font-size: 10px; font-weight: 700; line-height: 16px; text-align: center; box-shadow: 0 0 0 2px rgba(0,0,0,.35); }
+.notify-tile .count { position: absolute; top: 2px; right: 4px; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px; background: #e5484d; color: #fff; font-size: 10px; font-weight: 700; line-height: 16px; text-align: center; box-shadow: 0 0 0 2px rgba(0,0,0,.35); }
 /* Frosted pane: it must read on any wallpaper, and in a transparent window
    backdrop-filter cannot blur the desktop behind it - so the frost is drawn:
    a near-opaque theme tint (was rgba(var(--glass)) - an undefined variable,
@@ -1092,7 +1092,7 @@ webview.plugin-frame { background: #fff; }
 .ai-msg.ai-notice { align-self: center; font-size: 10.5px; font-style: italic; opacity: .7; background: transparent; padding: 2px 8px; }
 .ai-msg.ai-blocked { opacity: 1; font-style: normal; text-align: center; }
 /* File browser widget */
-.files-widget { height: 380px; display: flex; flex-direction: column; gap: 6px; overflow: hidden; }
+.files-widget { height: 380px; display: flex; flex-direction: column; gap: 6px; overflow: hidden; padding: 12px 14px 10px; }   /* same inner margins as the AI chat */
 .files-head { display: flex; align-items: center; gap: 2px; }
 .files-head .widget-title { margin-right: auto; }
 .files-crumbs { display: flex; gap: 1px; overflow-x: auto; white-space: nowrap; scrollbar-width: none; font-size: 11px; }
@@ -1106,7 +1106,7 @@ webview.plugin-frame { background: #fff; }
 .files-crumb:last-child { opacity: 1; font-weight: 600; }
 .files-filter { width: 100%; font-size: 12px; }
 .files-body { flex: 1; min-height: 0; display: flex; gap: 6px; }
-.files-places { width: 108px; flex: 0 0 auto; overflow-y: auto; display: flex; flex-direction: column; gap: 1px; scrollbar-width: thin; }
+.files-places { width: 108px; flex: 0 0 auto; overflow-y: auto; display: flex; flex-direction: column; gap: 1px; scrollbar-width: thin; scrollbar-color: rgba(255,255,255,.22) transparent; }
 .files-place { display: flex; align-items: center; gap: 5px; border: none; background: transparent; color: inherit; font: inherit; font-size: 11.5px; text-align: left; padding: 3px 5px; border-radius: 6px; cursor: pointer; opacity: .85; }
 .files-place .n { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .files-place:hover { background: rgba(255,255,255,.08); opacity: 1; }
@@ -1114,14 +1114,14 @@ webview.plugin-frame { background: #fff; }
 .files-place.off { opacity: .45; }
 .files-place-head { font-size: 9.5px; letter-spacing: .08em; text-transform: uppercase; opacity: .5; padding: 6px 5px 1px; }
 .files-connect .g { font-size: 12px; }
-.files-connect-form { position: absolute; left: 10px; right: 10px; top: 64px; z-index: 5; display: flex; flex-direction: column; gap: 6px; padding: 10px; border-radius: 10px;
+.files-connect-form { position: absolute; left: 14px; right: 14px; top: 72px; z-index: 5; display: flex; flex-direction: column; gap: 6px; padding: 10px; border-radius: 10px;
   background: linear-gradient(180deg, rgba(255,255,255,.12), rgba(255,255,255,.05)), rgba(var(--glass-rgb), .96); border: 1px solid rgba(255,255,255,.22); box-shadow: 0 12px 30px rgba(0,0,0,.45); }
 .files-connect-form .row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .files-connect-form input:not([type=checkbox]) { flex: 1; min-width: 0; font-size: 12px; }
 .files-connect-title { font-size: 12px; font-weight: 600; }
 .files-connect-err { font-size: 11px; color: #fca5a5; min-height: 13px; }
 .files-widget { position: relative; }
-.files-list { flex: 1; min-width: 0; overflow-y: auto; border: 1px solid rgba(255,255,255,.1); border-radius: 8px; background: rgba(0,0,0,.14); padding: 2px; outline: none; scrollbar-width: thin; }
+.files-list { flex: 1; min-width: 0; overflow-y: auto; border: 1px solid rgba(255,255,255,.1); border-radius: 8px; background: rgba(0,0,0,.14); padding: 2px; outline: none; scrollbar-width: thin; scrollbar-color: rgba(255,255,255,.22) transparent; }
 .files-list:focus-visible { border-color: color-mix(in srgb, var(--accent) 60%, transparent); }
 .files-list.drop { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, rgba(0,0,0,.14)); }
 .files-row { display: grid; grid-template-columns: 20px 1fr auto auto; gap: 6px; align-items: center; padding: 2px 5px; border-radius: 5px; font-size: 12px; cursor: default; user-select: none; }
