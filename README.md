@@ -4,7 +4,7 @@ A modern take on an old concept. Fully modular, widget and applet based desktop 
 
 <img width="2752" height="1536" alt="be-aero-desktop-logo" src="https://github.com/user-attachments/assets/83489174-cc12-498e-ae13-f62903981443" />
 
-A Windows 11 "Aero-Mica" desktop platform - widget sidebar, application dock, Spotlight-style search, web widgets, a sandboxed plugin SDK and a local app API. Built with Electron from the original `aero-widgets.html` prototype; runs on Linux too.
+A Windows 11 "Aero-Mica" desktop platform - widget sidebar, application dock, Spotlight-style search, web widgets, a sandboxed plugin SDK and a local app API. Built with Electron from the original `aero-widgets.html` prototype; runs on Linux too, and is meant to be a "universal desktop".
 
 <img width="1919" height="1079" alt="be-aero-125" src="https://github.com/user-attachments/assets/bc66e6d9-c30e-44fe-b767-deea8ccbd1b5" />
 
