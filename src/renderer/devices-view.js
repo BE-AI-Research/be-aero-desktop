@@ -114,6 +114,17 @@
     $('set-dev-enabled').addEventListener('change', async (e) => { state = await aero.devicesEnable(e.target.checked); render(); });
     $('set-dev-name').addEventListener('change', async (e) => { state = await aero.devicesRenameThis(e.target.value); render(); });
     $('btn-dev-copy').addEventListener('click', () => aero.devicesCopyId());
+    // What syncs (Settings > Devices > Keep the same on my devices).
+    (async () => {
+      const d = (await aero.getSettings()).devices || {};
+      const on = d.sync || {};
+      document.querySelectorAll('[data-sync]').forEach((c) => {
+        c.checked = on[c.dataset.sync] !== false;
+        c.addEventListener('change', () => aero.setSettings({ devices: { sync: { [c.dataset.sync]: c.checked } } }));
+      });
+      $('set-dev-newlocal').checked = d.newConversationsLocal === true;
+      $('set-dev-newlocal').addEventListener('change', (e) => aero.setSettings({ devices: { newConversationsLocal: e.target.checked } }));
+    })();
     $('btn-dev-code').addEventListener('click', async () => {
       if (state && state.pairing) await aero.devicesClosePairing(); else await aero.devicesOpenPairing();
       refresh();

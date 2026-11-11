@@ -2070,6 +2070,50 @@ app.whenReady().then(() => {
   ipcMain.handle('files:copy-path', (_e, p) => { require('electron').clipboard.writeText(String(p || '')); return true; });
 
   // Devices: identity, pairing and the mesh (src/main/mesh). Off by default.
+  // State sync (state-sync.js): notes, theme, pins, synced conversations,
+  // tasks and web widgets, the same on every paired device allowing
+  // "Synced state". Each category can be turned off in Settings > Devices.
+  const syncOn = () => ({ notes: true, theme: true, pins: true, conversations: true, tasks: true, webWidgets: true, ...((store.get('devices') || {}).sync || {}) });
+  const categoryOf = (key) => (key === 'scratchpad' ? 'notes' : key === 'theme' ? 'theme' : key.startsWith('pins:') ? 'pins' : key === 'webWidgets' ? 'webWidgets' : key.startsWith('task:') ? 'tasks' : key.startsWith('conv:') ? 'conversations' : null);
+  const stateSync = new (require('./state-sync').StateSync)({
+    indexFile: path.join(app.getPath('userData'), 'mesh', 'state-index.json'),
+    collect: () => {
+      // Not before the AI service is up: a scan without its conversations and
+      // tasks would read as deletes and remove them on the other devices.
+      if (!aiService) throw new Error('not ready');
+      const on = syncOn();
+      const m = new Map();
+      if (on.notes) m.set('scratchpad', { text: store.get('scratchpad') || '' });
+      if (on.theme) m.set('theme', store.get('theme') || {});
+      if (on.pins) m.set(`pins:${process.platform}`, ((store.get('appDock') || {}).pinned) || []);
+      if (on.webWidgets) m.set('webWidgets', store.get('webWidgets') || []);
+      if (aiService && on.tasks) for (const t of aiService.syncableTasks()) m.set(`task:${t.id}`, t);
+      if (aiService && on.conversations) for (const c of aiService.syncableConversations()) m.set(`conv:${c.id}`, c);
+      return m;
+    },
+    tracked: (key) => {
+      const cat = categoryOf(key);
+      if (!cat || !syncOn()[cat]) return false;
+      if (key.startsWith('pins:') && key !== `pins:${process.platform}`) return false;       // another OS's pins
+      if (key.startsWith('conv:') && aiService && aiService.isLocalConversation(key.slice(5))) return false;
+      if (key.startsWith('task:')) { const t = ((store.get('ai') || {}).tasks || []).find((x) => x.id === key.slice(5)); if (t && t.local) return false; }
+      return true;
+    },
+    apply: (key, value, from) => {
+      if (key === 'scratchpad') updateSettings({ scratchpad: String((value && value.text) || '') });
+      else if (key === 'theme') updateSettings({ theme: value || {} });
+      else if (key === `pins:${process.platform}`) updateSettings({ appDock: { pinned: Array.isArray(value) ? value : [] } });
+      else if (key === 'webWidgets') updateSettings({ webWidgets: Array.isArray(value) ? value : [] });
+      else if (key.startsWith('task:') && aiService) aiService.applySyncedTask(value);
+      else if (key.startsWith('conv:') && aiService) aiService.applySyncedConversation(value, from);
+    },
+    remove: (key) => {
+      if (key.startsWith('task:') && aiService) aiService.removeSyncedTask(key.slice(5));
+      else if (key.startsWith('conv:') && aiService) aiService.removeSyncedConversation(key.slice(5));
+    },
+    log: (m) => console.log('[state]', m)
+  });
+
   // File Pool sync rides on the mesh: it runs while device connections are on.
   const poolSync = new (require('./pool-sync').PoolSync)({
     poolDir: () => fileService.poolDir(),
@@ -2089,14 +2133,16 @@ app.whenReady().then(() => {
   });
   deviceService = new (require('./mesh/service').DeviceService)({
     userDataDir: app.getPath('userData'), store, getWindow: () => win,
-    onStart: (mesh) => { poolSync.attach(mesh); poolSync.start(); remoteFiles.attach(mesh); if (aiService) { aiService.bus.attach(mesh); aiService.shared.attach(mesh); } },
-    onStop: () => { poolSync.stop(); poolSync.mesh = null; }
+    onStart: (mesh) => { poolSync.attach(mesh); poolSync.start(); remoteFiles.attach(mesh); stateSync.attach(mesh); stateSync.start(); if (aiService) { aiService.bus.attach(mesh); aiService.shared.attach(mesh); } },
+    onStop: () => { poolSync.stop(); poolSync.mesh = null; stateSync.stop(); }
   });
   deviceService.registerIpc();
   if ((store.get('devices') || {}).enabled) deviceService.start();
   app.on('before-quit', () => { if (deviceService) deviceService.stop(); });
 
   aiService = new (require('./ai').AiService)({
+    deviceId: () => { try { return deviceService.ensureIdentity().id; } catch { return ''; } },
+    stateChanged: () => stateSync.touch(),
     getMesh: () => (deviceService && deviceService.mesh) || null,
     deviceName: () => String((store.get('devices') || {}).name || require('os').hostname()),
     userDataDir: app.getPath('userData'),

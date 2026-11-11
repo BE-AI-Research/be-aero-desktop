@@ -24,6 +24,7 @@ class AiService {
   constructor(deps) {
     this.d = deps;
     this.conversations = new Conversations(path.join(deps.userDataDir, 'ai', 'conversations'));
+    this.conversations.defaultLocal = () => (this.d.store.get('devices') || {}).newConversationsLocal === true;
     this.runs = new Map();          // conversationId -> AbortController
     this.queues = new Map();        // conversationId -> [text] waiting for the current turn
     this.pendingWebOps = new Map(); // opId -> { resolve, timer }
@@ -48,6 +49,8 @@ class AiService {
       run: (task, info) => this.runTask(task, info),
       notify: (title, body) => this.d.notify(title, body),
       maxRuntimeMin: () => Number(this.config().taskMaxRuntimeMin) || 30,
+      // A task synced from another device shows here but runs there.
+      owns: (t) => !t.device || !deps.deviceId || t.device === deps.deviceId(),
       onChange: (list) => { const w = this.d.getWindow(); if (w && !w.isDestroyed()) w.webContents.send('ai:tasks', list); }
     });
     this.scheduler.start();
@@ -80,6 +83,62 @@ class AiService {
       log: (m) => console.log('[ai-bus]', m)
     });
     this.registerIpc();
+  }
+
+  // ---- state sync (state-sync.js): what this device shares, and applying
+  // what others share. Conversations and tasks are synced unless Local.
+  syncableConversations() {
+    return this.conversations.list().filter((c) => !c.local && !/^AI bus · /.test(c.title))
+      .map((c) => {
+        // Synced as the conversation itself: this device's flags stay out,
+        // or applying it elsewhere would change it and bounce it back.
+        try { const { local, syncedFrom, ...rest } = this.conversations.get(c.id); return rest; } catch { return null; }
+      }).filter(Boolean);
+  }
+
+  isLocalConversation(id) {
+    try { const c = this.conversations.get(id); return !!c.local || /^AI bus · /.test(c.title); } catch { return false; }
+  }
+
+  applySyncedConversation(c, from) {
+    if (this.runs.has(c.id)) return;                     // busy here: the next sync brings it
+    const { local, syncedFrom, ...rest } = c || {};
+    this.conversations.put(rest);
+    const w = this.d.getWindow();
+    if (w && !w.isDestroyed()) w.webContents.send('ai:list-changed');
+  }
+
+  removeSyncedConversation(id) {
+    if (this.runs.has(id)) return;
+    this.conversations.remove(id);
+    const w = this.d.getWindow();
+    if (w && !w.isDestroyed()) w.webContents.send('ai:list-changed');
+  }
+
+  // Tasks share their definition, never their run state (last run, next
+  // run, failures), so a run on one device does not ripple to the others.
+  syncableTasks() {
+    const me = this.d.deviceId ? this.d.deviceId() : '';
+    const keep = ['id', 'name', 'prompt', 'when', 'permission', 'conversationMode', 'model', 'readAloud', 'state', 'createdBy', 'createdAt'];
+    return (this.config().tasks || []).filter((t) => !t.local).map((t) => {
+      const v = Object.fromEntries(keep.filter((k) => t[k] !== undefined).map((k) => [k, t[k]]));
+      v.device = t.device || me;
+      v.deviceName = t.device && t.device !== me ? (t.deviceName || '') : (this.d.deviceName ? this.d.deviceName() : '');
+      return v;
+    });
+  }
+
+  applySyncedTask(v) {
+    const tasks = (this.config().tasks || []).slice();
+    const i = tasks.findIndex((t) => t.id === v.id);
+    const merged = i >= 0 ? { ...tasks[i], ...v } : { ...v, failures: 0 };
+    if (i >= 0) tasks[i] = merged; else tasks.push(merged);
+    this.d.updateSettings({ ai: { tasks } });
+  }
+
+  removeSyncedTask(id) {
+    const tasks = (this.config().tasks || []).filter((t) => t.id !== id);
+    this.d.updateSettings({ ai: { tasks } });
   }
 
   // A task, request or question from another device's assistant. The
@@ -1015,7 +1074,25 @@ class AiService {
     ipcMain.handle('ai:rename', (_e, id, title) => this.conversations.rename(id, title));
     ipcMain.handle('ai:delete', (_e, id) => { this.stop(id); this.conversations.remove(id); return true; });
     ipcMain.handle('ai:send', (_e, id, text, atts) => this.send(id, text, atts));
-    ipcMain.handle('ai:tasks', () => this.scheduler.list());
+    ipcMain.handle('ai:tasks', () => {
+      const me = this.d.deviceId ? this.d.deviceId() : '';
+      return this.scheduler.list().map((t) => (t.device && t.device !== me ? { ...t, elsewhere: t.deviceName || 'another device' } : t));
+    });
+    // Local / Synced: a conversation that stays on this device, or not.
+    ipcMain.handle('ai:conv-local', (_e, id, local) => { try { this.conversations.setLocal(String(id), !!local); this.d.stateChanged && this.d.stateChanged(); return true; } catch { return false; } });
+    ipcMain.handle('ai:conv-menu', (_e, id) => new Promise((resolve) => {
+      let c = null;
+      try { c = this.conversations.get(String(id)); } catch { resolve(null); return; }
+      const { Menu } = require('electron');
+      let chosen = null;
+      const bus = /^AI bus · /.test(c.title);
+      Menu.buildFromTemplate([
+        { label: c.local || bus ? 'Local - on this device only' : 'Synced to your devices', enabled: false },
+        { type: 'separator' },
+        { label: 'Sync to my devices', type: 'radio', checked: !c.local && !bus, enabled: !bus, click: () => { chosen = 'synced'; } },
+        { label: 'Keep on this device only', type: 'radio', checked: !!c.local || bus, enabled: !bus, click: () => { chosen = 'local'; } }
+      ]).popup({ window: this.d.getWindow(), callback: () => setImmediate(() => resolve(chosen)) });
+    }));
     ipcMain.handle('ai:task-save', (_e, task) => { try { return this.scheduler.upsert(task); } catch (err) { return { error: err.message }; } });
     ipcMain.handle('ai:task-delete', (_e, id) => { this.scheduler.remove(String(id)); return true; });
     ipcMain.handle('ai:task-toggle', (_e, id, enabled) => this.scheduler.patch(String(id), { enabled: !!enabled }));

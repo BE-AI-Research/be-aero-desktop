@@ -166,7 +166,7 @@
   // redraw (tab switch, edit), the message with the same text nearest its old
   // position - a redraw shows only the latest page, so positions shift when
   // messages arrive, and long replies can share their opening text.
-  const keyOf = (el) => `${el.className.replace(/\s*(saying|unanswered|editing)/g, '')}|${el.textContent.slice(0, 120)}`;
+  const keyOf = (el) => `${el.className.replace(/\s*(saying|unanswered|editing)\b/g, '')}|${el.textContent.slice(0, 120)}`;
   function anchorNow() {
     const top = msgsEl.getBoundingClientRect().top;
     const kids = msgsEl.children;
@@ -679,7 +679,16 @@
     listEl.innerHTML = '';
     const opt0 = el('option', '', listEl, 'Open a conversation…');
     opt0.value = '';
-    for (const c of list) { const o = el('option', '', listEl, c.title); o.value = c.id; }
+    // Two sections: Synced (on all your devices) and Local (this device only).
+    const synced = list.filter((c) => !c.local && !/^AI bus · /.test(c.title));
+    const local = list.filter((c) => c.local || /^AI bus · /.test(c.title));
+    for (const [label, items] of [['Synced to your devices', synced], ['Local - this device only', local]]) {
+      if (!items.length) continue;
+      const g = document.createElement('optgroup');
+      g.label = label;
+      for (const c of items) { const o = el('option', '', g, c.title); o.value = c.id; }
+      listEl.appendChild(g);
+    }
     for (const t of tabs) { const c = list.find((x) => x.id === t.convId); if (c) t.title = c.title; }
     renderTabs();
     const t = activeTab();
@@ -892,6 +901,7 @@
       <div class="row">
         <select name="model" title="Model this task runs on" data-current="${esc(t.model || '')}"><option value="">Model: default for tasks</option>${t.model ? `<option value="${esc(t.model)}" selected>Model: ${esc(t.model)}</option>` : ''}</select>
         <label class="check" title="Say the result on your speakers when the task finishes"><input type="checkbox" name="readAloud"${t.readAloud ? ' checked' : ''}> Read the result aloud</label>
+        <label class="check" title="Otherwise it shows on all your paired devices (it always runs on this one)"><input type="checkbox" name="local"${t.local ? ' checked' : ''}> This device only</label>
       </div>
       <div class="row">
         <select name="conversationMode" title="Where the results go">
@@ -911,7 +921,7 @@
 
   function readForm(form, base) {
     const f = new FormData(form);
-    const out = { ...(base || {}), name: String(f.get('name')).trim(), prompt: String(f.get('prompt')).trim(), when: String(f.get('when')).trim(), conversationMode: f.get('conversationMode'), permission: f.get('permission'), model: String(f.get('model') || ''), readAloud: f.get('readAloud') === 'on' };
+    const out = { ...(base || {}), name: String(f.get('name')).trim(), prompt: String(f.get('prompt')).trim(), when: String(f.get('when')).trim(), conversationMode: f.get('conversationMode'), permission: f.get('permission'), model: String(f.get('model') || ''), readAloud: f.get('readAloud') === 'on', local: f.get('local') === 'on' };
     delete out.schedule;
     for (const k of ['summary', 'nextRun', 'running', 'queued', 'enabled', 'lastStatus', 'whenError']) delete out[k];
     return out;
@@ -975,19 +985,28 @@
       form.querySelector('.ai-task-cancel').addEventListener('click', () => { editingTask = null; renderTasks(); });
     }
     const list = el('div', 'ai-task-list', tasksEl);
-    for (const t of taskList) {
+    // Two sections, as for conversations: Synced (shown on all your devices;
+    // each runs on its own) and Local (this device only).
+    const sections = [['Synced to your devices', taskList.filter((t) => !t.local)], ['Local - this device only', taskList.filter((t) => t.local)]];
+    const ordered = [];
+    for (const [label, items] of sections) {
+      if (!items.length || !taskList.some((t) => t.local)) { ordered.push(...items); continue; }
+      ordered.push({ header: label }, ...items);
+    }
+    for (const t of ordered) {
+      if (t.header) { el('div', 'ai-task-section', list, t.header); continue; }
       const state = t.state || (t.enabled === false ? 'paused' : 'active');
       const row = el('div', `ai-task ${state}${t.running ? ' running' : ''}`, list);
       const status = t.running ? 'running now' : t.queued ? 'waiting to run'
         : state === 'done' ? 'done' : state === 'paused' ? (t.failures >= 3 ? `paused after ${t.failures} failures` : 'paused')
         : t.nextRun ? `next ${fmtTime(t.nextRun)}` : 'not scheduled';
       const last = t.lastOutcome ? ` · last: ${t.lastOutcome}` : '';
-      const perm = (t.permission === 'allow' ? ' · autonomous' : t.permission === 'deny' ? ' · read-only' : '') + (t.model ? ` · ${t.model.split('/').pop()}` : '') + (t.readAloud ? ' · read aloud' : '');
+      const perm = (t.permission === 'allow' ? ' · autonomous' : t.permission === 'deny' ? ' · read-only' : '') + (t.model ? ` · ${t.model.split('/').pop()}` : '') + (t.readAloud ? ' · read aloud' : '') + (t.elsewhere ? ` · runs on ${t.elsewhere}` : '');
       row.innerHTML = `<button class="icon-btn t-state" title="${state === 'active' ? 'Pause' : 'Resume'}">${state === 'active' ? '⏸' : '▶'}</button>
         <div class="ai-task-main"><div class="ai-task-name">${esc(t.name)}${t.createdBy === 'agent' ? ' <span class="ai-task-by" title="Created by the assistant">AI</span>' : ''}</div>
         <div class="ai-task-meta">${esc(t.summary || t.when || '')} · ${esc(status)}${esc(last)}${perm}</div>
         ${t.whenError ? `<div class="ai-task-meta bad">${esc(t.whenError)}</div>` : ''}</div>
-        <div class="ai-task-actions"><button class="icon-btn t-run" title="Run now"${t.running ? ' disabled' : ''}>⚡</button><button class="icon-btn t-open" title="Open its conversation"${t.conversationId ? '' : ' disabled'}>💬</button><button class="icon-btn t-edit" title="Edit">✎</button><button class="icon-btn t-del" title="Delete">🗑</button></div>`;
+        <div class="ai-task-actions"><button class="icon-btn t-run" title="${t.elsewhere ? `Runs on ${esc(t.elsewhere)}` : 'Run now'}"${t.running || t.elsewhere ? ' disabled' : ''}>⚡</button><button class="icon-btn t-open" title="Open its conversation"${t.conversationId ? '' : ' disabled'}>💬</button><button class="icon-btn t-edit" title="Edit">✎</button><button class="icon-btn t-del" title="Delete">🗑</button></div>`;
       row.querySelector('.t-state').addEventListener('click', () => aero.aiTaskToggle(t.id, state !== 'active'));
       row.querySelector('.t-run').addEventListener('click', () => aero.aiTaskRun(t.id));
       row.querySelector('.t-open').addEventListener('click', () => { if (t.conversationId) newTab(t.conversationId, `Task: ${t.name}`, true); });
@@ -1075,6 +1094,17 @@
       if (e.target.closest('.ai-tab-x')) { closeTab(tabBtn.dataset.key); return; }
       activateTab(tabBtn.dataset.key);
     });
+    // Right-click a conversation tab: keep it Local, or Sync it.
+    tabsEl.addEventListener('contextmenu', async (e) => {
+      const tabBtn = e.target.closest('.ai-tab');
+      if (!tabBtn) return;
+      const t = tabs.find((x) => x.key === tabBtn.dataset.key);
+      if (!t || !t.convId) return;
+      e.preventDefault();
+      const choice = await aero.aiConvMenu(t.convId);
+      if (choice) { await aero.aiConvLocal(t.convId, choice === 'local'); refreshList(); }
+    });
+    if (aero.onAiListChanged) aero.onAiListChanged(() => refreshList());
     tabsEl.addEventListener('auxclick', (e) => { const b = e.target.closest('.ai-tab'); if (b && e.button === 1 && b.dataset.key !== '+') closeTab(b.dataset.key); });
     // Drag to reorder.
     let dragKey = null;

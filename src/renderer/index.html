@@ -538,6 +538,16 @@
           <div id="dev-nearby" class="dev-nearby"></div>
           <div class="row"><input id="dev-pair-addr" type="text" spellcheck="false" placeholder="Address (e.g. 192.168.1.20)"><input id="dev-pair-code" type="text" inputmode="numeric" maxlength="7" placeholder="Code" class="dev-code-input"><button class="btn" id="btn-dev-pair">Pair</button></div>
           <div id="dev-pair-status" class="hint-text"></div>
+          <label class="field-label">Keep the same on my devices</label>
+          <div class="dev-sync">
+            <label class="check"><input type="checkbox" data-sync="notes"> Scratchpad notes</label>
+            <label class="check"><input type="checkbox" data-sync="theme"> Theme</label>
+            <label class="check"><input type="checkbox" data-sync="pins"> Pinned apps (same OS)</label>
+            <label class="check"><input type="checkbox" data-sync="conversations"> AI conversations (Synced section)</label>
+            <label class="check"><input type="checkbox" data-sync="tasks"> Scheduled tasks (each runs on its own device)</label>
+            <label class="check"><input type="checkbox" data-sync="webWidgets"> Web widgets</label>
+            <label class="check"><input type="checkbox" id="set-dev-newlocal"> New AI conversations start Local</label>
+          </div>
           <label class="field-label">Paired devices</label>
           <div id="dev-list" class="dev-list"></div>
         </div>

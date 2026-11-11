@@ -676,10 +676,10 @@
   $('set-ai-follow-shared').addEventListener('change', (e) => aero.setSettings({ ai: { followSharedModel: e.target.checked } }));
 
   // "Browser the assistant uses": the installed browsers (listed once).
-  let browserList = null;
+  var browserList = null;   // var: fillBrowsers can run before this line
   async function fillBrowsers(saved) {
     const sel = $('set-ai-browser-app');
-    if (browserList === null) { try { browserList = await aero.aiBrowsers(); } catch { browserList = []; } }
+    if (!browserList) { try { browserList = await aero.aiBrowsers(); } catch { browserList = []; } }
     sel.innerHTML = '';
     const d = document.createElement('option'); d.value = ''; d.textContent = 'My default browser'; sel.appendChild(d);
     for (const b of browserList) { const o = document.createElement('option'); o.value = b.key; o.textContent = b.name; sel.appendChild(o); }

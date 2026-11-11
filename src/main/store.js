@@ -164,6 +164,9 @@ const DEFAULTS = {
     }
   },
   devices: {
+    // What syncs to paired devices that allow "Synced state" (state-sync.js).
+    sync: { notes: true, theme: true, pins: true, conversations: true, tasks: true, webWidgets: true },
+    newConversationsLocal: false,   // new AI conversations start Local instead of Synced
     enabled: false,          // device connections (the mesh): off until turned on in Settings > Devices
     name: '',                // this device's name for others ('' = the computer name)
     port: 41801

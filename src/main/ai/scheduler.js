@@ -357,6 +357,7 @@ class TaskScheduler {
   // deps: { getTasks(): [], saveTasks(list), run(task, { scheduled, signal }): Promise<result>,
   //         now?: () => ms, onChange?: (list) => void, notify?: (title, body) => void, maxRuntimeMin?: () => n }
   constructor(deps) {
+    this.deps = deps;
     this.d = deps;
     this.now = deps.now || (() => Date.now());
     this.queue = [];              // task ids waiting to run, in order
@@ -398,6 +399,7 @@ class TaskScheduler {
     const now = this.now();
     let nearest = Infinity;
     for (const t of this.tasks()) {
+      if (this.deps.owns && !this.deps.owns(t)) continue;   // a synced task that runs on another device
       const due = nextDue(t);
       if (due == null) continue;
       if (due <= now) this.enqueue(t.id);
@@ -521,6 +523,8 @@ class TaskScheduler {
 
   // A person's "run now": runs even a paused task, ahead of the queue.
   async runTask(id) {
+    const own = this.tasks().find((t) => t.id === id);
+    if (own && this.deps.owns && !this.deps.owns(own)) return false;    // runs on its own device
     if (this.running && this.running.id === id) return { error: 'already running' };
     if (!this.tasks().some((t) => t.id === id)) return { error: 'no such task' };
     if (this.running) { this.queue.unshift(id); this.queued.add(id); return { queued: true }; }

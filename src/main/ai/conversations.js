@@ -37,7 +37,7 @@ class Conversations {
       if (!f.endsWith('.json')) continue;
       try {
         const c = this.get(f.slice(0, -5));
-        out.push({ id: c.id, title: c.title, updatedAt: c.updatedAt, count: c.messages.length });
+        out.push({ id: c.id, title: c.title, updatedAt: c.updatedAt, count: c.messages.length, local: !!c.local });
       } catch { /* skip corrupt file */ }
     }
     return out.sort((a, b) => b.updatedAt - a.updatedAt);
@@ -54,7 +54,7 @@ class Conversations {
   create(title) {
     const id = crypto.randomBytes(8).toString('hex');
     const now = Date.now();
-    const c = { id, title: title || 'New conversation', createdAt: now, updatedAt: now, messages: [] };
+    const c = { id, title: title || 'New conversation', createdAt: now, updatedAt: now, messages: [], ...(this.defaultLocal && this.defaultLocal() ? { local: true } : {}) };
     this.cache.set(id, c);
     this.save(c);
     return c;
@@ -111,6 +111,21 @@ class Conversations {
     const c = this.get(id);
     c.title = titleFrom(title);
     c.updatedAt = Date.now();
+    this.save(c);
+    return c;
+  }
+
+  // A conversation from another device (state sync): stored as it came.
+  put(c) {
+    if (!c || !c.id || !/^[a-f0-9]{8,32}$/i.test(String(c.id)) || !Array.isArray(c.messages)) throw new Error('not a conversation');
+    this.cache.set(c.id, c);
+    this.save(c);
+    return c;
+  }
+
+  setLocal(id, local) {
+    const c = this.get(id);
+    c.local = !!local;
     this.save(c);
     return c;
   }
