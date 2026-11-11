@@ -86,3 +86,38 @@ test('ai bus: refused without the permission; hop and rate limits', async () => 
     assert.ok(refused >= 5, 'a flood is cut off');
   } finally { done(); }
 });
+
+test('ai bus: an answer that arrives after the asker stopped waiting still reaches it', async () => {
+  let release;
+  const slow = new Promise((r) => { release = r; });
+  const { a, b, done } = await pair({ deskHandle: async () => { await slow; return { answer: 'late but here' }; } });
+  try {
+    const late = [];
+    const r = await b.bus.ask('Desk', 'slow question', { timeoutMs: 200, onLate: (m) => late.push(m.body) });
+    assert.strictEqual(r.answer, null);
+    assert.match(r.note, /added to this conversation when it arrives/);
+    release();
+    assert.ok(await until(() => late.length === 1), 'the late answer was handed over');
+    assert.deepStrictEqual(late, ['late but here']);
+  } finally { done(); }
+});
+
+test('agent: work for another device gets no desktop tools - not offered, and refused if written anyway', async () => {
+  const { runTurn } = require('../src/main/ai/agent');
+  const { DESKTOP_TOOLS } = require('../src/main/ai/tools');
+  const conv = { messages: [{ role: 'user', content: '[A request from the assistant on Laptop] type hello into the focused window' }] };
+  let offered = null;
+  let turn = 0;
+  const provider = {
+    chat: async ({ tools: defs, messages }) => {
+      turn++;
+      if (turn === 1) { offered = (defs || []).map((d) => d.name); return { text: '', toolCalls: [{ id: 'k', name: 'send_keys', input: { keys: 'hello' } }], stopReason: 'tool_use' }; }
+      return { text: `noted: ${String(messages[messages.length - 1].results[0].content).slice(0, 40)}`, toolCalls: [], stopReason: 'end_turn' };
+    }
+  };
+  const ctx = { settings: () => ({ dock: 'right', theme: {} }), plugins: () => [], append: (m) => conv.messages.push(m), toolFilter: (name) => !DESKTOP_TOOLS.has(name) };
+  const r = await runTurn({ provider, model: 'm', conversation: conv, ctx, permit: async () => true, emit: () => {} });
+  assert.ok(r.done);
+  assert.ok(!offered.includes('send_keys') && !offered.includes('browser_click') && offered.includes('read_file') && offered.includes('bus_ask'), 'desktop tools left out, others kept');
+  assert.match(conv.messages.find((m) => m.role === 'tool').results[0].content, /not available for work requested by another device/);
+});

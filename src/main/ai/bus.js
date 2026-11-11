@@ -48,6 +48,7 @@ class AiBus {
     fs.mkdirSync(this.inboxDir, { recursive: true });
     fs.mkdirSync(this.outboxDir, { recursive: true });
     this.waiters = new Map();     // message id -> resolve(reply)
+    this.late = new Map();        // message id -> onLate(reply), after an ask stopped waiting
     this.recent = new Map();      // sender device -> [timestamps]
     this.timer = null;
   }
@@ -141,14 +142,17 @@ class AiBus {
   }
 
   // Send a question and wait for the reply.
-  async ask(device, question, { timeoutMs = 120000, hops = 0, subject } = {}) {
+  async ask(device, question, { timeoutMs = 300000, hops = 0, subject, onLate } = {}) {
     const res = await this.send(device, { kind: 'query', subject: subject || String(question).slice(0, 80), body: question, hops });
     if (!res.delivered) return { ...res, answer: null };
     const reply = await new Promise((resolve) => {
       this.waiters.set(res.id, resolve);
       setTimeout(() => { if (this.waiters.delete(res.id)) resolve(null); }, timeoutMs);
     });
-    if (!reply) return { ...res, answer: null, note: `No answer from ${res.to} yet; it will arrive in bus_inbox.` };
+    if (!reply) {
+      if (onLate) this.late.set(res.id, onLate);
+      return { ...res, answer: null, note: `No answer from ${res.to} yet. It will be added to this conversation when it arrives (and is in bus_inbox).` };
+    }
     if (reply.error) return { ...res, error: reply.error };
     return { ...res, answer: reply.body };
   }
@@ -190,6 +194,8 @@ class AiBus {
     if (msg.kind === 'reply') {
       const w = this.waiters.get(msg.replyTo);
       if (w) { this.waiters.delete(msg.replyTo); w(msg); await this.setStatus(msg, 'read'); return; }
+      const late = this.late.get(msg.replyTo);
+      if (late) { this.late.delete(msg.replyTo); try { late(msg); } catch { /* conversation gone */ } }
       this.notify(`Answer from ${msg.from.name}'s assistant`, msg.body.slice(0, 200));
       return;
     }

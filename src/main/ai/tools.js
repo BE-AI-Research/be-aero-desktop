@@ -602,9 +602,9 @@ const TOOLS = [
   {
     name: 'bus_ask', category: 'control',
     description: "Ask the assistant on another of the user's devices a question and wait for its answer (it answers read-only on that device). Use it for anything only that device can know or see: its files, its running apps, its telemetry, a task's result there. device = its name from list_devices.",
-    input_schema: obj({ device: str('Device name (or ID prefix)'), question: str('The question'), wait_seconds: num('How long to wait for the answer (default 120, max 600)') }, ['device', 'question']),
+    input_schema: obj({ device: str('Device name (or ID prefix)'), question: str('The question'), wait_seconds: num('How long to wait for the answer (default 300, max 900)') }, ['device', 'question']),
     run: async (input, ctx) => {
-      try { return await ctx.bus.ask(input.device, input.question, { timeoutMs: Math.max(10, Math.min(600, Number(input.wait_seconds) || 120)) * 1000 }); } catch (err) { return { error: err.message }; }
+      try { return await ctx.bus.ask(input.device, input.question, { timeoutMs: Math.max(10, Math.min(900, Number(input.wait_seconds) || 300)) * 1000 }); } catch (err) { return { error: err.message }; }
     }
   },
   {
@@ -649,6 +649,22 @@ const TOOLS = [
 
 const byName = new Map(TOOLS.map((t) => [t.name, t]));
 
+// Tools that act on this desktop in front of the person: typing, clicking,
+// focusing or opening windows and apps, the browser, widgets, settings, the
+// clipboard, media and speech. Turns run for ANOTHER device's assistant (the
+// AI bus) do not get these unless the user allows it, so remote work never
+// fights the person - or their own assistant - for the screen.
+const DESKTOP_TOOLS = new Set([
+  'media_control', 'speak_text', 'set_settings', 'set_widget_enabled', 'write_scratchpad',
+  'launch', 'open_url', 'focus_app', 'close_app', 'minimize_app', 'maximize_app', 'restore_app', 'send_keys',
+  'create_web_widget', 'remove_web_widget', 'web_open', 'web_navigate', 'web_click', 'web_type', 'web_scroll', 'web_eval',
+  'web_select', 'web_hover', 'web_submit', 'web_back', 'web_forward', 'web_reload', 'web_wait', 'open_web_search',
+  'clipboard_read', 'clipboard_write',
+  'browser_tabs', 'browser_open', 'browser_read', 'browser_elements', 'browser_find', 'browser_screenshot', 'browser_navigate',
+  'browser_click', 'browser_type', 'browser_select', 'browser_hover', 'browser_scroll', 'browser_wait', 'browser_back',
+  'browser_forward', 'browser_activate', 'browser_close_tab', 'browser_eval'
+]);
+
 function definitions() {
   return TOOLS.map(({ name, description, input_schema }) => ({ name, description, input_schema }));
 }
@@ -685,4 +701,4 @@ async function execute(name, input, ctx) {
   return t.run(input || {}, ctx);
 }
 
-module.exports = { TOOLS, definitions, categoryOf, validateInput, execute, clip, sanitizeSettings, SETTABLE };
+module.exports = { DESKTOP_TOOLS, TOOLS, definitions, categoryOf, validateInput, execute, clip, sanitizeSettings, SETTABLE };

@@ -87,12 +87,27 @@ class AiService {
     const what = msg.kind === 'query' ? 'A question' : msg.kind === 'task' ? 'A task' : 'A request';
     const header = `[${what} from the assistant on ${from}${msg.subject ? `: ${msg.subject}` : ''}. Nobody is watching here; your final reply is sent back to that assistant, so make it complete and concise.${msg.kind === 'query' ? ' Answer only: do not change anything.' : ''}]\n`;
     this.busHops.set(conv.id, msg.hops || 0);
+    const start = this.conversations.get(conv.id).messages.length;
+    const answerSince = (from) => {
+      const msgs = this.conversations.get(conv.id).messages.slice(from);
+      const last = [...msgs].reverse().find((m) => m.role === 'assistant' && String(m.content || '').trim());
+      return last ? String(last.content).trim() : '';
+    };
     let result;
-    try { result = await this.send(conv.id, header + msg.body, [], { permission, source: 'bus' }); } finally { this.busHops.delete(conv.id); }
-    if (result && result.error) return { error: result.error };
-    const c = this.conversations.get(conv.id);
-    const last = [...c.messages].reverse().find((m) => m.role === 'assistant' && m.content);
-    return { answer: last ? last.content : '(no answer)' };
+    let answer = '';
+    try {
+      result = await this.send(conv.id, header + msg.body, [], { permission, source: 'bus' });
+      if (result && result.error) return { error: result.error };
+      answer = answerSince(start);
+      // The model finished with tool calls and no words (common with local
+      // models): one more step, no tools, to write the answer down.
+      if (!answer) {
+        const mark = this.conversations.get(conv.id).messages.length;
+        await this.send(conv.id, '[Write your answer for the other assistant now, in plain text, from what you found. Do not call tools.]', [], { permission: 'deny', source: 'bus', maxSteps: 1 });
+        answer = answerSince(mark);
+      }
+    } finally { this.busHops.delete(conv.id); }
+    return { answer: answer || '(the assistant here could not produce an answer)' };
   }
 
   // A scheduled task runs in its own conversation with its own permission
@@ -470,12 +485,24 @@ class AiService {
         setState: (id, state) => this.scheduler.setState(id, state)
       },
       aiFolder: () => require('../files').aiFolder(this.d.store),
+      // Work for another device's assistant: no desktop-driving tools unless allowed.
+      toolFilter: this.busHops.has(conversationId) && !this.config().busOperateDesktop
+        ? (name) => !require('./tools').DESKTOP_TOOLS.has(name) : null,
       // The AI bus, with the hop count of the bus message this conversation
       // is handling (anything sent from here goes one hop further).
       bus: {
         devices: () => this.bus.devices(),
         send: (device, m) => this.bus.send(device, { ...m, hops: (this.busHops.get(conversationId) || 0) + (this.busHops.has(conversationId) ? 1 : 0) }),
-        ask: (device, q, o) => this.bus.ask(device, q, { ...o, hops: (this.busHops.get(conversationId) || 0) + (this.busHops.has(conversationId) ? 1 : 0) }),
+        ask: (device, q, o) => this.bus.ask(device, q, {
+          ...o, hops: (this.busHops.get(conversationId) || 0) + (this.busHops.has(conversationId) ? 1 : 0),
+          // An answer that arrives after we stopped waiting still reaches
+          // this conversation (the model sees it next turn; the user now).
+          onLate: (reply) => {
+            const text = `[Late answer from ${reply.from.name}'s assistant${reply.subject ? ` (${reply.subject.replace(/^Re:\s*/, '')})` : ''}: ${reply.body}]`;
+            try { this.conversations.append(conversationId, { role: 'user', content: text }); } catch { /* conversation gone */ }
+            this.emit(conversationId, { type: 'notice', text: `Answer from ${reply.from.name}'s assistant: ${reply.body.slice(0, 300)}` });
+          }
+        }),
         inbox: (n) => this.bus.inbox(n)
       },
       files: {

@@ -71,7 +71,7 @@ async function compactConversation({ provider, model, conversation, ctx, emit, s
 }
 
 async function runTurn({ provider, model, conversation, ctx, permit, emit, signal, maxSteps = 12, context = {} }) {
-  const defs = ctx.noTools ? [] : tools.definitions();
+  const defs = ctx.noTools ? [] : tools.definitions().filter((d) => !ctx.toolFilter || ctx.toolFilter(d.name));
   const baseSystem = systemPrompt(ctx);
   // Tool-call format (BE-Code profiles): 'native' sends the tools field;
   // 'compat' embeds the tool list in the prompt and reads calls from text.
@@ -232,7 +232,10 @@ async function runTurn({ provider, model, conversation, ctx, permit, emit, signa
       let content;
       let isError = false;
       let images = null;
-      const invalid = tools.validateInput(call.name, call.input);
+      // Not offered in this turn (e.g. desktop tools during AI bus work):
+      // refused even if the model writes the call out as text.
+      const offered = !ctx.toolFilter || ctx.toolFilter(call.name);
+      const invalid = offered ? tools.validateInput(call.name, call.input) : `${call.name} is not available for work requested by another device's assistant (it would act on this desktop). Answer with what you can find instead.`;
       let callKey = '';
       try { callKey = `${call.name}|${JSON.stringify(call.input || {})}`; } catch { callKey = ''; }
       const repeat = !invalid && callKey && tools.categoryOf(call.name) === 'read' && seen.has(callKey);
