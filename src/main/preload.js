@@ -133,6 +133,7 @@ contextBridge.exposeInMainWorld('aero', {
   filesWatch: (dir) => ipcRenderer.invoke('files:watch', dir),
   onFilesChanged: (cb) => subscribe('files:changed', cb),
   filesSearch: (q) => ipcRenderer.invoke('files:search', q),
+  filesSearchRemote: (q) => ipcRenderer.invoke('files:search-remote', q),
   filesNetConnect: (opts) => ipcRenderer.invoke('files:net-connect', opts),
   filesNetDisconnect: (target) => ipcRenderer.invoke('files:net-disconnect', target),
   filesNetLetters: () => ipcRenderer.invoke('files:net-letters'),

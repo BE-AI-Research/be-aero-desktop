@@ -62,8 +62,15 @@ test('remote files: the Pool and shared folders only, confined, permission-check
     await assert.rejects(b.mesh.request(A, 'files.list', { root: 1, rel: '..' }), /outside the shared folder/);
     await assert.rejects(b.mesh.request(A, 'files.read', { root: 1, rel: '../secret.txt' }), /outside the shared folder/);
     await assert.rejects(b.mesh.request(A, 'files.read', { root: 7, rel: 'x' }), /no such shared folder/);
+    // search by name: only what is shared, with where it is
+    const hits = await b.rf.search('quarterly REPORT'.split(' ')[1]);
+    assert.deepStrictEqual(hits.map((h) => h.path), [`aero://${A}/1/sub/report.txt`]);
+    assert.match(hits[0].where, /^On Desk · Documents \/ sub$/);
+    assert.deepStrictEqual(await b.rf.search('secret'), [], 'not shared, not found');
+    assert.deepStrictEqual((await b.rf.search('shared')).map((h) => h.name), ['shared.txt']);
     // and without the permission, nothing
     a.mesh.setPerms(b.mesh.identity.id, { files: false });
     await assert.rejects(b.rf.list(`aero://${A}`), /has not allowed "files"/);
+    assert.deepStrictEqual(await b.rf.search('report'), []);
   } finally { a.mesh.stop(); b.mesh.stop(); fs.rmSync(base, { recursive: true, force: true }); }
 });

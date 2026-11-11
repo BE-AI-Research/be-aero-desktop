@@ -16,6 +16,36 @@ const path = require('path');
 const crypto = require('crypto');
 
 const CHUNK = 1024 * 1024;
+const INDEX_MAX = 50000;          // names per shared folder kept for search
+const INDEX_TTL = 60 * 1000;      // rebuilt when older than this
+const SEARCH_LIMIT = 40;
+
+// Every name under a folder (skipping hidden and sync metadata), breadth-first,
+// capped - what a search over a shared folder looks through.
+async function walkNames(rootDir) {
+  const out = [];
+  const queue = [''];
+  while (queue.length && out.length < INDEX_MAX) {
+    const rel = queue.shift();
+    let dirents;
+    try { dirents = await fsp.readdir(path.join(rootDir, rel), { withFileTypes: true }); } catch { continue; }
+    for (const d of dirents) {
+      if (d.name.startsWith('.') || d.name === '.be-aero-sync') continue;
+      const r = rel ? `${rel}/${d.name}` : d.name;
+      const dir = d.isDirectory();
+      out.push({ rel: r, name: d.name, dir });
+      if (dir) queue.push(r);
+      if (out.length >= INDEX_MAX) break;
+    }
+  }
+  return out;
+}
+
+// All words of the query in the name (any order, any case).
+function nameMatches(name, words) {
+  const n = name.toLowerCase();
+  return words.every((w) => n.includes(w));
+}
 const MAX_ENTRIES = 5000;
 const IMAGE_EXT = /\.(png|jpe?g|gif|webp|bmp|ico)$/i;
 const TEXT_EXT = /\.(txt|md|markdown|log|json|js|ts|py|go|rs|c|h|cpp|cs|java|sh|ps1|ini|cfg|conf|toml|ya?ml|xml|html?|css|csv|sql)$/i;
@@ -48,6 +78,17 @@ class RemoteFiles {
     this.poolDir = poolDir;
     this.cacheDir = cacheDir;
     this.shareStore = shareStore;
+    this.nameIndex = new Map();     // root path -> { at, names, building }
+  }
+
+  async namesOf(rootDir) {
+    const have = this.nameIndex.get(rootDir);
+    if (have && Date.now() - have.at < INDEX_TTL) return have.names;
+    if (have && have.building) return have.building;
+    const building = walkNames(rootDir).then((names) => { this.nameIndex.set(rootDir, { at: Date.now(), names }); return names; })
+      .catch(() => { this.nameIndex.delete(rootDir); return []; });
+    this.nameIndex.set(rootDir, { at: 0, names: have ? have.names : [], building });
+    return building;
   }
 
   // ---- serving
@@ -72,6 +113,21 @@ class RemoteFiles {
         entries.push({ name: d.name, dir: isDir, size: st && !isDir ? st.size : null, mtime: st ? st.mtimeMs : null, hidden: d.name.startsWith('.') });
       }
       return { entries, truncated: dirents.length > MAX_ENTRIES };
+    });
+    // Search by name in what this device shares with the asker.
+    mesh.handle('files.search', 'files', async (a, from) => {
+      const words = String(a.q || '').toLowerCase().split(/\s+/).filter(Boolean).slice(0, 6);
+      if (!words.length || words.join('').length < 2) return { results: [] };
+      const results = [];
+      const roots = this.roots(from.id);
+      for (let i = 0; i < roots.length && results.length < SEARCH_LIMIT; i++) {
+        for (const e of await this.namesOf(roots[i].path)) {
+          if (!nameMatches(e.name, words)) continue;
+          results.push({ root: i, rootName: roots[i].name, rel: e.rel, name: e.name, dir: e.dir });
+          if (results.length >= SEARCH_LIMIT) break;
+        }
+      }
+      return { results };
     });
     mesh.handle('files.read', 'files', async (a, from) => {
       const root = this.roots(from.id)[Number(a.root)];
@@ -102,6 +158,28 @@ class RemoteFiles {
     const m = this.getMesh();
     if (!m) return [];
     return [...m.peers.values()].filter((p) => m.conns.has(p.id)).map((p) => ({ id: p.id, name: p.label || p.name }));
+  }
+
+  // Search every online paired device's shared folders by name.
+  async search(q) {
+    const m = this.getMesh();
+    if (!m) return [];
+    const ids = [...m.conns.keys()].filter((id) => { const p = m.peers.get(id); return p && p.perms && p.perms.files !== false; });
+    const all = await Promise.all(ids.map(async (id) => {
+      try {
+        const { results } = await m.request(id, 'files.search', { q: String(q || '').slice(0, 100) }, 6000);
+        const name = this.peerName(id);
+        return (results || []).slice(0, SEARCH_LIMIT).map((r) => {
+          const parts = String(r.rel || '').split('/');
+          return {
+            name: String(r.name || parts[parts.length - 1]), dir: !!r.dir, device: name,
+            path: remoteUrl(id, Number(r.root), r.rel),
+            where: `On ${name} · ${[r.rootName, ...parts.slice(0, -1)].filter(Boolean).join(' / ')}`
+          };
+        });
+      } catch { return []; }          // that device does not share files with us, or is slow
+    }));
+    return all.flat();
   }
 
   peerName(id) {
@@ -187,4 +265,4 @@ class RemoteFiles {
   }
 }
 
-module.exports = { RemoteFiles, parseRemote, isRemote, remoteUrl, confine };
+module.exports = { RemoteFiles, parseRemote, isRemote, remoteUrl, confine, nameMatches, walkNames };

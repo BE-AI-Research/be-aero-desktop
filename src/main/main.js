@@ -715,6 +715,7 @@ function updateSettings(patch) {
   if (patch.telemetry && ('interval' in patch.telemetry || 'metrics' in patch.telemetry)) startTelemetry();
   if (spotlight && patch.theme) spotlight.applyTheme && spotlight.applyTheme(s.theme);
   if (patch.spellcheck) applySpellcheck();
+  if (patch.devices) rebuildTrayMenu();          // "Send clipboard to" follows the Clipboard switch
   if (patch.appDock && typeof patch.appDock === 'object' && 'hotkey' in patch.appDock) {
     applyDockHotkey(s.appDock.hotkey);
   }
@@ -750,6 +751,7 @@ function buildMenuTemplate() {
     { label: 'Check for updates...', click: () => runUpdateCheck({ manual: true }) },
     { label: 'Create widget from web address...',
       click: () => { showWindow(); win.webContents.send('settings:open', 'webwidget'); } },
+    ...clipMenuItems(),
     { type: 'separator' },
     { label: 'Widgets', submenu: [
       widgetItem('Search bar', 'search'),
@@ -835,6 +837,35 @@ function buildMenuTemplate() {
     { label: 'Reload widgets', click: () => win && win.webContents.reload() },
     { label: 'Quit BE-Aero Desktop', click: () => { isQuitting = true; app.quit(); } }
   ];
+}
+
+// Clipboard to and from my devices: off until turned on in Settings > Devices.
+const clipboardOn = () => (((store.get('devices') || {}).sync || {}).clipboard === true);
+
+// "Send clipboard to" - one item per paired device online now.
+function clipMenuItems() {
+  const mesh = deviceService && deviceService.mesh;
+  if (!mesh || !clipboardOn()) return [];        // off in Settings > Devices
+  const online = [...mesh.conns.keys()].map((id) => ({ id, p: mesh.peers.get(id) })).filter((x) => x.p);
+  return [{ label: 'Send clipboard to', enabled: online.length > 0,
+    submenu: online.length ? online.map(({ id, p }) => ({ label: p.label || p.name || id.slice(0, 7), click: () => sendClipboardTo(id) }))
+      : [{ label: 'No paired devices online', enabled: false }] }];
+}
+
+async function sendClipboardTo(peerId) {
+  const { clipboard } = require('electron');
+  const mesh = deviceService && deviceService.mesh;
+  const p = mesh && mesh.peers.get(peerId);
+  const name = (p && (p.label || p.name)) || 'that device';
+  const tell = (title, body) => { if (notifyCenter) notifyCenter.add({ source: 'system', title, body, toast: true }); };
+  try {
+    const msg = require('./clip-send').readClip(clipboard);
+    if (!msg) { tell('Nothing to send', 'The clipboard has no text or image.'); return; }
+    await mesh.request(peerId, 'clipboard.put', msg, 30000);
+    tell(`Clipboard sent to ${name}`, msg.kind === 'image' ? `An image (${msg.width} × ${msg.height})` : String(msg.text).replace(/\s+/g, ' ').trim().slice(0, 80));
+  } catch (err) {
+    tell('Clipboard not sent', /turned off/.test(err.message) ? `${name} has clipboard sharing turned off (Settings > Devices on ${name}).` : /allowed/.test(err.message) ? `${name} has not allowed "Clipboard" for this device (Settings > Devices on ${name}).` : err.message);
+  }
 }
 
 function rebuildTrayMenu() {
@@ -1954,6 +1985,17 @@ app.whenReady().then(() => {
     });
     if ((store.get('notifications') || {}).captureSystem !== false) linuxNotify.start();
   }
+  // Windows: other apps' toasts, read from Windows' own notification list
+  // (read-only; Windows still shows its pop-ups). Same switch as Linux.
+  if (process.platform === 'win32') {
+    linuxNotify = new (require('./win-notifications').WinNotificationWatcher)({
+      ownIds: ['com.beaero.desktop'],
+      nameFor: (id) => { const e = spotlight && spotlight.index.entries.find((x) => x.aumid && x.aumid.toLowerCase() === String(id).toLowerCase()); return e ? e.name : null; },
+      onNotification: (n) => { if (notifyCenter) notifyCenter.add({ source: 'os', sourceName: n.app || 'An app', title: n.title || n.app || 'Notification', body: n.body, toast: false }); },
+      log: (m) => console.log('[notifications]', m)
+    });
+    if ((store.get('notifications') || {}).captureSystem !== false) linuxNotify.start();
+  }
   ipcMain.handle('notifications:list', () => notifyCenter.list());
   ipcMain.handle('notifications:read', (_e, id) => notifyCenter.markRead(id || null));
   ipcMain.handle('notifications:remove', (_e, id) => notifyCenter.remove(id));
@@ -2012,6 +2054,7 @@ app.whenReady().then(() => {
   const fileService = new (require('./files').FileService)({ getPath: (n) => app.getPath(n), store, shell, nativeImage, smb: smbService, remote: remoteFiles });
   const fileCall = (fn) => async (...args) => { try { return { ok: true, result: await fn(...args) }; } catch (err) { return { error: String(err && err.message || err) }; } };
   ipcMain.handle('files:places', fileCall(() => fileService.places()));
+  ipcMain.handle('files:search-remote', fileCall((_e, q) => (String(q || '').trim().length < 2 ? [] : remoteFiles.search(String(q).trim()))));
   ipcMain.handle('files:list', async (_e, dir) => {
     try { return { ok: true, result: await fileService.list(dir) }; } catch (err) {
       return { error: String(err && err.message || err), needsConnect: err && err.code === 'NEEDS_CONNECT' };
@@ -2180,6 +2223,21 @@ app.whenReady().then(() => {
     log: (m) => console.log('[state]', m)
   });
 
+  // Send to device, receiving side: onto this clipboard, and say so.
+  function attachClipboard(mesh) {
+    mesh.handle('clipboard.put', 'clipboard', async (a, from) => {
+      if (!clipboardOn()) throw new Error(`clipboard sharing is turned off on ${store.get('devices').name || require('os').hostname()}`);
+      const { clipboard } = require('electron');
+      const what = require('./clip-send').writeClip(clipboard, nativeImage, a);
+      if (notifyCenter) notifyCenter.add({ source: 'system', title: `Clipboard from ${from.name || 'another device'}`, body: what, toast: true });
+      return { ok: true };
+    });
+    // Devices coming and going: the "Send clipboard to" list follows.
+    let t = null;
+    mesh.on('change', () => { clearTimeout(t); t = setTimeout(rebuildTrayMenu, 500); });
+    rebuildTrayMenu();
+  }
+
   // A web widget sent to one device: a copy there, not kept in sync.
   const toast = (title, body) => { try { if (Notification.isSupported()) new Notification({ title, body, icon: loadIcon() }).show(); } catch { /* no toasts */ } };
   function attachWidgetSend(mesh) {
@@ -2246,7 +2304,7 @@ app.whenReady().then(() => {
   });
   deviceService = new (require('./mesh/service').DeviceService)({
     userDataDir: app.getPath('userData'), store, getWindow: () => win,
-    onStart: (mesh) => { poolSync.attach(mesh); poolSync.start(); remoteFiles.attach(mesh); stateSync.attach(mesh); stateSync.start(); attachWidgetSend(mesh); if (aiService) { aiService.bus.attach(mesh); aiService.shared.attach(mesh); } },
+    onStart: (mesh) => { poolSync.attach(mesh); poolSync.start(); remoteFiles.attach(mesh); stateSync.attach(mesh); stateSync.start(); attachWidgetSend(mesh); attachClipboard(mesh); if (aiService) { aiService.bus.attach(mesh); aiService.shared.attach(mesh); } },
     onStop: () => { poolSync.stop(); poolSync.mesh = null; stateSync.stop(); }
   });
   deviceService.registerIpc();

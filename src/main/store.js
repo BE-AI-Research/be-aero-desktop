@@ -168,7 +168,7 @@ const DEFAULTS = {
     // What syncs to paired devices that allow "Synced state" (state-sync.js).
     // Only the theme by default; the rest is turned on in Settings > Devices.
     // Web widgets are shared one at a time (right-click a widget).
-    sync: { theme: true, notes: false, pins: false, conversations: false, tasks: false },
+    sync: { theme: true, notes: false, pins: false, conversations: false, tasks: false, clipboard: false },
     syncDefaults: 2,
     newConversationsLocal: false,   // new AI conversations start Local instead of Synced
     enabled: false,          // device connections (the mesh): off until turned on in Settings > Devices

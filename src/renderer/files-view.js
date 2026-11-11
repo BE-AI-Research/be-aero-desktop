@@ -552,6 +552,15 @@
         }) : [];
         if (r && r.ok && r.result.indexing && !found.length) status('Still indexing this PC - try again in a moment.');
         renderList();
+        // Then my other devices' shared folders ("On <device>"), when they answer.
+        if (!aero.filesSearchRemote) return;
+        const rr = await aero.filesSearchRemote(q);
+        if (q !== filter || !rr || !rr.ok || !rr.result.length) return;
+        found = found.concat(rr.result.map((x) => ({
+          name: x.name, path: x.path, dir: x.dir, found: true, remote: true, where: x.where,
+          kind: x.dir ? 'folder' : /\.(png|jpe?g|gif|webp|bmp|ico)$/i.test(x.name) ? 'image' : 'file'
+        })));
+        renderList();
       }, 220);
     });
     filterEl.addEventListener('keydown', (e) => {

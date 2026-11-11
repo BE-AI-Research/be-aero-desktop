@@ -1135,7 +1135,10 @@
     const on = !!(st && st.supported);
     $('set-notify-capture-row').classList.toggle('hidden', !on);
     $('notify-capture-hint').classList.toggle('hidden', !on);
-    if (on) $('notify-capture-hint').textContent = st.running ? `Listening on the desktop bus (${st.tool}). Read-only: the desktop still shows its own pop-ups.` : ($('set-notify-capture').checked ? 'Not running: neither busctl nor dbus-monitor is available.' : 'Off.');
+    const win = aero.platform === 'win32';
+    if (on) $('notify-capture-hint').textContent = st.running
+      ? (win ? 'Reading the Windows notification list. Read-only: Windows still shows its own pop-ups.' : `Listening on the desktop bus (${st.tool}). Read-only: the desktop still shows its own pop-ups.`)
+      : (!$('set-notify-capture').checked ? 'Off.' : win ? `Not running: ${st.error || 'the Windows notification list could not be read'}.` : 'Not running: neither busctl nor dbus-monitor is available.');
   }
   $('set-notify-capture').addEventListener('change', async (e) => {
     await aero.setSettings({ notifications: { captureSystem: e.target.checked } });
