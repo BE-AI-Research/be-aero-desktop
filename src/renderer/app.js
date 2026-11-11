@@ -1571,7 +1571,7 @@
       nm.textContent = w.name || w.url;
       const ds = document.createElement('div');
       ds.className = 'ds';
-      ds.textContent = w.url;
+      ds.textContent = w.shared ? `${w.url}  ·  shared with your devices` : w.url;
       meta.append(nm, ds);
       const del = document.createElement('button');
       del.className = 'btn btn-danger';

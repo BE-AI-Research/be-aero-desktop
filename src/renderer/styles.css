@@ -76,7 +76,8 @@ body.gesture, body.gesture * { cursor: grabbing !important; user-select: none !i
 body:not(.free) .resize-grip { cursor: ns-resize; }
 .widget:hover > .resize-grip, .toolbar:hover > .resize-grip, .resizing > .resize-grip { opacity: 1; }
 /* Locked layout: no grips, no grab cursor - widgets are furniture. */
-body.locked .resize-grip { display: none !important; }
+body.locked .resize-grip, .widget-locked > .resize-grip { display: none !important; }
+body.free .sidebar > .widget.widget-locked { cursor: default; }
 body.locked.free .sidebar > .widget, body.locked .drag-handle { cursor: default; }
 body:not(.free) .toolbar > .resize-grip { display: none; }
 .toolbar { position: relative; }

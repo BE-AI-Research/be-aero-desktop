@@ -119,7 +119,7 @@
       const d = (await aero.getSettings()).devices || {};
       const on = d.sync || {};
       document.querySelectorAll('[data-sync]').forEach((c) => {
-        c.checked = on[c.dataset.sync] !== false;
+        c.checked = c.dataset.sync === 'theme' ? on.theme !== false : on[c.dataset.sync] === true;
         c.addEventListener('change', () => aero.setSettings({ devices: { sync: { [c.dataset.sync]: c.checked } } }));
       });
       $('set-dev-newlocal').checked = d.newConversationsLocal === true;

@@ -1086,6 +1086,12 @@ class AiService {
       const { Menu } = require('electron');
       let chosen = null;
       const bus = /^AI bus · /.test(c.title);
+      const dev = this.d.store.get('devices') || {};
+      if (!dev.enabled || !(dev.sync || {}).conversations) {
+        Menu.buildFromTemplate([{ label: 'Conversation sync is off (Settings > Devices)', enabled: false }])
+          .popup({ window: this.d.getWindow(), callback: () => setImmediate(() => resolve(null)) });
+        return;
+      }
       Menu.buildFromTemplate([
         { label: c.local || bus ? 'Local - on this device only' : 'Synced to your devices', enabled: false },
         { type: 'separator' },

@@ -31,6 +31,9 @@
   const items = () => [...document.querySelectorAll('#sidebar > [data-widget], #sidebar > [data-key]')];
   const isFree = () => settings && settings.dock === 'free';
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+  // Locked: everything (Settings), or this one widget in free-form (right-click).
+  const lockedOne = (k) => isFree() && !!(layoutOf('free')[k] || {}).locked;
+  const isLocked = (k) => !!(settings && settings.locked) || lockedOne(k);
 
   function layoutOf(mode) {
     const base = (settings.layout && settings.layout[mode]) || {};
@@ -154,6 +157,7 @@
     for (const el of items()) {
       const k = keyOf(el);
       const [minW, minH] = MIN[k] || [160, 80];
+      el.classList.toggle('widget-locked', free && !!(saved[k] || {}).locked);
       if (free) {
         const g = { ...(defaults[k] || { x: vw - COL_W - GAP, y: 16, w: COL_W, h: DEFAULT_H[k] || 200 }), ...(saved[k] || {}) };
         const w = clamp(g.w || COL_W, minW, vw);
@@ -232,8 +236,8 @@
 
   function startMove(e, el) {
     bringToFront(el);
-    if (settings && settings.locked) return;
     const k = keyOf(el);
+    if (isLocked(k)) return;
     const x0 = el.offsetLeft;
     const y0 = el.offsetTop;
     el.classList.add('moving');
@@ -255,8 +259,8 @@
   function startResize(e, el) {
     e.stopPropagation();
     e.preventDefault();
-    if (settings && settings.locked) return;
     const k = keyOf(el);
+    if (isLocked(k)) return;
     const [minW, minH] = MIN[k] || [160, 80];
     const w0 = el.offsetWidth;
     const h0 = el.offsetHeight;
@@ -288,6 +292,7 @@
       grip.addEventListener('dblclick', (e) => {
         e.stopPropagation();
         const k = keyOf(el);
+        if (isLocked(k)) return;
         const mode = isFree() ? 'free' : 'docked';
         const geo = isFree() ? { w: COL_W, h: DEFAULT_H[k] } : { h: null };
         save(mode, k, geo);
@@ -296,6 +301,17 @@
       });
       el.appendChild(grip);
 
+      // Right-click: lock in place, share (web widgets). Widgets with their
+      // own right-click (file lists, task tiles) and text fields keep theirs.
+      el.addEventListener('contextmenu', async (e) => {
+        if (e.defaultPrevented || !aero.widgetMenu) return;
+        if (e.target.closest('input, textarea, select, [contenteditable], webview')) return;
+        if (String(window.getSelection() || '').trim()) return;
+        e.preventDefault();
+        const k = keyOf(el);
+        const r = await aero.widgetMenu({ key: k, free: isFree(), locked: lockedOne(k), allLocked: !!settings.locked });
+        if (r === 'lock' || r === 'unlock') { save('free', k, { locked: r === 'lock' }); flushSave(); apply(); }
+      });
       el.addEventListener('pointerdown', (e) => {
         if (!isFree() || e.button !== 0) return;
         if (e.target.closest(NO_DRAG) && !e.target.closest('.drag-handle')) return;

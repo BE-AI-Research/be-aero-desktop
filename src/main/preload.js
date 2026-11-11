@@ -72,6 +72,7 @@ contextBridge.exposeInMainWorld('aero', {
   onAiTasks: (cb) => subscribe('ai:tasks', cb),
   aiStop: (id) => ipcRenderer.invoke('ai:stop', id),
   aiConvLocal: (id, local) => ipcRenderer.invoke('ai:conv-local', id, local),
+  widgetMenu: (info) => ipcRenderer.invoke('widget:menu', info),
   aiConvMenu: (id) => ipcRenderer.invoke('ai:conv-menu', id),
   onAiListChanged: (cb) => subscribe('ai:list-changed', cb),
   aiEvictBlocking: (id) => ipcRenderer.invoke('ai:evict-blocking', id),

@@ -15,6 +15,10 @@
   let pending = [];         // attachments chosen for the next message
   let pinned = false;
   let taskList = [];
+  let syncFlags = {};          // which AI items sync to my devices (Settings > Devices)
+  async function loadSyncFlags() {
+    try { const d = (await aero.getSettings()).devices || {}; const s = d.sync || {}; syncFlags = { conversations: !!d.enabled && s.conversations === true, tasks: !!d.enabled && s.tasks === true }; } catch { syncFlags = {}; }
+  }
   let editingTask = null;
 
   const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -676,14 +680,16 @@
 
   async function refreshList() {
     const list = await aero.aiConversations();
+    await loadSyncFlags();
     listEl.innerHTML = '';
     const opt0 = el('option', '', listEl, 'Open a conversation…');
     opt0.value = '';
     // Two sections: Synced (on all your devices) and Local (this device only).
     const synced = list.filter((c) => !c.local && !/^AI bus · /.test(c.title));
     const local = list.filter((c) => c.local || /^AI bus · /.test(c.title));
-    for (const [label, items] of [['Synced to your devices', synced], ['Local - this device only', local]]) {
+    for (const [label, items] of syncFlags.conversations ? [['Synced to your devices', synced], ['Local - this device only', local]] : [['', list]]) {
       if (!items.length) continue;
+      if (!label) { for (const c of items) { const o = el('option', '', listEl, c.title); o.value = c.id; } continue; }
       const g = document.createElement('optgroup');
       g.label = label;
       for (const c of items) { const o = el('option', '', g, c.title); o.value = c.id; }
@@ -901,7 +907,7 @@
       <div class="row">
         <select name="model" title="Model this task runs on" data-current="${esc(t.model || '')}"><option value="">Model: default for tasks</option>${t.model ? `<option value="${esc(t.model)}" selected>Model: ${esc(t.model)}</option>` : ''}</select>
         <label class="check" title="Say the result on your speakers when the task finishes"><input type="checkbox" name="readAloud"${t.readAloud ? ' checked' : ''}> Read the result aloud</label>
-        <label class="check" title="Otherwise it shows on all your paired devices (it always runs on this one)"><input type="checkbox" name="local"${t.local ? ' checked' : ''}> This device only</label>
+        ${syncFlags.tasks ? `<label class="check" title="Otherwise it shows on all your paired devices (it always runs on this one)"><input type="checkbox" name="local"${t.local ? ' checked' : ''}> This device only</label>` : ''}
       </div>
       <div class="row">
         <select name="conversationMode" title="Where the results go">
@@ -921,7 +927,7 @@
 
   function readForm(form, base) {
     const f = new FormData(form);
-    const out = { ...(base || {}), name: String(f.get('name')).trim(), prompt: String(f.get('prompt')).trim(), when: String(f.get('when')).trim(), conversationMode: f.get('conversationMode'), permission: f.get('permission'), model: String(f.get('model') || ''), readAloud: f.get('readAloud') === 'on', local: f.get('local') === 'on' };
+    const out = { ...(base || {}), name: String(f.get('name')).trim(), prompt: String(f.get('prompt')).trim(), when: String(f.get('when')).trim(), conversationMode: f.get('conversationMode'), permission: f.get('permission'), model: String(f.get('model') || ''), readAloud: f.get('readAloud') === 'on', local: f.has('local') ? f.get('local') === 'on' : !!(base && base.local) };
     delete out.schedule;
     for (const k of ['summary', 'nextRun', 'running', 'queued', 'enabled', 'lastStatus', 'whenError']) delete out[k];
     return out;
@@ -990,7 +996,7 @@
     const sections = [['Synced to your devices', taskList.filter((t) => !t.local)], ['Local - this device only', taskList.filter((t) => t.local)]];
     const ordered = [];
     for (const [label, items] of sections) {
-      if (!items.length || !taskList.some((t) => t.local)) { ordered.push(...items); continue; }
+      if (!items.length || !syncFlags.tasks || !taskList.some((t) => t.local)) { ordered.push(...items); continue; }
       ordered.push({ header: label }, ...items);
     }
     for (const t of ordered) {
@@ -1057,6 +1063,7 @@
     root.querySelector('.ai-tasks-btn').addEventListener('click', async () => {
       if (!tabs.some((t) => t.key === TASKS_KEY)) tabs.push({ key: TASKS_KEY, convId: null, title: 'Tasks', unread: false });
       taskList = await aero.aiTasks();
+      await loadSyncFlags();
       activateTab(TASKS_KEY);
     });
     pinBtn.addEventListener('click', async () => {

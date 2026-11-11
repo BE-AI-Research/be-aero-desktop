@@ -2073,8 +2073,11 @@ app.whenReady().then(() => {
   // State sync (state-sync.js): notes, theme, pins, synced conversations,
   // tasks and web widgets, the same on every paired device allowing
   // "Synced state". Each category can be turned off in Settings > Devices.
-  const syncOn = () => ({ notes: true, theme: true, pins: true, conversations: true, tasks: true, webWidgets: true, ...((store.get('devices') || {}).sync || {}) });
-  const categoryOf = (key) => (key === 'scratchpad' ? 'notes' : key === 'theme' ? 'theme' : key.startsWith('pins:') ? 'pins' : key === 'webWidgets' ? 'webWidgets' : key.startsWith('task:') ? 'tasks' : key.startsWith('conv:') ? 'conversations' : null);
+  const syncOn = () => ({ theme: true, notes: false, pins: false, conversations: false, tasks: false, ...((store.get('devices') || {}).sync || {}) });
+  const categoryOf = (key) => (key === 'scratchpad' ? 'notes' : key === 'theme' ? 'theme' : key.startsWith('pins:') ? 'pins' : key.startsWith('task:') ? 'tasks' : key.startsWith('conv:') ? 'conversations' : null);
+  // A shared web widget syncs what it IS (name and address), never how it
+  // sits on this screen (minimized, size, zoom, position).
+  const webShared = (w) => ({ id: w.id, name: w.name || '', url: w.url });
   const stateSync = new (require('./state-sync').StateSync)({
     indexFile: path.join(app.getPath('userData'), 'mesh', 'state-index.json'),
     collect: () => {
@@ -2086,12 +2089,17 @@ app.whenReady().then(() => {
       if (on.notes) m.set('scratchpad', { text: store.get('scratchpad') || '' });
       if (on.theme) m.set('theme', store.get('theme') || {});
       if (on.pins) m.set(`pins:${process.platform}`, ((store.get('appDock') || {}).pinned) || []);
-      if (on.webWidgets) m.set('webWidgets', store.get('webWidgets') || []);
+      for (const w of store.get('webWidgets') || []) if (w.shared) m.set(`web:${w.id}`, webShared(w));
       if (aiService && on.tasks) for (const t of aiService.syncableTasks()) m.set(`task:${t.id}`, t);
       if (aiService && on.conversations) for (const c of aiService.syncableConversations()) m.set(`conv:${c.id}`, c);
       return m;
     },
     tracked: (key) => {
+      if (key.startsWith('web:')) {
+        // Shared one at a time: a widget here that is not shared stays out.
+        const w = (store.get('webWidgets') || []).find((x) => x.id === key.slice(4));
+        return !w || !!w.shared;
+      }
       const cat = categoryOf(key);
       if (!cat || !syncOn()[cat]) return false;
       if (key.startsWith('pins:') && key !== `pins:${process.platform}`) return false;       // another OS's pins
@@ -2103,16 +2111,71 @@ app.whenReady().then(() => {
       if (key === 'scratchpad') updateSettings({ scratchpad: String((value && value.text) || '') });
       else if (key === 'theme') updateSettings({ theme: value || {} });
       else if (key === `pins:${process.platform}`) updateSettings({ appDock: { pinned: Array.isArray(value) ? value : [] } });
-      else if (key === 'webWidgets') updateSettings({ webWidgets: Array.isArray(value) ? value : [] });
+      else if (key.startsWith('web:')) {
+        if (!value || !/^https?:\/\//i.test(String(value.url || ''))) throw new Error('not a web widget');
+        const list = (store.get('webWidgets') || []).slice();
+        const i = list.findIndex((x) => x.id === value.id);
+        const v = { name: String(value.name || '').slice(0, 40), url: String(value.url), shared: true };
+        if (i >= 0) list[i] = { ...list[i], ...v }; else list.push({ id: String(value.id).slice(0, 40), height: 300, ...v });
+        updateSettings({ webWidgets: list });
+      }
       else if (key.startsWith('task:') && aiService) aiService.applySyncedTask(value);
       else if (key.startsWith('conv:') && aiService) aiService.applySyncedConversation(value, from);
     },
     remove: (key) => {
-      if (key.startsWith('task:') && aiService) aiService.removeSyncedTask(key.slice(5));
+      if (key.startsWith('web:')) updateSettings({ webWidgets: (store.get('webWidgets') || []).filter((x) => x.id !== key.slice(4)) });
+      else if (key.startsWith('task:') && aiService) aiService.removeSyncedTask(key.slice(5));
       else if (key.startsWith('conv:') && aiService) aiService.removeSyncedConversation(key.slice(5));
     },
     log: (m) => console.log('[state]', m)
   });
+
+  // A web widget sent to one device: a copy there, not kept in sync.
+  const toast = (title, body) => { try { if (Notification.isSupported()) new Notification({ title, body, icon: loadIcon() }).show(); } catch { /* no toasts */ } };
+  function attachWidgetSend(mesh) {
+    mesh.handle('widget.receive', 'state', async (a, from) => {
+      const w = a && a.widget;
+      if (!w || !/^https?:\/\//i.test(String(w.url || ''))) throw new Error('not a web widget');
+      const list = (store.get('webWidgets') || []).slice();
+      if (!list.some((x) => x.url === w.url)) {
+        list.push({ id: `w${Date.now().toString(36)}`, name: String(w.name || '').slice(0, 40), url: String(w.url), height: 300 });
+        updateSettings({ webWidgets: list });
+      }
+      toast('Web widget received', `${from.name || 'Another device'} sent "${w.name || w.url}".`);
+      return { ok: true };
+    });
+  }
+
+  // Right-click a widget: lock it in place (free-form), and for a web
+  // widget, share it with all my devices or send a copy to one.
+  ipcMain.handle('widget:menu', (_e, info) => new Promise((resolve) => {
+    info = info || {};
+    const key = String(info.key || '');
+    let chosen = null;
+    const tpl = [];
+    if (info.free) tpl.push({ label: info.allLocked ? 'Lock in place (all widgets are locked)' : 'Lock in place', type: 'checkbox', checked: !!info.locked || !!info.allLocked, enabled: !info.allLocked, click: () => { chosen = info.locked ? 'unlock' : 'lock'; } });
+    else tpl.push({ label: 'Lock in place (in the free-form layout)', enabled: false });
+    const m = /^web:(.+)$/.exec(key);
+    const w = m && (store.get('webWidgets') || []).find((x) => x.id === m[1]);
+    if (w) {
+      const mesh = deviceService && deviceService.mesh;
+      const online = mesh ? [...mesh.conns.keys()].map((id) => ({ id, p: mesh.peers.get(id) })).filter((x) => x.p) : [];
+      const setShared = (on) => {
+        updateSettings({ webWidgets: (store.get('webWidgets') || []).map((x) => (x.id === w.id ? { ...x, shared: on } : x)) });
+        stateSync.touch();
+      };
+      tpl.push({ type: 'separator' },
+        { label: 'Share with all my devices', type: 'checkbox', checked: !!w.shared, enabled: !!mesh, click: () => setShared(!w.shared) },
+        { label: 'Send to', enabled: online.length > 0, submenu: online.length ? online.map(({ id, p }) => ({
+          label: p.label || p.name || id.slice(0, 7),
+          click: () => mesh.request(id, 'widget.receive', { widget: webShared(w) }, 10000)
+            .then(() => toast('Web widget sent', `"${w.name || w.url}" is on ${p.label || p.name} now.`))
+            .catch((err) => toast('Web widget not sent', /allowed/.test(err.message) ? `${p.label || p.name} has not allowed "Synced state" for this device.` : err.message))
+        })) : [{ label: 'No paired devices online', enabled: false }] });
+      if (!mesh) tpl.push({ label: 'Turn on device connections in Settings > Devices to share', enabled: false });
+    }
+    Menu.buildFromTemplate(tpl).popup({ window: win, callback: () => setImmediate(() => resolve(chosen)) });
+  }));
 
   // File Pool sync rides on the mesh: it runs while device connections are on.
   const poolSync = new (require('./pool-sync').PoolSync)({
@@ -2133,7 +2196,7 @@ app.whenReady().then(() => {
   });
   deviceService = new (require('./mesh/service').DeviceService)({
     userDataDir: app.getPath('userData'), store, getWindow: () => win,
-    onStart: (mesh) => { poolSync.attach(mesh); poolSync.start(); remoteFiles.attach(mesh); stateSync.attach(mesh); stateSync.start(); if (aiService) { aiService.bus.attach(mesh); aiService.shared.attach(mesh); } },
+    onStart: (mesh) => { poolSync.attach(mesh); poolSync.start(); remoteFiles.attach(mesh); stateSync.attach(mesh); stateSync.start(); attachWidgetSend(mesh); if (aiService) { aiService.bus.attach(mesh); aiService.shared.attach(mesh); } },
     onStop: () => { poolSync.stop(); poolSync.mesh = null; stateSync.stop(); }
   });
   deviceService.registerIpc();
