@@ -279,10 +279,66 @@
       resetTimer = setTimeout(() => { searchInput.value = ''; searchInput.blur(); }, 900);
     });
   }
-  searchInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') openSearch(); });
-  document.querySelector('.search-widget').addEventListener('click', (e) => {
-    if (e.target !== searchInput) openSearch();
+  searchInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') openSearch();
+    if (e.key === 'Escape') { closeRecent(); searchInput.blur(); }
   });
+  document.querySelector('.search-widget').addEventListener('click', (e) => {
+    if (e.target === searchInput) { if (!searchInput.value) openRecent(); return; }
+    openSearch();
+  });
+
+  // Click into the empty search bar: recent files (newest first, with when)
+  // and recent apps below. Typing goes to Spotlight as before.
+  let recentEl = null;
+  function when(ms) {
+    if (!ms) return '';
+    const d = new Date(ms);
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const t = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    if (ms >= today.getTime()) return `Today ${t}`;
+    if (ms >= today.getTime() - 86400000) return `Yesterday ${t}`;
+    if (Date.now() - ms < 6 * 86400000) return `${d.toLocaleDateString([], { weekday: 'long' })} ${t}`;
+    return `${d.toLocaleDateString([], { month: 'short', day: 'numeric', year: d.getFullYear() === today.getFullYear() ? undefined : 'numeric' })} ${t}`;
+  }
+  function closeRecent() { if (recentEl) { recentEl.remove(); recentEl = null; } }
+  async function openRecent() {
+    if (recentEl) return;
+    const box = document.querySelector('.search-widget').getBoundingClientRect();
+    recentEl = document.createElement('div');
+    recentEl.className = 'recent-panel widget-hit';
+    recentEl.style.left = `${Math.max(8, Math.min(box.left, window.innerWidth - 368))}px`;
+    recentEl.style.width = `${Math.max(320, Math.min(520, box.width))}px`;
+    recentEl.style.top = `${box.bottom + 6}px`;
+    recentEl.innerHTML = '<div class="recent-head">RECENT FILES</div><div class="recent-list recent-files"><div class="recent-empty">Loading…</div></div><div class="recent-head">RECENT APPS</div><div class="recent-list recent-apps"></div>';
+    document.body.appendChild(recentEl);
+    const panel = recentEl;
+    const r = await aero.searchRecent();
+    if (panel !== recentEl) return;
+    const fill = (sel, items, kind, empty) => {
+      const list = panel.querySelector(sel);
+      list.innerHTML = '';
+      if (!items.length) { list.innerHTML = `<div class="recent-empty">${empty}</div>`; return; }
+      for (const it of items) {
+        const row = document.createElement('button');
+        row.className = 'recent-row';
+        row.title = it.path;
+        row.innerHTML = `<span class="ri"></span><span class="rn"></span><span class="rt"></span>`;
+        row.querySelector('.rn').textContent = it.name;
+        row.querySelector('.rt').textContent = when(it.time);
+        row.addEventListener('mousedown', (e) => e.preventDefault());       // keep focus in the search bar
+        row.addEventListener('click', () => { closeRecent(); aero.searchOpenRecent(it.path, kind); });
+        row.addEventListener('contextmenu', (e) => { e.preventDefault(); if (kind === 'file') { closeRecent(); aero.filesReveal(it.path); } });
+        list.appendChild(row);
+        aero.searchRecentIcon(it.path, kind).then((url) => { if (url) row.querySelector('.ri').innerHTML = `<img src="${url}" alt="">`; });
+      }
+    };
+    fill('.recent-files', (r && r.files) || [], 'file', 'No recent files.');
+    fill('.recent-apps', (r && r.apps) || [], 'app', 'Apps you open will appear here.');
+  }
+  searchInput.addEventListener('input', () => closeRecent());
+  searchInput.addEventListener('blur', () => setTimeout(closeRecent, 150));
+  document.addEventListener('mousedown', (e) => { if (recentEl && !recentEl.contains(e.target) && e.target !== searchInput) closeRecent(); });
   refreshHotkeyLabel();
   // Spotlight registers its hotkey shortly after startup.
   setTimeout(refreshHotkeyLabel, 1500);

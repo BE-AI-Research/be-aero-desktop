@@ -1401,6 +1401,7 @@ ipcMain.handle('tasks:list', async () => {
 
 ipcMain.handle('dock:launch', (_e, exe) => {
   if (!dockKnowsExe(exe)) return false;
+  try { require('./recent').recordLaunch(store, String(exe || '')); } catch { /* not important */ }
   if (linuxTasks) return linuxTasks.launch(exe);
   try { return spawnDetached(exe); } catch { return false; }
 });
@@ -1950,6 +1951,21 @@ app.whenReady().then(() => {
   ipcMain.handle('files:preview', fileCall((_e, p) => fileService.preview(p)));
   ipcMain.handle('files:icon', async (_e, p, size) => fileService.icon(p, size));
   ipcMain.handle('files:pool', fileCall(() => fileService.ensurePool()));
+  // Search bar drop-down: recent files and recent apps (recent.js).
+  const recentService = new (require('./recent').RecentService)({ store, shell, indexEntries: () => (spotlight ? spotlight.index.entries : []) });
+  ipcMain.handle('search:recent', async () => { try { return await recentService.recent(); } catch { return { files: [], apps: [] }; } });
+  ipcMain.handle('search:recent-icon', async (_e, p, kind) => {
+    try {
+      if (kind === 'app' && spotlight) { const r = await spotlight.icon(p); if (r) return r; }
+      return await fileService.icon(p, 'normal');
+    } catch { return null; }
+  });
+  ipcMain.handle('search:open-recent', async (_e, p, kind) => {
+    if (kind === 'app' && spotlight) { await spotlight.open({ path: p, kind: 'app' }); return true; }
+    const err = await shell.openPath(String(p || ''));
+    return !err;
+  });
+
   // Network drives (SMB): connect / disconnect through the OS (smb.js).
   ipcMain.handle('files:net-connect', fileCall((_e, opts) => smbService.connect(opts || {})));
   ipcMain.handle('files:net-disconnect', fileCall((_e, target) => smbService.disconnect(target)));

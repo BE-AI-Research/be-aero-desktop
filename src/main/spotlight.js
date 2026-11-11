@@ -246,6 +246,8 @@ class Spotlight {
   async open(item) {
     if (!item || !item.path) return;
     const p = item.path;
+    // Apps opened here show under "Recent apps" in the search bar.
+    if (item.kind === 'app' || /\.(lnk|exe|desktop)$/i.test(p) || /^shell:AppsFolder/i.test(p)) require('./recent').recordLaunch(this.store, p);
     // Remember launches so frequently used items rank higher.
     const s = this.store.get('search');
     const counts = { ...(s.launchCounts || {}) };
