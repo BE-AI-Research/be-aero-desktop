@@ -141,6 +141,16 @@ function containerId(cgroupText) {
 
 // Match running processes to desktop entries. Pure, testable.
 // procs: [{pid, comm, argv0, flatpak, snap}], entries: [{name, file, exec, flatpakId, snapName}]
+// Folders too general to identify an app by: a program in /usr/bin is not
+// "the same app" as every other program there.
+const SHARED_DIRS = /^\/(usr\/(local\/)?(s?bin|lib(exec|64)?(\/[^/]+)?|share)|s?bin|lib(64)?|opt)$/;
+
+// Running processes -> one dock entry per app. A process belongs to an app
+// when it runs from a Flatpak / Snap container of that app, has the app's
+// command name, or runs from the app's own install folder - the last one
+// catches wrapper launchers (google-chrome-stable -> /opt/google/chrome/
+// google-chrome, a script, -> /opt/google/chrome/chrome). An app's many
+// processes (browsers run dozens) are one tile: its oldest process.
 function matchProcesses(procs, entries) {
   const out = [];
   const taken = new Set();
@@ -151,19 +161,46 @@ function matchProcesses(procs, entries) {
       let hit = false;
       if (e.flatpakId && p.flatpak) hit = p.flatpak === e.flatpakId;
       else if (e.snapName && p.snap) hit = p.snap === e.snapName;
+      else if (e.webAppId) hit = !!p.args && p.args.includes(`--app-id=${e.webAppId}`);   // a browser web app: only its own processes
       else if (e.base && !p.flatpak && !p.snap) {
+        if (p.webApp) continue;                                       // belongs to a web app shortcut, not the browser
         const procBase = (p.argv0 || p.comm || '').toLowerCase();
         // /proc comm is truncated to 15 chars; compare accordingly.
         hit = procBase === e.base
-          || (e.base.length > 15 && p.comm && e.base.startsWith(p.comm.toLowerCase()));
+          || (e.base.length > 15 && p.comm && e.base.startsWith(p.comm.toLowerCase()))
+          || (!!e.binDir && !!p.dir && (p.dir === e.binDir || p.dir.startsWith(`${e.binDir}/`)));
       }
       if (hit) { pids.push(p.pid); taken.add(p.pid); }
     }
-    for (const pid of pids) {
-      out.push({ hwnd: pid, pid, title: e.name, exe: e.file });
+    if (pids.length) {
+      const pid = Math.min(...pids);
+      out.push({ hwnd: pid, pid, title: e.name, exe: e.file, processes: pids.length });
     }
   }
   return out;
+}
+
+// An Exec= command's real install folder (symlinks followed), or '' when it
+// is a shared system folder (see SHARED_DIRS).
+function execDir(exec, which = whichSync) {
+  const words = String(exec || '').replace(/%[a-zA-Z]/g, '').trim().split(/\s+/);
+  let i = 0;
+  if (words[i] === 'env') { i++; while (words[i] && /^[A-Za-z_][A-Za-z0-9_]*=/.test(words[i])) i++; }
+  const cmd = words[i];
+  if (!cmd || /^(flatpak|snap|sh|bash|python3?|java|gio)$/.test(path.basename(cmd))) return '';
+  let full = cmd.startsWith('/') ? cmd : which(cmd);
+  if (!full) return '';
+  try { full = fs.realpathSync(full); } catch { return ''; }
+  const dir = path.dirname(full);
+  return SHARED_DIRS.test(dir) ? '' : dir;
+}
+
+function whichSync(cmd) {
+  for (const d of String(process.env.PATH || '/usr/local/bin:/usr/bin:/bin').split(':')) {
+    const f = path.join(d, cmd);
+    try { fs.accessSync(f, fs.constants.X_OK); return f; } catch { /* next */ }
+  }
+  return '';
 }
 
 function parseDesktopFile(file, text) {
@@ -195,7 +232,10 @@ function parseDesktopFile(file, text) {
     flatpakId: isFlatpak ? id : null,
     snapName: isSnap ? id : null,
     wmClass: get('StartupWMClass'),
-    icon: get('Icon')
+    icon: get('Icon'),
+    binDir: isFlatpak || isSnap ? '' : execDir(exec),
+    // Chrome / Edge / Brave web-app shortcuts run the browser with --app-id.
+    webAppId: (/--app-id=([A-Za-z0-9_-]+)/.exec(exec) || [])[1] || ''
   };
 }
 
@@ -336,10 +376,13 @@ class LinuxTasks {
         if (uid >= 0 && fs.statSync(`/proc/${n}`).uid !== uid) continue;
         const comm = fs.readFileSync(`/proc/${n}/comm`, 'utf8').trim();
         const cmdline = fs.readFileSync(`/proc/${n}/cmdline`, 'utf8');
-        const argv0 = path.basename((cmdline.split('\0')[0] || ''));
+        const arg0 = cmdline.split('\0')[0] || '';
+        const argv0 = path.basename(arg0);
+        const dir = arg0.startsWith('/') ? path.dirname(arg0) : '';
         let cg = null;
         try { cg = containerId(fs.readFileSync(`/proc/${n}/cgroup`, 'utf8')); } catch { /* fine */ }
-        procs.push({ pid, comm, argv0, flatpak: cg && cg.flatpak, snap: cg && cg.snap });
+        const args = cmdline.split(' ').join(' ');
+        procs.push({ pid, comm, argv0, dir, args, webApp: /--app-id=/.test(args), flatpak: cg && cg.flatpak, snap: cg && cg.snap });
       } catch { /* process vanished */ }
     }
     return procs;
@@ -461,4 +504,4 @@ class LinuxTasks {
   }
 }
 
-module.exports = { LinuxTasks, execBase, containerId, matchProcesses, parseDesktopFile, parseWmctrl, parseGdbusB64, entryForWindow, EXT_UUID, buildIconIndex, sizeRank };
+module.exports = { LinuxTasks, execBase, execDir, containerId, matchProcesses, parseDesktopFile, parseWmctrl, parseGdbusB64, entryForWindow, EXT_UUID, buildIconIndex, sizeRank };

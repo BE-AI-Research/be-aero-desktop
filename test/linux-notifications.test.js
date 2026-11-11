@@ -102,3 +102,20 @@ test('linux dock: .desktop files with leading comments are read, and themed icon
   assert.ok(!idx.has('gvim-symbolic'), 'symbolic icons skipped');
   assert.ok(sizeRank('scalable') > sizeRank('256x256') && sizeRank('256x256') > sizeRank('512x512') && sizeRank('32x32@2') === 64);
 });
+
+test('linux dock: wrapper launchers match by install folder, web apps keep to their own, one tile per app', () => {
+  const { matchProcesses } = require('../src/main/tasks-linux');
+  const entries = [
+    { name: 'Gemini', file: '/home/u/.local/share/applications/chrome-abc-Default.desktop', base: 'google-chrome', binDir: '/opt/google/chrome', webAppId: 'abc' },
+    { name: 'Google Chrome', file: '/usr/share/applications/google-chrome.desktop', base: 'google-chrome-stable', binDir: '/opt/google/chrome', webAppId: '' },
+    { name: 'Files', file: '/usr/share/applications/org.gnome.Nautilus.desktop', base: 'nautilus', binDir: '', webAppId: '' }
+  ];
+  const procs = [
+    { pid: 900, comm: 'chrome', argv0: 'chrome', dir: '/opt/google/chrome', args: '/opt/google/chrome/chrome' },
+    { pid: 905, comm: 'chrome', argv0: 'chrome', dir: '/opt/google/chrome', args: '/opt/google/chrome/chrome --type=renderer' },
+    { pid: 950, comm: 'chrome', argv0: 'chrome', dir: '/opt/google/chrome', args: '/opt/google/chrome/chrome --app-id=abc', webApp: true },
+    { pid: 990, comm: 'nautilus', argv0: 'nautilus', dir: '/usr/bin', args: '/usr/bin/nautilus' }
+  ];
+  const out = matchProcesses(procs, entries).map((w) => `${w.title}:${w.pid}:${w.processes}`).sort();
+  assert.deepStrictEqual(out, ['Files:990:1', 'Gemini:950:1', 'Google Chrome:900:2']);
+});
