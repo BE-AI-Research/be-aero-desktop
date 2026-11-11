@@ -109,12 +109,18 @@ while ($true) {
     $me = [WinEnum]::GetCurrentThreadId()
     $att = $false
     if ($fgT -ne 0 -and $fgT -ne $me) { $att = [WinEnum]::AttachThreadInput($me, $fgT, $true) }
-    if ([WinEnum]::IsIconic($h)) { [WinEnum]::ShowWindow($h, 9) | Out-Null } else { [WinEnum]::ShowWindow($h, 5) | Out-Null }
+    $min = [WinEnum]::IsIconic($h)
+    if (-not $min) { [WinEnum]::ShowWindow($h, 5) | Out-Null }
     # HWND_TOPMOST (-1) then HWND_NOTOPMOST (-2): to the top of the z-order. SWP_NOMOVE|SWP_NOSIZE|SWP_SHOWWINDOW = 0x43
     [WinEnum]::SetWindowPos($h, [IntPtr](-1), 0, 0, 0, 0, 0x43) | Out-Null
     [WinEnum]::SetWindowPos($h, [IntPtr](-2), 0, 0, 0, 0, 0x43) | Out-Null
     [WinEnum]::BringWindowToTop($h) | Out-Null
     [WinEnum]::SetForegroundWindow($h) | Out-Null
+    # Minimized (a UAC prompt Windows held back sits minimized on the
+    # taskbar): restore it the way a taskbar click does - WM_SYSCOMMAND
+    # SC_RESTORE. Activating alone does not make consent.exe show the prompt;
+    # this does (verified: the secure desktop opens at once).
+    if ($min) { [WinEnum]::PostMessage($h, 0x0112, [IntPtr]0xF120, [IntPtr]::Zero) | Out-Null }
     if ($att) { [WinEnum]::AttachThreadInput($me, $fgT, $false) | Out-Null }
     [Console]::Out.WriteLine('ok')
   } elseif ($cmd -eq 'bin') {
