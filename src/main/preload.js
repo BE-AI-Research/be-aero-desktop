@@ -110,6 +110,8 @@ contextBridge.exposeInMainWorld('aero', {
   notifyOpen: (id) => ipcRenderer.invoke('notifications:open', id),
   notifyFromWeb: (payload) => ipcRenderer.send('notifications:from-web', payload),
   onNotificationsChanged: (cb) => subscribe('notifications:changed', cb),
+  notifyCapture: (on) => ipcRenderer.invoke('notifications:capture', !!on),
+  notifyCaptureStatus: () => ipcRenderer.invoke('notifications:capture-status'),
   uacState: () => ipcRenderer.invoke('uac:state'),
   uacMenu: () => ipcRenderer.invoke('uac:menu'),
   uacEnable: (on) => ipcRenderer.invoke('uac:enable', !!on),

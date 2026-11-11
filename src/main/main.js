@@ -44,6 +44,7 @@ let whisper = null;
 let piper = null;
 let aiService = null;
 let notifyCenter = null;
+let linuxNotify = null;
 let dockHotkey = null;       // the accelerator actually registered for the dock
 let dockSummoned = false;    // sidebar lifted above everything by the dock hotkey
 let lastUpdateStatus = { state: 'idle' };
@@ -1299,6 +1300,12 @@ function dockKnowsExe(exe) {
 }
 let lastDockExes = new Set();
 
+ipcMain.handle('notifications:capture', (_e, on) => {
+  if (!linuxNotify) return { supported: false };
+  if (on) linuxNotify.start(); else linuxNotify.stop();
+  return { supported: true, ...linuxNotify.status() };
+});
+ipcMain.handle('notifications:capture-status', () => (linuxNotify ? { supported: true, ...linuxNotify.status() } : { supported: false }));
 ipcMain.handle('uac:state', () => (uacMonitor && (store.get('appDock') || {}).uacShield !== false ? uacMonitor.state() : { supported: false }));
 ipcMain.handle('uac:enable', (_e, on) => {
   if (!uacMonitor) return { supported: false };
@@ -1819,6 +1826,15 @@ app.whenReady().then(() => {
       n.show();
     }
   });
+  // Linux: every app's desktop notifications, mirrored into the center
+  // (read-only bus monitor; the desktop still shows its own popups).
+  if (process.platform === 'linux') {
+    linuxNotify = new (require('./linux-notifications').LinuxNotificationWatcher)({
+      onNotification: (n) => { if (notifyCenter) notifyCenter.add({ source: 'os', sourceName: n.app || 'An app', title: n.title || n.app || 'Notification', body: n.body, toast: false }); },
+      log: (m) => console.log('[notifications]', m)
+    });
+    if ((store.get('notifications') || {}).captureSystem !== false) linuxNotify.start();
+  }
   ipcMain.handle('notifications:list', () => notifyCenter.list());
   ipcMain.handle('notifications:read', (_e, id) => notifyCenter.markRead(id || null));
   ipcMain.handle('notifications:remove', (_e, id) => notifyCenter.remove(id));

@@ -93,6 +93,9 @@ the final answer.
   lists the browsers installed (Chrome, Edge, Brave, Chromium, Firefox), so the assistant can
   use a different browser from your default. Firefox opens pages; clicking and typing use a
   Chromium browser, since Firefox can't be automated this way.
+- **Linux: notifications from every app.** The notification center now also collects other
+  apps' desktop notifications (mail, calendar, chat, Flatpak apps...), labelled with the app.
+  It only listens - GNOME still shows its own pop-ups. Settings > Notifications turns it off.
 - **The notification panel is readable on any background.** It had no background at all
   (a broken style), so it disappeared over matching wallpaper; it's now a frosted pane.
 - **Chat:** the edit / resend / delete buttons under messages are visible again.

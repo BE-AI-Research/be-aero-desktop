@@ -8,3 +8,7 @@ quick-resume-code
 # The rest of examples/ (sample plugin and client) is tracked.
 examples/be-code/
 examples/be-code-main.zip
+
+# Local machine credentials (never commit)
+.passfile
+*.pass

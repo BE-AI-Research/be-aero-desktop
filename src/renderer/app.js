@@ -387,6 +387,8 @@
     if (window.__applyVoiceSettings) window.__applyVoiceSettings(vc);
     if (window.AeroAi && AeroAi.setVoice) AeroAi.setVoice(vc);
     $('set-notify-toast').checked = (s.notifications || {}).toast !== false;
+    $('set-notify-capture').checked = (s.notifications || {}).captureSystem !== false;
+    if (aero.notifyCaptureStatus) aero.notifyCaptureStatus().then(showCapture).catch(() => {});
     refreshAiStatus();
     if (!recordingDockHotkey && s.appDock && s.appDock.hotkey) {
       aero.dockHotkey().then((hk) => { $('set-dock-hotkey').value = AeroHotkey.pretty(hk || s.appDock.hotkey); });
@@ -1062,6 +1064,16 @@
     aero.setSettings({ ai: { maxSteps: n } });
   });
   $('set-notify-toast').addEventListener('change', (e) => aero.setSettings({ notifications: { toast: e.target.checked } }));
+  function showCapture(st) {
+    const on = !!(st && st.supported);
+    $('set-notify-capture-row').classList.toggle('hidden', !on);
+    $('notify-capture-hint').classList.toggle('hidden', !on);
+    if (on) $('notify-capture-hint').textContent = st.running ? `Listening on the desktop bus (${st.tool}). Read-only: the desktop still shows its own pop-ups.` : ($('set-notify-capture').checked ? 'Not running: neither busctl nor dbus-monitor is available.' : 'Off.');
+  }
+  $('set-notify-capture').addEventListener('change', async (e) => {
+    await aero.setSettings({ notifications: { captureSystem: e.target.checked } });
+    showCapture(await aero.notifyCapture(e.target.checked));
+  });
 
   // Dock hotkey: same recorder behaviour as the search one.
   const dockHotkeyInput = $('set-dock-hotkey');

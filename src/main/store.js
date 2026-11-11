@@ -154,7 +154,8 @@ const DEFAULTS = {
     }
   },
   notifications: {
-    toast: true              // also show OS toasts for web-widget / AI notifications
+    toast: true,             // also show OS toasts for web-widget / AI notifications
+    captureSystem: true      // Linux: mirror every app's desktop notifications into the center
   }
 };
 

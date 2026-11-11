@@ -23,6 +23,7 @@
     if (item.icon) return `<img src="${esc(item.icon)}" alt="">`;
     if (item.source === 'ai') return '✨';
     if (item.source === 'web') return '🌐';
+    if (item.source === 'os') return '💬';
     return '🔔';
   }
 
@@ -43,7 +44,7 @@
       row.innerHTML = `<div class="n-ico">${sourceGlyph(it)}</div>
         <div class="n-body"><div class="n-title">${esc(it.title)}</div>
         ${it.body ? `<div class="n-text">${esc(it.body)}</div>` : ''}
-        <div class="n-meta">${esc(it.sourceName || (it.source === 'ai' ? 'AI assistant' : it.source === 'web' ? 'Web widget' : 'BE-Aero Desktop'))} · ${ago(it.ts)}</div></div>
+        <div class="n-meta">${esc(it.sourceName || (it.source === 'ai' ? 'AI assistant' : it.source === 'web' ? 'Web widget' : it.source === 'os' ? 'An app' : 'BE-Aero Desktop'))} · ${ago(it.ts)}</div></div>
         <button class="n-x" title="Dismiss">✕</button>`;
       row.addEventListener('click', (e) => {
         if (e.target.closest('.n-x')) { aero.notifyRemove(it.id); return; }

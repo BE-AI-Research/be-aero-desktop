@@ -20,7 +20,8 @@ class NotificationCenter {
     } catch { /* first run */ }
   }
 
-  // source: 'web' | 'ai' | 'system'; sourceId: web widget id when web.
+  // source: 'web' | 'ai' | 'system' | 'os' (another app's desktop
+  // notification, Linux); sourceId: web widget id when web.
   add({ source = 'system', sourceId = null, sourceName = '', title, body = '', url = null, icon = null, toast = true }) {
     const item = {
       id: crypto.randomBytes(6).toString('hex'), ts: Date.now(),
