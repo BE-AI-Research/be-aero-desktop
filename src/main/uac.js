@@ -133,7 +133,7 @@ class UacMonitor {
   // A prompt Windows is holding back: activating its window shows it.
   bringForward() {
     if (!this.waitingHwnd) return Promise.resolve(false);
-    return this.tw.action('activate', this.waitingHwnd);
+    return this.tw.action('raise', this.waitingHwnd);
   }
 
   // -> { ok, level } or { error, cancelled? }

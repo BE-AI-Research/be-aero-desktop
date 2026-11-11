@@ -32,7 +32,12 @@
     tileEl.className = 'dock-tile uac-tile';
     tileEl.type = 'button';
     tileEl.innerHTML = `<div class="dock-ico ticon">${SHIELD}</div>`;
-    tileEl.addEventListener('click', (e) => { e.stopPropagation(); aero.uacMenu(); });
+    // A prompt waiting off screen: one click brings it up. Otherwise the menu.
+    tileEl.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const r = aero.uacClick ? await aero.uacClick() : 'menu';
+      if (r !== 'shown') aero.uacMenu();
+    });
     tileEl.addEventListener('contextmenu', (e) => { e.preventDefault(); aero.uacMenu(); });
     apply();
     barEl.appendChild(tileEl);
@@ -44,7 +49,7 @@
     // Turned on or off in Settings: the dock is redrawn on its next refresh;
     // until then hide or keep the tile we have.
     if (tileEl && !state.supported) { tileEl.remove(); tileEl = null; }
-    if (!wasSupported && state.supported && window.AeroTasks && AeroTasks.refresh) AeroTasks.refresh();
+    if (!wasSupported && state.supported && window.AeroTasks && AeroTasks.refresh) AeroTasks.refresh(true);
     apply();
   }
 

@@ -57,6 +57,7 @@
   function renderTile(barEl) {
     // Same element shape as an app tile so it gets the dock's size, hover
     // and hit-area styling - a bare div had no layout and nothing to click.
+    if (tileEl && tileEl.isConnected) tileEl.remove();     // one bell: it moves with the power group
     tileEl = document.createElement('button');
     tileEl.className = `dock-tile notify-tile${state.unread ? ' has-unread' : ''}`;
     tileEl.type = 'button';

@@ -107,7 +107,8 @@
     if (wrap) return;
     wrap = el('div', 'dock-power');
     el('div', 'dock-sep power-sep', wrap);
-    // The operating system's own Settings, next to the power button.
+    // Notifications bell, then the operating system's own Settings, then power.
+    el('div', 'notify-slot', wrap);
     const gear = el('button', 'dock-tile os-settings-tile', wrap);
     gear.title = navigator.userAgent.includes('Windows') ? 'Windows Settings' : 'System Settings';
     el('span', 'dock-ico power-ico', gear).innerHTML = GEAR_SVG;
@@ -124,11 +125,23 @@
     const pm = (settings && settings.powerMenu) || {};
     cfg = { enabled: pm.enabled !== false, side: pm.side === 'left' ? 'left' : 'right' };
     if (!widget) return;
-    if (!cfg.enabled) { closePanel(); if (wrap) wrap.remove(); widget.classList.remove('has-power', 'power-left', 'power-right'); return; }
+    const bar0 = widget.querySelector('#task-list');
+    if (!cfg.enabled) {
+      closePanel();
+      if (wrap) wrap.remove();
+      widget.classList.remove('has-power', 'power-left', 'power-right');
+      if (window.AeroNotify && bar0) AeroNotify.renderTile(bar0);      // the bell goes back to the dock's end
+      return;
+    }
     build();
-    const bar = widget.querySelector('#task-list');
+    const bar = bar0;
     if (cfg.side === 'left') widget.insertBefore(wrap, bar); else widget.appendChild(wrap);
     wrap.classList.toggle('left', cfg.side === 'left');
+    // Keep the bell on the gear's left on either side (the left group is drawn reversed).
+    const slot = wrap.querySelector('.notify-slot');
+    const gearEl = wrap.querySelector('.os-settings-tile');
+    if (cfg.side === 'left') wrap.insertBefore(slot, gearEl.nextSibling); else wrap.insertBefore(slot, gearEl);
+    if (window.AeroNotify) AeroNotify.renderTile(slot);
     widget.classList.add('has-power');
     widget.classList.toggle('power-left', cfg.side === 'left');
     widget.classList.toggle('power-right', cfg.side !== 'left');

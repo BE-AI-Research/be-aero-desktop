@@ -52,6 +52,7 @@ let lastUpdateStatus = { state: 'idle' };
 let updateTimer = null;
 let taskWindows = null;
 let uacMonitor = null;
+let trash = null;
 const taskIconCache = new Map();
 let PLUGINS_DIR = null;
 
@@ -1374,6 +1375,39 @@ ipcMain.handle('notifications:capture', (_e, on) => {
   return { supported: true, ...linuxNotify.status() };
 });
 ipcMain.handle('notifications:capture-status', () => (linuxNotify ? { supported: true, ...linuxNotify.status() } : { supported: false }));
+ipcMain.handle('trash:state', () => (trash && (store.get('appDock') || {}).trash !== false ? trash.refresh() : { supported: false }));
+ipcMain.handle('trash:open', () => (trash ? trash.open() : false));
+ipcMain.handle('trash:put', async (_e, paths) => {
+  const list = [].concat(paths || []).map(String).filter((p) => p && path.isAbsolute(p));
+  let n = 0;
+  for (const p of list) { try { await shell.trashItem(p); n++; } catch { /* in use, or gone */ } }
+  if (trash) trash.refresh();
+  return n;
+});
+ipcMain.handle('trash:menu', () => new Promise((resolve) => {
+  if (!trash) { resolve(false); return; }
+  const st = trash.state();
+  const bin = process.platform === 'win32' ? 'Recycle Bin' : 'Trash';
+  const emptyIt = async () => {
+    const r = await dialog.showMessageBox(win, {
+      type: 'warning', buttons: [`Empty ${bin}`, 'Cancel'], defaultId: 1, cancelId: 1, noLink: true,
+      message: `Permanently delete ${st.count === 1 ? 'the item' : st.count ? `all ${st.count} items` : 'everything'} in the ${bin}?`,
+      detail: 'This cannot be undone.'
+    });
+    if (r.response === 0) await trash.empty();
+  };
+  Menu.buildFromTemplate([
+    { label: st.count === null ? bin : st.empty ? `${bin} is empty` : `${bin}: ${st.count} item${st.count === 1 ? '' : 's'}`, enabled: false },
+    { type: 'separator' },
+    { label: `Open ${bin}`, click: () => trash.open() },
+    { label: `Empty ${bin}…`, enabled: !st.empty, click: () => { emptyIt(); } }
+  ]).popup({ window: win, callback: () => resolve(true) });
+}));
+ipcMain.handle('trash:enable', (_e, on) => {
+  if (!trash) return { supported: false };
+  if (on) trash.start(); else trash.stop();
+  return on ? trash.refresh() : { supported: false };
+});
 ipcMain.handle('uac:state', () => (uacMonitor && (store.get('appDock') || {}).uacShield !== false ? uacMonitor.state() : { supported: false }));
 ipcMain.handle('uac:enable', (_e, on) => {
   if (!uacMonitor) return { supported: false };
@@ -1381,6 +1415,16 @@ ipcMain.handle('uac:enable', (_e, on) => {
   return on ? uacMonitor.state() : { supported: false };
 });
 // The shield's menu: status, bring a held-back prompt forward, the level.
+// Left-click the shield: a prompt is waiting off screen -> bring it up;
+// otherwise the menu. Polls first, so a prompt from a second ago counts.
+ipcMain.handle('uac:click', async () => {
+  if (!uacMonitor) return false;
+  uacMonitor.polling = false;
+  await uacMonitor.poll();
+  const st = uacMonitor.state();
+  if (st.waiting && await uacMonitor.bringForward()) return 'shown';
+  return 'menu';
+});
 ipcMain.handle('uac:menu', async () => {
   if (!uacMonitor) return false;
   await uacMonitor.refreshLevel();
@@ -1879,6 +1923,12 @@ app.whenReady().then(() => {
     });
     if ((store.get('appDock') || {}).uacShield !== false) uacMonitor.start();
   }
+  // Recycle Bin / Trash tile on the dock.
+  trash = new (require('./trash').Trash)({
+    tw: taskWindows,
+    onChange: (st) => { if (win && !win.isDestroyed()) win.webContents.send('trash:update', st); }
+  });
+  if ((store.get('appDock') || {}).trash !== false) trash.start();
   // Linux cannot list other apps' windows (Wayland policy), but /proc shows
   // which applications RUN - the dock mirrors that instead.
   if (process.platform === 'linux') linuxTasks = new (require('./tasks-linux').LinuxTasks)();

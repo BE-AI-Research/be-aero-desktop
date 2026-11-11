@@ -85,6 +85,7 @@
   if (window.AeroMedia) AeroMedia.init({ aero });
   if (window.AeroPower) AeroPower.init({ aero });
   if (window.AeroUac) AeroUac.init({ aero });
+  if (window.AeroTrash) AeroTrash.init({ aero });
   if (window.AeroDevices) AeroDevices.init({ aero });
   if (window.AeroFiles) AeroFiles.init({ aero });
   if (window.AeroNotify) AeroNotify.init({
@@ -405,6 +406,7 @@
     $('set-locked').checked = !!s.locked;
     setVal($('set-dock-align'), (s.dock && s.dock.align) || 'center');
     $('set-dock-uac').checked = !s.appDock || s.appDock.uacShield !== false;
+    $('set-dock-trash').checked = !s.appDock || s.appDock.trash !== false;
     $('set-uac-row').classList.toggle('hidden', !navigator.userAgent.includes('Windows'));
     $('set-startup').checked = s.launchAtStartup;
     const aiCfg = s.ai || {};
@@ -1249,6 +1251,10 @@
   $('set-dock-uac').addEventListener('change', async (e) => {
     await aero.setSettings({ appDock: { uacShield: e.target.checked } });
     if (window.AeroUac) AeroUac.setState(await aero.uacEnable(e.target.checked));
+  });
+  $('set-dock-trash').addEventListener('change', async (e) => {
+    await aero.setSettings({ appDock: { trash: e.target.checked } });
+    if (window.AeroTrash) AeroTrash.setState(await aero.trashEnable(e.target.checked));
   });
   $('btn-reset-layout').addEventListener('click', () => AeroLayout.reset());
   $('btn-settings-export').addEventListener('click', () => aero.exportSettings());

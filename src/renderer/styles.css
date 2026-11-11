@@ -736,7 +736,7 @@ input[type=color] {
   opacity: 0;
   transition: opacity 0.15s ease;
 }
-.web-widget:hover .webw-controls { opacity: 1; }
+.web-widget:hover .webw-controls, .visual-widget:hover .webw-controls, .webw-controls:focus-within { opacity: 1; }
 .webw-btn { width: 22px; height: 20px; font-size: 12px; line-height: 1; }
 .webw-zoom { width: auto; min-width: 34px; padding: 0 3px; font-size: 10px; font-variant-numeric: tabular-nums; }
 
@@ -1254,6 +1254,12 @@ webview.plugin-frame { background: #fff; }
 .tasks-widget.has-power { flex-direction: row; align-items: stretch; }
 .tasks-widget.has-power .dock-bar { flex: 1; min-width: 0; }
 .dock-power { display: flex; align-items: center; flex: none; }
+.notify-slot { display: flex; align-items: center; }
+.notify-slot:empty { display: none; }
+.trash-tile .ticon svg { width: 22px; height: 22px; display: block; }
+.trash-tile .ticon { opacity: .75; color: rgba(var(--text-rgb), .85); }
+.trash-tile:hover .ticon, .trash-tile.drop .ticon { opacity: 1; color: var(--accent); }
+.trash-tile.drop { transform: scale(1.12); }
 .dock-power.left { flex-direction: row-reverse; }
 .dock-power .power-sep { margin: 8px 6px; }
 .power-tile .power-ico svg, .os-settings-tile .power-ico svg { width: 22px; height: 22px; display: block; }

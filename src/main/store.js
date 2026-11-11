@@ -88,7 +88,8 @@ const DEFAULTS = {
     pinned: [],       // [{ exe, name }]
     align: 'center',  // 'left' | 'center' | 'right'
     hotkey: 'Control+Alt+D',  // summons the dock above everything; falls back if taken
-    uacShield: true           // Windows: UAC shield tile (prompt status + level menu)
+    uacShield: true,          // Windows: UAC shield tile (prompt status + level menu)
+    trash: true               // Recycle Bin / Trash tile
   },
   // Certificates the user explicitly accepted on a web widget's warning page:
   // "host:port" -> "sha256/..." fingerprint. Exact-match only.

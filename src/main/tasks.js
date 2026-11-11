@@ -15,7 +15,8 @@ const ACTIONS = Object.freeze({
   minimize: 'min',
   maximize: 'max',
   restore: 'restore',
-  close: 'close'
+  close: 'close',
+  raise: 'raise'
 });
 
 const WORKER_SCRIPT = `
@@ -44,6 +45,15 @@ public class WinEnum {
   [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, uint m, IntPtr w, IntPtr l);
   [DllImport("user32.dll")] public static extern bool MoveWindow(IntPtr h, int x, int y, int w, int cy, bool repaint);
   [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int w, int cy, uint flags);
+  [DllImport("user32.dll")] public static extern bool AttachThreadInput(uint a, uint b, bool attach);
+  [DllImport("user32.dll")] public static extern bool BringWindowToTop(IntPtr h);
+  [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int cmd);
+  [DllImport("kernel32.dll")] public static extern uint GetCurrentThreadId();
+}
+[StructLayout(LayoutKind.Sequential)]
+public struct SHQUERYRBINFO { public int cbSize; public long i64Size; public long i64NumItems; }
+public class WinBin {
+  [DllImport("shell32.dll", CharSet = CharSet.Unicode)] public static extern int SHQueryRecycleBin(string root, ref SHQUERYRBINFO info);
 }
 '@
 while ($true) {
@@ -88,6 +98,30 @@ while ($true) {
     if ([WinEnum]::IsIconic($h)) { [WinEnum]::ShowWindowAsync($h, 9) | Out-Null }
     [WinEnum]::SetForegroundWindow($h) | Out-Null
     [Console]::Out.WriteLine('ok')
+  } elseif ($cmd -eq 'raise' -and $parts.Length -gt 1) {
+    # Bring a window up even though this helper is not the foreground app:
+    # borrow the foreground window's input (the sidebar, just clicked) so
+    # Windows lets SetForegroundWindow through.
+    $h = [IntPtr][int64]$parts[1]
+    $fg = [WinEnum]::GetForegroundWindow()
+    $x = [uint32]0
+    $fgT = [WinEnum]::GetWindowThreadProcessId($fg, [ref]$x)
+    $me = [WinEnum]::GetCurrentThreadId()
+    $att = $false
+    if ($fgT -ne 0 -and $fgT -ne $me) { $att = [WinEnum]::AttachThreadInput($me, $fgT, $true) }
+    if ([WinEnum]::IsIconic($h)) { [WinEnum]::ShowWindow($h, 9) | Out-Null } else { [WinEnum]::ShowWindow($h, 5) | Out-Null }
+    # HWND_TOPMOST (-1) then HWND_NOTOPMOST (-2): to the top of the z-order. SWP_NOMOVE|SWP_NOSIZE|SWP_SHOWWINDOW = 0x43
+    [WinEnum]::SetWindowPos($h, [IntPtr](-1), 0, 0, 0, 0, 0x43) | Out-Null
+    [WinEnum]::SetWindowPos($h, [IntPtr](-2), 0, 0, 0, 0, 0x43) | Out-Null
+    [WinEnum]::BringWindowToTop($h) | Out-Null
+    [WinEnum]::SetForegroundWindow($h) | Out-Null
+    if ($att) { [WinEnum]::AttachThreadInput($me, $fgT, $false) | Out-Null }
+    [Console]::Out.WriteLine('ok')
+  } elseif ($cmd -eq 'bin') {
+    $info = New-Object SHQUERYRBINFO
+    $info.cbSize = [System.Runtime.InteropServices.Marshal]::SizeOf($info)
+    $hr = [WinBin]::SHQueryRecycleBin($null, [ref]$info)
+    [Console]::Out.WriteLine('{"hr":' + $hr + ',"items":' + $info.i64NumItems + ',"size":' + $info.i64Size + '}')
   } elseif ($cmd -eq 'min' -and $parts.Length -gt 1) {
     [WinEnum]::ShowWindowAsync([IntPtr][int64]$parts[1], 6) | Out-Null
     [Console]::Out.WriteLine('ok')

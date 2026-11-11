@@ -127,7 +127,8 @@
     window.addEventListener('pointercancel', onUp, true);
   }
 
-  async function refresh() {
+  async function refresh(force) {
+    if (force === true) lastKey = '';   // a tile appeared or went (UAC, bin): redraw even if the apps did not change
     if (!barEl || barEl.closest('.widget').classList.contains('hidden')) return;
     if (drag) return;
     const windows = await aero.listTasks();
@@ -198,7 +199,11 @@
     }
 
     if (window.AeroUac) AeroUac.renderTile(barEl);
-    if (window.AeroNotify) AeroNotify.renderTile(barEl);
+    if (window.AeroTrash) AeroTrash.renderTile(barEl);
+    // The bell sits left of the OS settings gear when the power group is
+    // shown; otherwise at the end of the dock.
+    const bellSlot = document.querySelector('.tasks-widget .dock-power .notify-slot');
+    if (window.AeroNotify) AeroNotify.renderTile(bellSlot || barEl);
     if (!tiles.length && !minimizedWidgets.length && !window.AeroNotify) {
       // Wayland offers no way to list other applications' windows (that is a
       // compositor policy, not a bug here), so on Linux the dock is a parking
