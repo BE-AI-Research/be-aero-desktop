@@ -2089,7 +2089,7 @@ app.whenReady().then(() => {
   });
   deviceService = new (require('./mesh/service').DeviceService)({
     userDataDir: app.getPath('userData'), store, getWindow: () => win,
-    onStart: (mesh) => { poolSync.attach(mesh); poolSync.start(); remoteFiles.attach(mesh); },
+    onStart: (mesh) => { poolSync.attach(mesh); poolSync.start(); remoteFiles.attach(mesh); if (aiService) aiService.bus.attach(mesh); },
     onStop: () => { poolSync.stop(); poolSync.mesh = null; }
   });
   deviceService.registerIpc();
@@ -2097,6 +2097,8 @@ app.whenReady().then(() => {
   app.on('before-quit', () => { if (deviceService) deviceService.stop(); });
 
   aiService = new (require('./ai').AiService)({
+    getMesh: () => (deviceService && deviceService.mesh) || null,
+    deviceName: () => String((store.get('devices') || {}).name || require('os').hostname()),
     userDataDir: app.getPath('userData'),
     store,
     updateSettings,

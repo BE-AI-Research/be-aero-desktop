@@ -592,6 +592,35 @@ const TOOLS = [
     input_schema: obj({ path: str('Absolute file path'), maxChars: num('Maximum characters to return (default 60000)') }, ['path']),
     run: async (input, ctx) => ctx.files.read(input.path, input.maxChars || 60000)
   },
+  // ------------------------------------------------------- AI bus (other devices)
+  {
+    name: 'list_devices', category: 'read',
+    description: "List the user's paired devices (other computers running BE-Aero) - their names, whether they are online, and whether you may message their assistants.",
+    input_schema: obj({}),
+    run: async (_in, ctx) => ({ devices: ctx.bus.devices() })
+  },
+  {
+    name: 'bus_ask', category: 'control',
+    description: "Ask the assistant on another of the user's devices a question and wait for its answer (it answers read-only on that device). Use it for anything only that device can know or see: its files, its running apps, its telemetry, a task's result there. device = its name from list_devices.",
+    input_schema: obj({ device: str('Device name (or ID prefix)'), question: str('The question'), wait_seconds: num('How long to wait for the answer (default 120, max 600)') }, ['device', 'question']),
+    run: async (input, ctx) => {
+      try { return await ctx.bus.ask(input.device, input.question, { timeoutMs: Math.max(10, Math.min(600, Number(input.wait_seconds) || 120)) * 1000 }); } catch (err) { return { error: err.message }; }
+    }
+  },
+  {
+    name: 'bus_send', category: 'control',
+    description: "Send a message to the assistant on another of the user's devices without waiting. kind: 'request' (do something there - it runs under that device's own permission setting; the result comes back as a reply in bus_inbox), 'task' (schedule work there; give 'when' in the scheduler's words, e.g. 'daily 07:00' or 'in 2h'), 'query' (a question, answered later), or 'event' (just let it know).",
+    input_schema: obj({ device: str('Device name (or ID prefix)'), kind: { type: 'string', enum: ['request', 'task', 'query', 'event'] }, subject: str('A short subject'), message: str('What to do / say'), when: str('For a task: when it should run') }, ['device', 'kind', 'message']),
+    run: async (input, ctx) => {
+      try { return await ctx.bus.send(input.device, { kind: input.kind, subject: input.subject || '', body: input.message, when: input.when }); } catch (err) { return { error: err.message }; }
+    }
+  },
+  {
+    name: 'bus_inbox', category: 'read',
+    description: "Messages and answers that other devices' assistants sent to this device, newest first.",
+    input_schema: obj({ limit: num('How many (default 10)') }),
+    run: async (input, ctx) => ({ messages: await ctx.bus.inbox(Number(input.limit) || 10) })
+  },
   {
     name: 'write_file', category: 'control',
     description: 'Save a text file (notes, a report, code, CSV, Markdown...) into your own AI folder - the only place you can write. path is relative to that folder, e.g. "reports/summary.md"; folders are created. An existing file is kept and the new one gets a numbered name unless overwrite is true. Returns the saved path.',

@@ -51,7 +51,48 @@ class AiService {
       onChange: (list) => { const w = this.d.getWindow(); if (w && !w.isDestroyed()) w.webContents.send('ai:tasks', list); }
     });
     this.scheduler.start();
+    // AI bus: assistants on paired devices talking (bus.js). Attached to
+    // the mesh by main when device connections are on.
+    this.busHops = new Map();       // conversation id -> hop count of the bus message it is handling
+    this.bus = new (require('./bus').AiBus)({
+      dir: path.join(deps.userDataDir, 'ai', 'bus'),
+      getMesh: () => (deps.getMesh ? deps.getMesh() : null),
+      deviceName: () => (deps.deviceName ? deps.deviceName() : require('os').hostname()),
+      handle: (msg) => this.handleBusMessage(msg),
+      notify: (title, body) => this.d.notify(title, body),
+      log: (m) => console.log('[ai-bus]', m)
+    });
     this.registerIpc();
+  }
+
+  // A task, request or question from another device's assistant. The
+  // RECEIVING device's settings apply: questions are read-only; requests
+  // use this device's permission setting (ask -> read-only, as for tasks).
+  async handleBusMessage(msg) {
+    if (!this.enabled()) return { error: 'the assistant is turned off on that device' };
+    const from = msg.from.name || 'another device';
+    if (msg.kind === 'task' && msg.when) {
+      try {
+        const t = this.scheduler.upsert({ name: (msg.subject || `Task from ${from}`).slice(0, 80), prompt: msg.body, when: msg.when, permission: 'inherit', conversationMode: 'shared' }, { createdBy: `device:${from}` });
+        return { scheduled: `Scheduled "${t.name}" on ${require('os').hostname()} (${t.when}).` };
+      } catch (err) { return { error: err.message }; }
+    }
+    // One running conversation per sending device.
+    const title = `AI bus · ${from}`;
+    let conv = this.conversations.list().find((c) => c.title === title);
+    if (!conv) { conv = this.conversations.create(); this.conversations.rename(conv.id, title); }
+    while (this.runs.has(conv.id)) await new Promise((r) => setTimeout(r, 1000));
+    const globalMode = this.config().permission || 'ask';
+    const permission = msg.kind === 'query' ? 'deny' : (globalMode === 'ask' ? 'deny' : globalMode);
+    const what = msg.kind === 'query' ? 'A question' : msg.kind === 'task' ? 'A task' : 'A request';
+    const header = `[${what} from the assistant on ${from}${msg.subject ? `: ${msg.subject}` : ''}. Nobody is watching here; your final reply is sent back to that assistant, so make it complete and concise.${msg.kind === 'query' ? ' Answer only: do not change anything.' : ''}]\n`;
+    this.busHops.set(conv.id, msg.hops || 0);
+    let result;
+    try { result = await this.send(conv.id, header + msg.body, [], { permission, source: 'bus' }); } finally { this.busHops.delete(conv.id); }
+    if (result && result.error) return { error: result.error };
+    const c = this.conversations.get(conv.id);
+    const last = [...c.messages].reverse().find((m) => m.role === 'assistant' && m.content);
+    return { answer: last ? last.content : '(no answer)' };
   }
 
   // A scheduled task runs in its own conversation with its own permission
@@ -429,6 +470,14 @@ class AiService {
         setState: (id, state) => this.scheduler.setState(id, state)
       },
       aiFolder: () => require('../files').aiFolder(this.d.store),
+      // The AI bus, with the hop count of the bus message this conversation
+      // is handling (anything sent from here goes one hop further).
+      bus: {
+        devices: () => this.bus.devices(),
+        send: (device, m) => this.bus.send(device, { ...m, hops: (this.busHops.get(conversationId) || 0) + (this.busHops.has(conversationId) ? 1 : 0) }),
+        ask: (device, q, o) => this.bus.ask(device, q, { ...o, hops: (this.busHops.get(conversationId) || 0) + (this.busHops.has(conversationId) ? 1 : 0) }),
+        inbox: (n) => this.bus.inbox(n)
+      },
       files: {
         // write_file: only inside the AI folder; never overwrites unless asked.
         write: async (rel, content, overwrite) => {
