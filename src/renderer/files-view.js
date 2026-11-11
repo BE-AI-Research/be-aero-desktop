@@ -477,7 +477,7 @@
       if (row && !selected.has(row.dataset.path)) selectRow(row.dataset.path, null);
       const paths = row ? [...selected] : [];
       const firstEntry = paths.length === 1 && entryOf(paths[0]);
-      const action = await aero.filesMenu({ count: paths.length, dir: !!(firstEntry && firstEntry.dir), inPool: cur.inPool, canPaste: !!(clip && clip.paths.length) && !isRemote(cur.path), showHidden, readOnly: isRemote(cur.path) });
+      const action = await aero.filesMenu({ count: paths.length, dir: !!(firstEntry && firstEntry.dir), inPool: cur.inPool, path: firstEntry && firstEntry.dir ? paths[0] : null, here: cur.path, canPaste: !!(clip && clip.paths.length) && !isRemote(cur.path), showHidden, readOnly: isRemote(cur.path) });
       if (action) act(action, paths);
     });
     listEl.addEventListener('keydown', (e) => {

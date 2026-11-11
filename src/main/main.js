@@ -2128,6 +2128,29 @@ app.whenReady().then(() => {
   }));
   // Right-click menu: native, like the rest of the app. Resolves with the
   // chosen action id (or null), the renderer carries it out.
+  // "Shared index": a folder my other devices may search and open (the
+  // per-device shares of Settings > Devices > Shared with it).
+  const samePath = (a, b) => (process.platform === 'win32' ? String(a).toLowerCase() === String(b).toLowerCase() : a === b);
+  function shareMenu(dir) {
+    if (!dir || /^aero:/i.test(dir) || /^(\\|smb:)/i.test(dir) || !path.isAbsolute(dir)) return [];
+    const mesh = deviceService && deviceService.mesh;
+    const peers = mesh ? [...mesh.peers.values()] : [];
+    if (!peers.length) return [{ type: 'separator' }, { label: 'Shared index', submenu: [{ label: mesh ? 'No paired devices yet (Settings > Devices)' : 'Turn on device connections in Settings > Devices', enabled: false }] }];
+    const has = (p) => (p.shares || []).some((s) => samePath(s.path, dir));
+    const set = (p, on) => {
+      const rest = (p.shares || []).filter((s) => !samePath(s.path, dir));
+      mesh.setShares(p.id, on ? [...rest, { path: dir, name: path.basename(dir) || dir }] : rest);
+      remoteFiles.nameIndex.delete(dir);
+    };
+    const all = peers.every(has);
+    return [{ type: 'separator' }, { label: `Shared index${peers.some(has) ? ' ✓' : ''}`, submenu: [
+      { label: `${path.basename(dir) || dir} - searchable and openable from:`, enabled: false },
+      { type: 'separator' },
+      { label: 'All my devices', type: 'checkbox', checked: all, click: () => peers.forEach((p) => set(p, !all)) },
+      { type: 'separator' },
+      ...peers.map((p) => ({ label: p.label || p.name || p.id.slice(0, 7), type: 'checkbox', checked: has(p), click: () => set(p, !has(p)) }))
+    ] }];
+  }
   ipcMain.handle('files:menu', (_e, ctx) => new Promise((resolve) => {
     const c = ctx || {};
     const one = c.count === 1;
@@ -2144,13 +2167,15 @@ app.whenReady().then(() => {
       item('Rename…', 'rename', { enabled: one && !c.readOnly }),
       item(process.platform === 'win32' ? 'Delete (Recycle Bin)' : 'Move to Trash', 'trash', { enabled: !c.readOnly }),
       { type: 'separator' },
-      item('Copy path', 'copy-path', { enabled: one })
+      item('Copy path', 'copy-path', { enabled: one }),
+      ...(one && c.dir ? shareMenu(c.path) : [])
     ] : [
       item('New folder', 'mkdir', { enabled: !c.readOnly }),
       item('Paste', 'paste', { enabled: !!c.canPaste }),
       { type: 'separator' },
       item(process.platform === 'win32' ? 'Open in Explorer' : 'Open in Files', 'reveal-here'),
-      item(c.showHidden ? 'Hide hidden files' : 'Show hidden files', 'toggle-hidden')
+      item(c.showHidden ? 'Hide hidden files' : 'Show hidden files', 'toggle-hidden'),
+      ...shareMenu(c.here)
     ];
     Menu.buildFromTemplate(template).popup({ window: win, callback: () => setImmediate(() => resolve(chosen)) });
   }));
