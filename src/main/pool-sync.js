@@ -166,8 +166,11 @@ class PoolSync {
       if (!within(root, file) || IGNORE(rel)) continue;
       const local = this.index.get(rel);
       if (r.deleted) {
-        // Their delete wins over a copy we have not changed since we last agreed.
-        if (local && !local.deleted && local.synced === local.hash && (r.t || 0) >= (local.t || 0)) {
+        // Their delete wins when the file they deleted is exactly our copy (a
+        // tombstone keeps the deleted content's hash), or when we have not
+        // changed ours since we last agreed. A copy edited here is kept.
+        const sameContent = local && local.hash === r.hash;
+        if (local && !local.deleted && (sameContent || local.synced === local.hash) && (sameContent || (r.t || 0) >= (local.t || 0))) {
           try { await this.trash(file); } catch { /* already gone */ }
           this.index.set(rel, { ...local, deleted: true, t: r.t || Date.now() });
           done.deleted.push(rel);

@@ -94,3 +94,26 @@ test('pool sync: a device without the File Pool permission gets nothing', async 
     await assert.rejects(b.mesh.request(a.mesh.identity.id, 'pool.read', { rel: '../id/device-key.pem' }), /not in the pool/);
   } finally { done(); }
 });
+
+test('pool sync: a file made on one device and deleted on the other is deleted everywhere; a later edit is kept', async () => {
+  const { a, b, done } = await twoDevices();
+  try {
+    // made on the laptop, copied to the desk, deleted on the desk right away
+    fs.writeFileSync(path.join(b.pool, 'made-on-laptop.txt'), 'from the laptop');
+    await b.sync.scan(); b.sync.announce();
+    assert.ok(await until(() => read(path.join(a.pool, 'made-on-laptop.txt')) === 'from the laptop'));
+    fs.rmSync(path.join(a.pool, 'made-on-laptop.txt'));
+    await a.sync.scan(); a.sync.announce();
+    assert.ok(await until(() => read(path.join(b.pool, 'made-on-laptop.txt')) === null), 'deleted on the laptop too');
+    // but a copy edited after the other side deleted it is kept
+    fs.writeFileSync(path.join(a.pool, 'keep.txt'), 'v1');
+    await a.sync.scan(); a.sync.announce();
+    assert.ok(await until(() => read(path.join(b.pool, 'keep.txt')) === 'v1'));
+    a.sync.mesh = null; b.sync.mesh = null;
+    fs.rmSync(path.join(a.pool, 'keep.txt')); await a.sync.scan();
+    fs.writeFileSync(path.join(b.pool, 'keep.txt'), 'v2 edited on the laptop'); await b.sync.scan();
+    a.sync.mesh = a.mesh; b.sync.mesh = b.mesh;
+    await b.sync.syncWith(a.mesh.identity.id);
+    assert.strictEqual(read(path.join(b.pool, 'keep.txt')), 'v2 edited on the laptop', 'the edit survives the other side\'s delete');
+  } finally { done(); }
+});
