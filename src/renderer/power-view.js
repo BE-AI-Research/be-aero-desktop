@@ -12,6 +12,7 @@
     { id: 'restart', label: 'Restart', glyph: '↻', confirm: true },
     { id: 'shutdown', label: 'Shut down', glyph: '⏻', confirm: true }
   ];
+  const GEAR_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3.2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 2.8l1.7 2.4 2.9-.6.9 2.8 2.7 1.3-.6 2.9L21.2 14l-2.4 1.7.6 2.9-2.8.9-1.3 2.7-2.9-.6L12 21.2l-1.7-2.4-2.9.6-.9-2.8-2.7-1.3.6-2.9L2.8 10l2.4-1.7-.6-2.9 2.8-.9 1.3-2.7 2.9.6z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>';
   const POWER_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v9" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/><path d="M6.3 6.8a8 8 0 1 0 11.4 0" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>';
 
   let aero = null;
@@ -106,6 +107,11 @@
     if (wrap) return;
     wrap = el('div', 'dock-power');
     el('div', 'dock-sep power-sep', wrap);
+    // The operating system's own Settings, next to the power button.
+    const gear = el('button', 'dock-tile os-settings-tile', wrap);
+    gear.title = navigator.userAgent.includes('Windows') ? 'Windows Settings' : 'System Settings';
+    el('span', 'dock-ico power-ico', gear).innerHTML = GEAR_SVG;
+    gear.addEventListener('click', () => { closePanel(); if (aero && aero.openOsSettings) aero.openOsSettings(); });
     tile = el('button', 'dock-tile power-tile', wrap);
     tile.title = 'Power: lock, switch user, log off, sleep, restart, shut down';
     const ic = el('span', 'dock-ico power-ico', tile);

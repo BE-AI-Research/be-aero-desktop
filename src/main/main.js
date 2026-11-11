@@ -1306,6 +1306,25 @@ ipcMain.handle('displays:list', () => screen.getAllDisplays().map((d, i) => ({
 // ---------------------------------------------------------------- Power menu
 // Only the five fixed verbs reach the OS; the renderer never names a command.
 ipcMain.handle('power:action', (_e, action) => require('./power').runPower(String(action || '')));
+// The dock's gear: the operating system's own Settings app.
+ipcMain.handle('os:settings', async () => {
+  if (process.platform === 'win32') { await shell.openExternal('ms-settings:'); return true; }
+  if (process.platform === 'darwin') { await shell.openPath('/System/Applications/System Settings.app'); return true; }
+  const { execFileSync, spawn } = require('child_process');
+  const has = (bin) => { try { execFileSync('sh', ['-c', `command -v ${bin}`], { stdio: 'ignore' }); return true; } catch { return false; } };
+  const desktop = String(process.env.XDG_CURRENT_DESKTOP || '').toLowerCase();
+  const order = [
+    ...(desktop.includes('kde') ? ['systemsettings', 'systemsettings5'] : []),
+    ...(desktop.includes('xfce') ? ['xfce4-settings-manager'] : []),
+    ...(desktop.includes('cinnamon') ? ['cinnamon-settings'] : []),
+    ...(desktop.includes('mate') ? ['mate-control-center'] : []),
+    'gnome-control-center', 'budgie-control-center', 'systemsettings', 'xfce4-settings-manager', 'cinnamon-settings', 'mate-control-center', 'lxqt-config'
+  ];
+  const bin = order.find(has);
+  if (!bin) return false;
+  spawn(bin, [], { detached: true, stdio: 'ignore' }).unref();
+  return true;
+});
 
 // ---------------------------------------------------------------- App dock
 ipcMain.handle('tasks:action', (_e, name, hwnd) => {

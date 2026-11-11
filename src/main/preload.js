@@ -36,6 +36,7 @@ contextBridge.exposeInMainWorld('aero', {
   quit: () => ipcRenderer.send('app:quit'),
   openExternal: (url) => ipcRenderer.send('shell:open', url),
   openSearch: (query) => ipcRenderer.send('search:open', query),
+  openOsSettings: () => ipcRenderer.invoke('os:settings'),
   searchRecent: () => ipcRenderer.invoke('search:recent'),
   searchRecentIcon: (p, kind) => ipcRenderer.invoke('search:recent-icon', p, kind),
   searchOpenRecent: (p, kind) => ipcRenderer.invoke('search:open-recent', p, kind),

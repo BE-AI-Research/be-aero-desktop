@@ -1246,7 +1246,9 @@ webview.plugin-frame { background: #fff; }
 .dock-power { display: flex; align-items: center; flex: none; }
 .dock-power.left { flex-direction: row-reverse; }
 .dock-power .power-sep { margin: 8px 6px; }
-.power-tile .power-ico svg { width: 22px; height: 22px; display: block; }
+.power-tile .power-ico svg, .os-settings-tile .power-ico svg { width: 22px; height: 22px; display: block; }
+.os-settings-tile .power-ico { opacity: .7; color: rgba(var(--text-rgb), .85); transition: transform .3s ease; }
+.os-settings-tile:hover .power-ico { opacity: 1; color: var(--accent); transform: rotate(45deg); }
 .power-tile .power-ico { opacity: .7; color: rgba(var(--text-rgb), .85); }
 .power-tile:hover .power-ico, .power-tile.open .power-ico { opacity: 1; color: #f87171; }
 .power-panel { position: fixed; z-index: 100000; min-width: 190px; padding: 8px; border-radius: 12px;
