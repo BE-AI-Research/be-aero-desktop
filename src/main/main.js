@@ -301,11 +301,11 @@ function displayGeometry() {
 function sinkToDesktop() {
   if (!win) return;
   if (store.get('alwaysOnTop') || dockSummoned || (aiService && aiService.isPinned())) return;
-  // Linux: GNOME treats the free-form canvas as a normal window and raises
-  // it over every app as soon as a widget is clicked; "keep below" makes it
-  // the desktop layer it is on Windows. (Docked, it is a dock with reserved
-  // space - nothing sits behind it.)
-  if (process.platform === 'linux') { if (store.get('dock') === 'free') linuxKeepBelow(true); return; }
+  // Linux: the canvas stacks like a normal window - clicking a widget brings
+  // the widgets over the app windows, clicking an app (through the empty
+  // space, which takes no input) brings that app forward. Keeping it below
+  // everything (linuxKeepBelow) was tried and left the widgets stuck behind.
+  if (process.platform === 'linux') return;
   if (process.platform !== 'win32' || !taskWindows) return;
   try {
     const handle = win.getNativeWindowHandle();
