@@ -23,7 +23,7 @@
   let found = [];                 // index matches elsewhere on this PC
   let searchTimer = null;
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-  const GLYPH = { folder: '📁', image: '🖼️', text: '📄', file: '📦', pool: '🌊', drive: '💽', network: '🖧', share: '🗂️' };
+  const GLYPH = { folder: '📁', image: '🖼️', text: '📄', file: '📦', pool: '🌊', ai: '🤖', drive: '💽', network: '🖧', share: '🗂️' };
   const IS_WIN = navigator.userAgent.includes('Windows');
 
   function human(n) {

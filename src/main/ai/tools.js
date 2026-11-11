@@ -593,6 +593,12 @@ const TOOLS = [
     run: async (input, ctx) => ctx.files.read(input.path, input.maxChars || 60000)
   },
   {
+    name: 'write_file', category: 'control',
+    description: 'Save a text file (notes, a report, code, CSV, Markdown...) into your own AI folder - the only place you can write. path is relative to that folder, e.g. "reports/summary.md"; folders are created. An existing file is kept and the new one gets a numbered name unless overwrite is true. Returns the saved path.',
+    input_schema: obj({ path: str('File path relative to your AI folder'), content: str('The text to write'), overwrite: { type: 'boolean', description: 'Replace an existing file of that name (default false)' } }, ['path', 'content']),
+    run: async (input, ctx) => ctx.files.write(input.path, input.content, !!input.overwrite)
+  },
+  {
     name: 'list_directory', category: 'control',
     description: 'List the files and folders in a directory with sizes and modification times.',
     input_schema: obj({ path: str('Absolute directory path') }, ['path']),

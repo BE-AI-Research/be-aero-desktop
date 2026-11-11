@@ -44,6 +44,22 @@ function within(parent, child) {
   return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
 }
 
+// The assistant's own folder (its work, and copies of files attached to
+// chats in Uploads/). Settings ai.folder, default ~/BE-Aero AI.
+function aiFolder(store) {
+  const a = (store && store.get('ai')) || {};
+  return a.folder || path.join(os.homedir(), 'BE-Aero AI');
+}
+async function ensureAiFolder(store) {
+  const dir = aiFolder(store);
+  await fsp.mkdir(path.join(dir, 'Uploads'), { recursive: true });
+  const readme = path.join(dir, 'About this folder.txt');
+  try { await fsp.access(readme); } catch {
+    await fsp.writeFile(readme, 'This is the BE-Aero assistant\'s folder.\n\nFiles you attach to a chat are copied into Uploads, so the conversation keeps working if you move the original.\nThe assistant saves what it makes here (it can only write inside this folder).\nYou can change this folder in Settings > AI assistant.\n').catch(() => {});
+  }
+  return dir;
+}
+
 class FileService {
   // { getPath(name), store, shell, nativeImage, smb }
   constructor({ getPath, store, shell, nativeImage, smb }) {
@@ -71,7 +87,10 @@ class FileService {
 
   // Sidebar places: user folders that exist, drives/mounts, the File Pool.
   async places() {
-    const out = [{ id: 'pool', name: 'File Pool', path: this.poolDir(), kind: 'pool' }];
+    const out = [
+      { id: 'pool', name: 'File Pool', path: this.poolDir(), kind: 'pool' },
+      { id: 'ai', name: 'AI Folder', path: aiFolder(this.store), kind: 'ai' }
+    ];
     const user = [['home', 'Home'], ['desktop', 'Desktop'], ['documents', 'Documents'], ['downloads', 'Downloads'], ['pictures', 'Pictures'], ['music', 'Music'], ['videos', 'Videos']];
     for (const [key, name] of user) {
       try { const p = this.getPath(key); if (p && fs.existsSync(p)) out.push({ id: key, name, path: p, kind: 'folder' }); } catch { /* not on this OS */ }
@@ -117,6 +136,7 @@ class FileService {
       dir = path.join(hit.path, net.rest || '');
     }
     const abs = expandPath(dir || os.homedir());
+    if (within(aiFolder(this.store), abs)) await ensureAiFolder(this.store);
     let st;
     try { st = await fsp.stat(abs); } catch (err) {
       // A share that wants a sign-in first (Windows UNC).
@@ -222,4 +242,4 @@ class FileService {
   }
 }
 
-module.exports = { FileService, freeName, within, expandPath };
+module.exports = { FileService, freeName, within, expandPath, aiFolder, ensureAiFolder };

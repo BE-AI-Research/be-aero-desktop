@@ -428,7 +428,26 @@ class AiService {
         remove: (id) => this.scheduler.remove(id),
         setState: (id, state) => this.scheduler.setState(id, state)
       },
+      aiFolder: () => require('../files').aiFolder(this.d.store),
       files: {
+        // write_file: only inside the AI folder; never overwrites unless asked.
+        write: async (rel, content, overwrite) => {
+          const { ensureAiFolder, freeName, within } = require('../files');
+          const p = require('path');
+          const fsp = require('fs/promises');
+          const dir = await ensureAiFolder(this.d.store);
+          const target = p.resolve(dir, String(rel || '').replace(/^[\\/]+/, ''));
+          if (!within(dir, target) || target === dir) return { error: `Files can only be written inside the AI folder (${dir}).` };
+          await fsp.mkdir(p.dirname(target), { recursive: true });
+          let final = target;
+          let exists = false;
+          try { await fsp.access(target); exists = true; } catch { /* new */ }
+          if (exists && !overwrite) final = p.join(p.dirname(target), await freeName(p.dirname(target), p.basename(target)));
+          const text = String(content == null ? '' : content);
+          if (text.length > 5 * 1024 * 1024) return { error: 'That is more than 5 MB of text.' };
+          await fsp.writeFile(final, text, 'utf8');
+          return { ok: true, path: final, bytes: Buffer.byteLength(text), ...(final !== target ? { note: 'A file with that name existed, so this was saved under a new name.' } : {}) };
+        },
         read: (p, maxChars) => {
           try {
             const att = attachments.describe(p);
@@ -653,11 +672,36 @@ class AiService {
     return { id: c.id, title: c.title, total: all.length, start, end, messages };
   }
 
+  // Attached files are copied into the AI folder's Uploads, so the
+  // conversation keeps working if the original moves, and the assistant has
+  // its own copy. Files already in the AI folder, or over 200 MB, are used
+  // where they are.
+  async ingestUploads(paths) {
+    const { ensureAiFolder, freeName, within } = require('../files');
+    const fsp = require('fs/promises');
+    const p = require('path');
+    let dir;
+    try { dir = await ensureAiFolder(this.d.store); } catch { return paths; }
+    const uploads = p.join(dir, 'Uploads');
+    const out = [];
+    for (const src of paths) {
+      try {
+        const st = await fsp.stat(src);
+        if (!st.isFile() || within(dir, src) || st.size > 200 * 1024 * 1024) { out.push(src); continue; }
+        const target = p.join(uploads, await freeName(uploads, p.basename(src)));
+        await fsp.copyFile(src, target);
+        out.push(target);
+      } catch { out.push(src); }
+    }
+    return out;
+  }
+
   async send(conversationId, text, atts, opts = {}) {
     if (!this.enabled()) return { error: 'The AI assistant is disabled.' };
     const content = String(text || '').trim();
-    const files = (Array.isArray(atts) ? atts : []).filter((a) => a && typeof a.path === 'string').slice(0, 10)
-      .map((a) => { try { return attachments.describe(a.path); } catch { return null; } }).filter(Boolean);
+    const picked = (Array.isArray(atts) ? atts : []).filter((a) => a && typeof a.path === 'string').slice(0, 10).map((a) => a.path);
+    const stored = opts.keepAttachmentPaths ? picked : await this.ingestUploads(picked);
+    const files = stored.map((pth) => { try { return attachments.describe(pth); } catch { return null; } }).filter(Boolean);
     if (!content && !files.length) return { error: 'empty message' };
     let conv = null;
     if (conversationId) {
