@@ -930,6 +930,11 @@ webview.plugin-frame { background: #fff; }
 .ai-title { font-size: 11px; opacity: .7; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ai-messages { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; padding: 8px; font-size: 12.5px; line-height: 1.45;
   border: 1px solid rgba(255,255,255,.12); border-radius: 10px; background: rgba(0,0,0,.14); }
+/* Chat text can be selected and copied (the page turns selection off by
+   default); its buttons stay unselectable. .no-drag keeps a press in the
+   chat from moving the widget in free-form layout. */
+.ai-messages, .ai-messages .ai-msg { user-select: text; cursor: text; }
+.ai-messages button, .ai-messages .ai-act, .ai-messages .ai-say, .ai-messages .ai-copy { user-select: none; cursor: pointer; }
 .ai-msg { padding: 7px 10px; border-radius: 10px; max-width: 94%; word-wrap: break-word; overflow-wrap: anywhere; }
 .ai-user { align-self: flex-end; background: color-mix(in srgb, var(--accent) 28%, transparent); border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent); }
 .ai-assistant { align-self: flex-start; background: rgba(255,255,255,.07); border: 1px solid rgba(255,255,255,.1); }
