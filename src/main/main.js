@@ -341,6 +341,29 @@ function linuxShapeInput() {
   return process.platform === 'linux' && win && typeof win.setShape === 'function';
 }
 
+// setShape only sets the drawn (bounding) shape. Under Xwayland - GNOME and
+// every Wayland session - input follows the INPUT shape alone, so it is set
+// as well (x11-input-shape.js); without it the transparent canvas took every
+// click on the screen.
+let x11Input = null;
+let lastInputRects = null;
+function setInputRegion(rects) {
+  if (process.platform !== 'linux' || !win || win.isDestroyed()) return;
+  lastInputRects = rects;
+  if (!x11Input) {
+    const { X11InputShape } = require('./x11-input-shape');
+    x11Input = new X11InputShape({ log: (m) => console.log('[input-shape]', m) });
+    // A window that is unmapped and mapped again (hide/show, a display
+    // change) can come back with a full input region: re-assert it now and then.
+    setInterval(() => {
+      if (lastInputRects && win && !win.isDestroyed() && win.isVisible()) {
+        x11Input.set(require('./x11-input-shape').xidOf(win), lastInputRects).catch(() => {});
+      }
+    }, 5000);
+  }
+  x11Input.set(require('./x11-input-shape').xidOf(win), rects).catch(() => {});
+}
+
 function applyInputModel() {
   if (!win) return;
   if (!linuxShapeInput()) { setIgnoreMouse(true); return; }
@@ -350,7 +373,9 @@ function applyInputModel() {
     // reverts to rectangular, but an implementation that reads it as an
     // empty REGION would make the window deaf - pass the full rect instead.
     const b = win.getBounds();
-    win.setShape([{ x: 0, y: 0, width: b.width, height: b.height }]);
+    const full = [{ x: 0, y: 0, width: b.width, height: b.height }];
+    win.setShape(full);
+    setInputRegion(full);
   }
   // free: the renderer's rect reports (window:input-shape) take over
 }
@@ -358,9 +383,16 @@ function applyInputModel() {
 ipcMain.on('window:input-shape', (_e, rects) => {
   if (!linuxShapeInput() || store.get('dock') !== 'free') return;
   try {
-    win.setShape((Array.isArray(rects) ? rects : [])
+    const list = (Array.isArray(rects) ? rects : [])
       .map((r) => ({ x: r.x | 0, y: r.y | 0, width: r.width | 0, height: r.height | 0 }))
-      .filter((r) => r.width > 0 && r.height > 0));
+      .filter((r) => r.width > 0 && r.height > 0);
+    win.setShape(list);
+    // Input: the same widgets with a tighter margin (the drawn shape keeps
+    // 24 px for glows; 8 px is enough for the resize grips), so a window
+    // just beside a widget can still be clicked.
+    const b = win.getContentBounds();
+    const full = list.length === 1 && list[0].x === 0 && list[0].y === 0 && list[0].width >= b.width - 2 && list[0].height >= b.height - 2;
+    setInputRegion(full ? list : list.map((r) => ({ x: r.x + 16, y: r.y + 16, width: Math.max(1, r.width - 32), height: Math.max(1, r.height - 32) })));
   } catch { /* window going away */ }
 });
 

@@ -103,6 +103,9 @@ the final answer.
   message. Each tab keeps its place, and so does the chat after being minimized - it used to
   jump back to the top, or open partway up instead of at the latest message.
 - **Chat:** the edit / resend / delete buttons under messages are visible again.
+- **Linux: click through to windows behind the widgets.** In free-form layout on GNOME and other
+  Wayland desktops, the transparent space between widgets took every click, so windows behind
+  it couldn't be used. Only the widgets take the mouse now.
 - **Linux:** the per-core CPU heatmap no longer flickers between 0% and 100%.
 
 ## UAC shield in the dock (Windows)
