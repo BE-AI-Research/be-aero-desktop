@@ -107,6 +107,47 @@ function shapeRectanglesRequest(major, xid, rects) {
   return b;
 }
 
+function internAtomRequest(name) {
+  const b = Buffer.from(name, 'latin1');
+  const len = 2 + Math.ceil(b.length / 4);
+  const r = Buffer.alloc(len * 4);
+  r.writeUInt8(16, 0);                  // InternAtom
+  r.writeUInt8(0, 1);                   // only-if-exists: no
+  r.writeUInt16LE(len, 2);
+  r.writeUInt16LE(b.length, 4);
+  b.copy(r, 8);
+  return r;
+}
+
+// EWMH: ask the window manager to add (1) or remove (0) a state such as
+// _NET_WM_STATE_BELOW - SendEvent of a ClientMessage to the root window.
+function wmStateRequest(root, xid, netWmState, action, atom1, atom2 = 0) {
+  const r = Buffer.alloc(44);
+  r.writeUInt8(25, 0);                  // SendEvent
+  r.writeUInt8(0, 1);                   // propagate: no
+  r.writeUInt16LE(11, 2);
+  r.writeUInt32LE(root >>> 0, 4);
+  r.writeUInt32LE(((1 << 19) | (1 << 20)) >>> 0, 8);   // SubstructureNotify | SubstructureRedirect
+  const e = 12;                         // the 32-byte event
+  r.writeUInt8(33, e);                  // ClientMessage
+  r.writeUInt8(32, e + 1);              // format 32
+  r.writeUInt32LE(xid >>> 0, e + 4);
+  r.writeUInt32LE(netWmState >>> 0, e + 8);
+  r.writeUInt32LE(action, e + 12);
+  r.writeUInt32LE(atom1 >>> 0, e + 16);
+  r.writeUInt32LE(atom2 >>> 0, e + 20);
+  r.writeUInt32LE(1, e + 24);           // source: a normal application
+  return r;
+}
+
+// The first screen's root window, from the connection setup reply.
+function rootFromSetup(reply) {
+  const vendorLen = reply.readUInt16LE(24);
+  const formats = reply.readUInt8(29);
+  const screens = 40 + vendorLen + pad4(vendorLen) + 8 * formats;
+  return reply.length >= screens + 4 ? reply.readUInt32LE(screens) : 0;
+}
+
 class X11InputShape {
   // { display, xauthority, log }
   constructor({ display = process.env.DISPLAY, xauthority = process.env.XAUTHORITY, log = () => {} } = {}) {
@@ -114,9 +155,37 @@ class X11InputShape {
     this.xauthority = xauthority;
     this.log = log;
     this.sock = null;
-    this.major = 0;
-    this.ready = null;      // Promise<boolean>
+    this.major = 0;             // SHAPE extension opcode (0 = none)
+    this.root = 0;
+    this.seq = 0;               // sequence number of the last request sent
+    this.waiting = new Map();   // seq -> resolve(reply | null)
+    this.atoms = new Map();
+    this.ready = null;          // Promise<boolean>
     this.failed = false;
+  }
+
+  // Send a request; with `reply`, resolve with its reply packet (null on error).
+  request(buf, reply = false) {
+    if (!this.sock) return Promise.resolve(null);
+    this.seq = (this.seq + 1) & 0xffff;
+    const seq = this.seq;
+    this.sock.write(buf);
+    if (!reply) return Promise.resolve(true);
+    return new Promise((resolve) => {
+      this.waiting.set(seq, resolve);
+      setTimeout(() => { if (this.waiting.delete(seq)) resolve(null); }, 3000);
+    });
+  }
+
+  onPacket(pkt) {
+    const type = pkt[0];
+    if (type === 1 || type === 0) {
+      const seq = pkt.readUInt16LE(2);
+      const w = this.waiting.get(seq);
+      if (w) { this.waiting.delete(seq); w(type === 1 ? pkt : null); }
+      if (type === 0 && !w) this.log(`X11 error ${pkt[1]} on request ${pkt.readUInt8(10)}.${pkt.readUInt16LE(8)}`);
+    }
+    // events (type > 1) were not asked for; ignore
   }
 
   connect() {
@@ -126,8 +195,17 @@ class X11InputShape {
       if (n === null) { this.fail(`DISPLAY "${this.display}" is not a local display`); resolve(false); return; }
       const auth = cookieFor(n, this.xauthority);
       let buf = Buffer.alloc(0);
-      let stage = 'setup';
+      let setupDone = false;
       const done = (ok, why) => { if (!ok) this.fail(why); resolve(ok); };
+      const drain = () => {
+        while (buf.length >= 32) {
+          const extra = buf[0] === 1 ? buf.readUInt32LE(4) * 4 : 0;
+          if (buf.length < 32 + extra) return;
+          const pkt = buf.subarray(0, 32 + extra);
+          buf = buf.subarray(32 + extra);
+          this.onPacket(pkt);
+        }
+      };
       const tryConnect = (addr, next) => {
         const s = net.createConnection(addr);
         s.once('error', () => { s.destroy(); next(); });
@@ -135,44 +213,31 @@ class X11InputShape {
           s.removeAllListeners('error');
           this.sock = s;
           s.on('error', (e) => this.fail(`socket: ${e.message}`));
-          s.on('close', () => { this.sock = null; });
+          s.on('close', () => {
+            this.sock = null;
+            this.ready = null;          // reconnect on next use
+            for (const w of this.waiting.values()) w(null);
+            this.waiting.clear();
+          });
           s.on('data', (d) => {
             buf = Buffer.concat([buf, d]);
-            if (stage === 'setup') {
+            if (!setupDone) {
               if (buf.length < 8) return;
               const extra = buf.readUInt16LE(6) * 4;
               if (buf.length < 8 + extra) return;
               const status = buf[0];
+              const reply = buf.subarray(0, 8 + extra);
               buf = buf.subarray(8 + extra);
               if (status !== 1) { done(false, `X server refused the connection (status ${status}${auth ? '' : ', no cookie found'})`); s.destroy(); return; }
-              stage = 'ext';
-              s.write(queryExtensionRequest('SHAPE'));
+              setupDone = true;
+              this.root = rootFromSetup(reply);
+              this.request(queryExtensionRequest('SHAPE'), true).then((q) => {
+                if (!q || !q[8]) this.log('the X server has no SHAPE extension');
+                else this.major = q[9];
+                done(true);
+              });
             }
-            if (stage === 'ext') {
-              // Skip events / errors until the 32-byte QueryExtension reply.
-              while (buf.length >= 32) {
-                const type = buf[0];
-                const extra = type === 1 ? buf.readUInt32LE(4) * 4 : 0;
-                if (buf.length < 32 + extra) return;
-                const pkt = buf.subarray(0, 32 + extra);
-                buf = buf.subarray(32 + extra);
-                if (type === 1) {
-                  stage = 'run';
-                  if (!pkt[8]) { done(false, 'the X server has no SHAPE extension'); return; }
-                  this.major = pkt[9];
-                  done(true);
-                  return;
-                }
-              }
-            }
-            if (stage === 'run') {
-              // Errors from our requests: log once each kind, never throw.
-              while (buf.length >= 32) {
-                const pkt = buf.subarray(0, 32);
-                buf = buf.subarray(32);
-                if (pkt[0] === 0) this.log(`X11 error ${pkt[1]} on request ${pkt.readUInt8(10)}.${pkt.readUInt16LE(8)}`);
-              }
-            }
+            drain();
           });
           s.write(setupRequest(auth));
         });
@@ -184,17 +249,37 @@ class X11InputShape {
   }
 
   fail(why) {
-    if (!this.failed) this.log(`input shape unavailable: ${why}`);
+    if (!this.failed) this.log(`X11 control unavailable: ${why}`);
     this.failed = true;
+  }
+
+  async atom(name) {
+    if (this.atoms.has(name)) return this.atoms.get(name);
+    const r = await this.request(internAtomRequest(name), true);
+    const a = r ? r.readUInt32LE(8) : 0;
+    if (a) this.atoms.set(name, a);
+    return a;
   }
 
   // Window input region := rects (window coordinates). An empty list means
   // "no input anywhere", so callers pass the full window to take everything.
   async set(xid, rects) {
     if (!xid) return false;
-    if (!(await this.connect()) || !this.sock) return false;
+    if (!(await this.connect()) || !this.sock || !this.major) return false;
     const list = (rects || []).filter((r) => r && r.width > 0 && r.height > 0);
-    this.sock.write(shapeRectanglesRequest(this.major, xid, list));
+    await this.request(shapeRectanglesRequest(this.major, xid, list));
+    return true;
+  }
+
+  // Keep the window below all others (_NET_WM_STATE_BELOW) - the desktop
+  // layer, where widgets live behind app windows - or lift it out again.
+  async keepBelow(xid, on) {
+    if (!xid) return false;
+    if (!(await this.connect()) || !this.sock || !this.root) return false;
+    const state = await this.atom('_NET_WM_STATE');
+    const below = await this.atom('_NET_WM_STATE_BELOW');
+    if (!state || !below) return false;
+    await this.request(wmStateRequest(this.root, xid, state, on ? 1 : 0, below));
     return true;
   }
 
@@ -209,4 +294,4 @@ function xidOf(win) {
   } catch { return 0; }
 }
 
-module.exports = { X11InputShape, xidOf, parseXauthority, displayNumber, shapeRectanglesRequest, setupRequest, queryExtensionRequest };
+module.exports = { X11InputShape, xidOf, parseXauthority, displayNumber, shapeRectanglesRequest, setupRequest, queryExtensionRequest, internAtomRequest, wmStateRequest, rootFromSetup };

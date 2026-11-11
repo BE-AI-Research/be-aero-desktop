@@ -299,8 +299,14 @@ function displayGeometry() {
 // window the user works with. Re-assert that whenever we might have risen
 // (bounds changes, startup, losing focus) - unless Always on top is chosen.
 function sinkToDesktop() {
-  if (process.platform !== 'win32' || !win || !taskWindows) return;
+  if (!win) return;
   if (store.get('alwaysOnTop') || dockSummoned || (aiService && aiService.isPinned())) return;
+  // Linux: GNOME treats the free-form canvas as a normal window and raises
+  // it over every app as soon as a widget is clicked; "keep below" makes it
+  // the desktop layer it is on Windows. (Docked, it is a dock with reserved
+  // space - nothing sits behind it.)
+  if (process.platform === 'linux') { if (store.get('dock') === 'free') linuxKeepBelow(true); return; }
+  if (process.platform !== 'win32' || !taskWindows) return;
   try {
     const handle = win.getNativeWindowHandle();
     const hwnd = handle.length >= 8 ? Number(handle.readBigUInt64LE(0)) : handle.readUInt32LE(0);
@@ -347,9 +353,17 @@ function linuxShapeInput() {
 // click on the screen.
 let x11Input = null;
 let lastInputRects = null;
+function linuxKeepBelow(on) {
+  if (process.platform !== 'linux' || !win || win.isDestroyed()) return;
+  setInputRegion(null);           // make sure the shared X11 connection exists
+  x11Input.keepBelow(require('./x11-input-shape').xidOf(win), on).catch(() => {});
+}
+// Before the window is lifted above others (summon, always on top, pinned):
+// "keep below" would hold it down, so it is cleared first.
+function liftFromDesktop() { if (process.platform === 'linux') linuxKeepBelow(false); }
 function setInputRegion(rects) {
   if (process.platform !== 'linux' || !win || win.isDestroyed()) return;
-  lastInputRects = rects;
+  if (rects) lastInputRects = rects;
   if (!x11Input) {
     const { X11InputShape } = require('./x11-input-shape');
     x11Input = new X11InputShape({ log: (m) => console.log('[input-shape]', m) });
@@ -361,7 +375,7 @@ function setInputRegion(rects) {
       }
     }, 5000);
   }
-  x11Input.set(require('./x11-input-shape').xidOf(win), rects).catch(() => {});
+  if (rects) x11Input.set(require('./x11-input-shape').xidOf(win), rects).catch(() => {});
 }
 
 function applyInputModel() {
@@ -580,7 +594,7 @@ function summonDock() {
   if (dockSummoned) { unsummonDock(); return; }
   dockSummoned = true;
   console.log('[dock] summoned');
-  if (!store.get('alwaysOnTop')) win.setAlwaysOnTop(true, 'screen-saver');
+  if (!store.get('alwaysOnTop')) { liftFromDesktop(); win.setAlwaysOnTop(true, 'screen-saver'); }
   win.show();
   win.focus();
   win.webContents.send('dock:summon', true);
@@ -674,6 +688,7 @@ function updateSettings(patch) {
 
   if (win) {
     if ('alwaysOnTop' in patch) {
+      if (s.alwaysOnTop) liftFromDesktop();
       win.setAlwaysOnTop(s.alwaysOnTop, 'floating');
       if (!s.alwaysOnTop) sinkToDesktop();
     }
@@ -1946,7 +1961,7 @@ app.whenReady().then(() => {
     }),
     setPinned: (on) => {
       if (!win) return;
-      if (on) { win.setAlwaysOnTop(true, 'screen-saver'); win.show(); }
+      if (on) { liftFromDesktop(); win.setAlwaysOnTop(true, 'screen-saver'); win.show(); }
       else if (!store.get('alwaysOnTop')) { win.setAlwaysOnTop(false); sinkToDesktop(); }
     }
   });
