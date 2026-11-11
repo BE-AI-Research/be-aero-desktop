@@ -23,7 +23,8 @@
   let found = [];                 // index matches elsewhere on this PC
   let searchTimer = null;
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-  const GLYPH = { folder: '📁', image: '🖼️', text: '📄', file: '📦', pool: '🌊', drive: '💽' };
+  const GLYPH = { folder: '📁', image: '🖼️', text: '📄', file: '📦', pool: '🌊', drive: '💽', network: '🖧', share: '🗂️' };
+  const IS_WIN = navigator.userAgent.includes('Windows');
 
   function human(n) {
     if (n == null) return '';
@@ -49,14 +50,88 @@
 
   function renderPlaces() {
     placesEl.innerHTML = '';
+    let netHeader = false;
     for (const p of places) {
+      if (p.kind === 'network' && !netHeader) {
+        netHeader = true;
+        const h = document.createElement('div');
+        h.className = 'files-place-head';
+        h.textContent = 'Network';
+        placesEl.appendChild(h);
+      }
       const b = document.createElement('button');
       b.className = `files-place${cur && (cur.path === p.path || (p.kind === 'pool' && cur.inPool && cur.path.startsWith(p.path))) ? ' on' : ''}`;
       b.title = p.path;
       b.innerHTML = `<span class="g">${GLYPH[p.kind] || GLYPH.folder}</span><span class="n">${esc(p.name)}</span>`;
       b.addEventListener('click', () => go(p.path));
+      if (p.kind === 'network') {
+        if (p.status && p.status !== 'OK') { b.classList.add('off'); b.title = `${p.remote} - ${p.status}`; }
+        b.addEventListener('contextmenu', async (e) => {
+          e.preventDefault();
+          const action = await aero.filesNetMenu({ remote: p.remote, status: p.status });
+          if (action === 'disconnect') {
+            const r = await aero.filesNetDisconnect(IS_WIN && /^[A-Z]:\\$/i.test(p.path) ? p.path.slice(0, 2) : p.remote);
+            status(r && r.ok ? `Disconnected ${p.name}.` : (r && r.error) || 'Could not disconnect.', !(r && r.ok));
+            await reloadPlaces();
+          }
+        });
+      }
       placesEl.appendChild(b);
     }
+    if (!netHeader) {
+      const h = document.createElement('div');
+      h.className = 'files-place-head';
+      h.textContent = 'Network';
+      placesEl.appendChild(h);
+    }
+    const c = document.createElement('button');
+    c.className = 'files-place files-connect';
+    c.innerHTML = '<span class="g">＋</span><span class="n">Connect to server…</span>';
+    c.title = IS_WIN ? 'Connect a network share (\\\\server\\share)' : 'Connect a network share (smb://server/share)';
+    c.addEventListener('click', () => connectForm(''));
+    placesEl.appendChild(c);
+  }
+
+  async function reloadPlaces() {
+    const pr = await aero.filesPlaces();
+    places = pr && pr.ok ? pr.result : places;
+    renderPlaces();
+  }
+
+  // Connect to a network share: address, user, password (to the OS on
+  // stdin - never stored by BE-Aero), drive letter on Windows, remember.
+  async function connectForm(address) {
+    const old = root.querySelector('.files-connect-form');
+    if (old) old.remove();
+    const f = document.createElement('form');
+    f.className = 'files-connect-form';
+    const letters = IS_WIN ? ((await aero.filesNetLetters()) || {}).result || [] : [];
+    f.innerHTML = `
+      <div class="files-connect-title">Connect to a network share</div>
+      <input name="address" spellcheck="false" placeholder="${IS_WIN ? '\\\\server\\share' : 'smb://server/share'}" value="${esc(address)}" required>
+      <div class="row"><input name="user" spellcheck="false" autocomplete="username" placeholder="User name (blank = as you / guest)"><input name="password" type="password" autocomplete="current-password" placeholder="Password"></div>
+      <div class="row">${IS_WIN ? `<select name="letter"><option value="">No drive letter</option>${letters.map((L) => `<option value="${L}">${L}:</option>`).join('')}</select>` : ''}
+        <label class="check"><input type="checkbox" name="remember"> ${IS_WIN ? 'Reconnect at sign-in (password kept in Windows Credential Manager)' : 'Keep connected'}</label></div>
+      <div class="files-connect-err"></div>
+      <div class="row"><button type="submit" class="btn">Connect</button><button type="button" class="btn files-connect-cancel">Cancel</button></div>`;
+    root.appendChild(f);
+    const err = f.querySelector('.files-connect-err');
+    f.querySelector('.files-connect-cancel').addEventListener('click', () => f.remove());
+    f.addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Escape') f.remove(); });
+    f.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const d = new FormData(f);
+      err.textContent = 'Connecting…';
+      const btn = f.querySelector('button[type=submit]');
+      btn.disabled = true;
+      const r = await aero.filesNetConnect({ address: d.get('address'), user: d.get('user'), password: d.get('password'), letter: d.get('letter') || '', remember: d.get('remember') === 'on' });
+      btn.disabled = false;
+      if (!r || !r.ok) { err.textContent = (r && r.error) || 'Could not connect.'; return; }
+      f.remove();
+      await reloadPlaces();
+      go(r.result.path);
+    });
+    f.querySelector(address ? 'input[name=user]' : 'input[name=address]').focus();
   }
 
   // The path bar is editable, like Explorer's: click its empty space (or
@@ -94,10 +169,17 @@
     crumbsEl.innerHTML = '';
     if (!cur) return;
     const sep = cur.path.includes('\\') ? '\\' : '/';
-    const parts = cur.path.split(/[\\/]/).filter((x, i) => x || i === 0);
+    // Network paths start with the server: \\server\share\dir or smb://server/share/dir.
+    const unc = /^\\\\([^\\]+)(.*)$/.exec(cur.path);
+    const smbUri = /^smb:\/\/([^/]+)(.*)$/i.exec(cur.path);
+    const net = unc || smbUri;
+    const parts = net
+      ? [net[1], ...net[2].split(/[\\/]/).filter(Boolean)]
+      : cur.path.split(/[\\/]/).filter((x, i) => x || i === 0);
     let acc = '';
     parts.forEach((part, i) => {
-      acc = i === 0 ? (part === '' ? '/' : `${part}${sep}`) : `${acc}${acc.endsWith(sep) ? '' : sep}${part}`;
+      if (net) acc = i === 0 ? (unc ? `\\\\${part}` : `smb://${part}`) : `${acc}${unc ? '\\' : '/'}${part}`;
+      else acc = i === 0 ? (part === '' ? '/' : `${part}${sep}`) : `${acc}${acc.endsWith(sep) ? '' : sep}${part}`;
       const target = acc;
       const b = document.createElement('button');
       b.className = 'files-crumb';
@@ -162,7 +244,13 @@
 
   async function go(dir, { push = true } = {}) {
     const r = await aero.filesList(dir);
-    if (!r || !r.ok) { status(r && r.error ? r.error.replace(/^Error:\s*/, '') : 'Cannot open that folder.', true); return false; }
+    if (r && r.needsConnect) { status('That share needs you to connect first.'); connectForm(String(dir)); return false; }
+    if (!r || !r.ok) {
+      const msg = r && r.error ? r.error.replace(/^Error:\s*/, '') : 'Cannot open that folder.';
+      if (msg === 'needs sign-in') { connectForm(String(dir)); status('Sign in to see this server\'s shares.'); return false; }
+      status(msg, true);
+      return false;
+    }
     if (push && cur && cur.path !== r.result.path) { back.push(cur.path); forward = []; }
     cur = r.result;
     selected = new Set();
@@ -374,7 +462,9 @@
     showHidden = !!s.showHidden;
     const pr = await aero.filesPlaces();
     places = pr && pr.ok ? pr.result : [];
-    const start = s.last || (places.find((p) => p.id === 'home') || places[0] || {}).path;
+    const home = (places.find((p) => p.id === 'home') || places[1] || {}).path;
+    // Do not start on a network share (it may be slow or gone); start home.
+    const start = s.last && !/^(\\\\|smb:)/i.test(s.last) ? s.last : home;
     await go(start, { push: false });
     if (!cur && places[1]) await go(places[1].path, { push: false });
   }

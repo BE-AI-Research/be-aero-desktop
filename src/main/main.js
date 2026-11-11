@@ -1931,10 +1931,15 @@ app.whenReady().then(() => {
   });
 
   // File browser + File Pool (src/main/files.js).
-  const fileService = new (require('./files').FileService)({ getPath: (n) => app.getPath(n), store, shell, nativeImage });
+  const smbService = new (require('./smb').SmbService)();
+  const fileService = new (require('./files').FileService)({ getPath: (n) => app.getPath(n), store, shell, nativeImage, smb: smbService });
   const fileCall = (fn) => async (...args) => { try { return { ok: true, result: await fn(...args) }; } catch (err) { return { error: String(err && err.message || err) }; } };
   ipcMain.handle('files:places', fileCall(() => fileService.places()));
-  ipcMain.handle('files:list', fileCall((_e, dir) => fileService.list(dir)));
+  ipcMain.handle('files:list', async (_e, dir) => {
+    try { return { ok: true, result: await fileService.list(dir) }; } catch (err) {
+      return { error: String(err && err.message || err), needsConnect: err && err.code === 'NEEDS_CONNECT' };
+    }
+  });
   ipcMain.handle('files:open', fileCall(async (_e, p) => { const err = await fileService.open(p); if (err) throw new Error(err); return true; }));
   ipcMain.handle('files:reveal', fileCall((_e, p) => fileService.reveal(p)));
   ipcMain.handle('files:mkdir', fileCall((_e, dir, name) => fileService.mkdir(dir, name)));
@@ -1945,6 +1950,18 @@ app.whenReady().then(() => {
   ipcMain.handle('files:preview', fileCall((_e, p) => fileService.preview(p)));
   ipcMain.handle('files:icon', async (_e, p) => fileService.icon(p));
   ipcMain.handle('files:pool', fileCall(() => fileService.ensurePool()));
+  // Network drives (SMB): connect / disconnect through the OS (smb.js).
+  ipcMain.handle('files:net-connect', fileCall((_e, opts) => smbService.connect(opts || {})));
+  ipcMain.handle('files:net-disconnect', fileCall((_e, target) => smbService.disconnect(target)));
+  ipcMain.handle('files:net-letters', fileCall(() => smbService.freeLetters()));
+  ipcMain.handle('files:net-menu', (_e, place) => new Promise((resolve) => {
+    let chosen = null;
+    Menu.buildFromTemplate([
+      { label: `${(place && place.status) || 'Connected'}: ${(place && place.remote) || ''}`, enabled: false },
+      { type: 'separator' },
+      { label: 'Disconnect', click: () => { chosen = 'disconnect'; } }
+    ]).popup({ window: win, callback: () => setImmediate(() => resolve(chosen)) });
+  }));
   // The file browser's search: the same index and ranking as Spotlight,
   // files and folders only.
   ipcMain.handle('files:search', fileCall((_e, q) => {

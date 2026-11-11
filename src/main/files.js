@@ -45,8 +45,9 @@ function within(parent, child) {
 }
 
 class FileService {
-  // { getPath(name), store, shell, nativeImage }
-  constructor({ getPath, store, shell, nativeImage }) {
+  // { getPath(name), store, shell, nativeImage, smb }
+  constructor({ getPath, store, shell, nativeImage, smb }) {
+    this.smb = smb || null;
     this.getPath = getPath;
     this.store = store;
     this.shell = shell;
@@ -75,9 +76,14 @@ class FileService {
     for (const [key, name] of user) {
       try { const p = this.getPath(key); if (p && fs.existsSync(p)) out.push({ id: key, name, path: p, kind: 'folder' }); } catch { /* not on this OS */ }
     }
+    // Network shares first known, so their drive letters are not listed twice.
+    let net = [];
+    try { net = this.smb ? await this.smb.connections() : []; } catch { net = []; }
+    const netLetters = new Set(net.map((n) => (n.letter || '').charAt(0).toUpperCase()).filter(Boolean));
     if (process.platform === 'win32') {
       for (let c = 67; c <= 90; c++) {            // C: .. Z:
         const root = `${String.fromCharCode(c)}:\\`;
+        if (netLetters.has(root[0])) continue;
         try { await fsp.access(root); out.push({ id: `drive-${root[0]}`, name: `${root[0]}:`, path: root, kind: 'drive' }); } catch { /* none */ }
       }
     } else {
@@ -88,13 +94,35 @@ class FileService {
         for (const n of names) out.push({ id: `mount-${base}/${n}`, name: n, path: path.join(base, n), kind: 'drive' });
       }
     }
+    for (const n of net) out.push({ id: `net-${n.remote}`, name: n.letter ? `${n.name} (${n.letter})` : n.name, path: n.path, remote: n.remote, status: n.status, kind: 'network' });
     return out;
   }
 
   async list(dir) {
+    // A server on its own (\\server, smb://server): its shares, as folders.
+    const net = this.smb ? require('./smb').parseAddress(dir) : null;
+    if (net && !net.share) {
+      const shares = await this.smb.shares(net.server);
+      const win = process.platform === 'win32';
+      return {
+        path: win ? `\\\\${net.server}` : `smb://${net.server}`, parent: null, server: net.server, inPool: false, truncated: false,
+        entries: shares.map((s) => ({ name: s, path: win ? `\\\\${net.server}\\${s}` : `smb://${net.server}/${s}`, dir: true, size: null, mtime: null, hidden: false, link: false, kind: 'share' }))
+      };
+    }
+    // smb:// on Linux: the gvfs folder when mounted; otherwise ask to connect.
+    if (net && process.platform !== 'win32') {
+      const conns = await this.smb.connections();
+      const hit = conns.find((c) => { const a = require('./smb').parseAddress(c.remote); return a && a.server.toLowerCase() === net.server.toLowerCase() && a.share.toLowerCase() === net.share.toLowerCase(); });
+      if (!hit) { const e = new Error('needs sign-in'); e.code = 'NEEDS_CONNECT'; throw e; }
+      dir = path.join(hit.path, net.rest || '');
+    }
     const abs = expandPath(dir || os.homedir());
     let st;
-    try { st = await fsp.stat(abs); } catch { throw new Error(`"${String(dir).trim()}" was not found.`); }
+    try { st = await fsp.stat(abs); } catch (err) {
+      // A share that wants a sign-in first (Windows UNC).
+      if (net && /EPERM|EACCES|ENOENT|UNKNOWN|EBUSY/.test(String(err && err.code))) { const e = new Error('needs sign-in'); e.code = 'NEEDS_CONNECT'; throw e; }
+      throw new Error(`"${String(dir).trim()}" was not found.`);
+    }
     if (!st.isDirectory()) throw new Error(`"${path.basename(abs)}" is a file, not a folder.`);
     if (within(this.poolDir(), abs)) await this.ensurePool();
     const dirents = await fsp.readdir(abs, { withFileTypes: true });

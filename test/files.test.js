@@ -91,3 +91,16 @@ test('files: a typed address that is missing or a file says so', async () => {
     await assert.rejects(svc.list(path.join(dir, 'f.txt')), /is a file, not a folder/);
   } finally { done(); }
 });
+
+test('smb: addresses, net view and gio parsing, friendly errors', () => {
+  const { parseAddress, parseNetView, parseGioMounts, friendly } = require('../src/main/smb');
+  assert.deepStrictEqual(parseAddress('smb://alice@nas/media/films'), { server: 'nas', share: 'media', rest: 'films' });
+  assert.deepStrictEqual(parseAddress('//nas/media'), { server: 'nas', share: 'media', rest: '' });
+  assert.deepStrictEqual(parseAddress('smb://nas'), { server: 'nas', share: '', rest: '' });
+  assert.strictEqual(parseAddress('C:/Users'), null);
+  const view = 'Shared resources at \\Mainframe\r\n\r\nShare name  Type  Used as  Comment\r\n\r\n-------------------------------------------\r\nDATABASE    Disk  M:\r\nprinter     Print\r\nThe command completed successfully.\r\n';
+  assert.deepStrictEqual(parseNetView(view), ['DATABASE']);
+  assert.deepStrictEqual(parseGioMounts('Drive(0): disk\nMount(0): media on nas -> smb://nas/media/\n'), [{ server: 'nas', share: 'media', uri: 'smb://nas/media' }]);
+  assert.match(friendly('System error 1326 has occurred'), /not accepted/);
+  assert.match(friendly('The network path was not found'), /not found/);
+});

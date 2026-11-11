@@ -1111,6 +1111,16 @@ webview.plugin-frame { background: #fff; }
 .files-place .n { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .files-place:hover { background: rgba(255,255,255,.08); opacity: 1; }
 .files-place.on { background: color-mix(in srgb, var(--accent) 28%, transparent); opacity: 1; }
+.files-place.off { opacity: .45; }
+.files-place-head { font-size: 9.5px; letter-spacing: .08em; text-transform: uppercase; opacity: .5; padding: 6px 5px 1px; }
+.files-connect .g { font-size: 12px; }
+.files-connect-form { position: absolute; left: 10px; right: 10px; top: 64px; z-index: 5; display: flex; flex-direction: column; gap: 6px; padding: 10px; border-radius: 10px;
+  background: linear-gradient(180deg, rgba(255,255,255,.12), rgba(255,255,255,.05)), rgba(var(--glass-rgb), .96); border: 1px solid rgba(255,255,255,.22); box-shadow: 0 12px 30px rgba(0,0,0,.45); }
+.files-connect-form .row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.files-connect-form input:not([type=checkbox]) { flex: 1; min-width: 0; font-size: 12px; }
+.files-connect-title { font-size: 12px; font-weight: 600; }
+.files-connect-err { font-size: 11px; color: #fca5a5; min-height: 13px; }
+.files-widget { position: relative; }
 .files-list { flex: 1; min-width: 0; overflow-y: auto; border: 1px solid rgba(255,255,255,.1); border-radius: 8px; background: rgba(0,0,0,.14); padding: 2px; outline: none; scrollbar-width: thin; }
 .files-list:focus-visible { border-color: color-mix(in srgb, var(--accent) 60%, transparent); }
 .files-list.drop { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, rgba(0,0,0,.14)); }
