@@ -762,6 +762,7 @@ function buildMenuTemplate() {
         click: () => updateSettings({ appDock: { align: a } })
       })) },
       widgetItem('Scratchpad', 'scratchpad'),
+      widgetItem('Files', 'files'),
       widgetItem('AI chat', 'ai'),
       // Plugins and web widgets are widgets too - individually toggleable
       // from the same place.
@@ -1928,6 +1929,69 @@ app.whenReady().then(() => {
   ipcMain.handle('ai:voice-speak', async (_e, text, opts) => {
     try { return await voice.speak(String(text || ''), opts || {}); } catch (err) { return { error: err.message }; }
   });
+
+  // File browser + File Pool (src/main/files.js).
+  const fileService = new (require('./files').FileService)({ getPath: (n) => app.getPath(n), store, shell, nativeImage });
+  const fileCall = (fn) => async (...args) => { try { return { ok: true, result: await fn(...args) }; } catch (err) { return { error: String(err && err.message || err) }; } };
+  ipcMain.handle('files:places', fileCall(() => fileService.places()));
+  ipcMain.handle('files:list', fileCall((_e, dir) => fileService.list(dir)));
+  ipcMain.handle('files:open', fileCall(async (_e, p) => { const err = await fileService.open(p); if (err) throw new Error(err); return true; }));
+  ipcMain.handle('files:reveal', fileCall((_e, p) => fileService.reveal(p)));
+  ipcMain.handle('files:mkdir', fileCall((_e, dir, name) => fileService.mkdir(dir, name)));
+  ipcMain.handle('files:rename', fileCall((_e, p, name) => fileService.rename(p, name)));
+  ipcMain.handle('files:trash', fileCall((_e, paths) => fileService.trash(paths)));
+  ipcMain.handle('files:transfer', fileCall((_e, paths, dest, move) => fileService.transfer(paths, dest, { move: !!move })));
+  ipcMain.handle('files:to-pool', fileCall(async (_e, paths) => fileService.transfer(paths, await fileService.ensurePool())));
+  ipcMain.handle('files:preview', fileCall((_e, p) => fileService.preview(p)));
+  ipcMain.handle('files:icon', async (_e, p) => fileService.icon(p));
+  ipcMain.handle('files:pool', fileCall(() => fileService.ensurePool()));
+  // The file browser's search: the same index and ranking as Spotlight,
+  // files and folders only.
+  ipcMain.handle('files:search', fileCall((_e, q) => {
+    const text = String(q || '').trim();
+    if (text.length < 2 || !spotlight) return { results: [], indexing: !!(spotlight && !spotlight.index.stats) };
+    const { search } = require('./search');
+    const entries = spotlight.index.entries.filter((e) => e.kind === 'file' || e.kind === 'folder');
+    const r = search(text, entries, { limit: 60, perCategory: 60, launchCounts: (store.get('search') || {}).launchCounts || {} });
+    const seen = new Set();
+    const flat = (r.groups ? r.groups.flatMap((g) => g.items) : r.results || []).filter((x) => x && x.path && !seen.has(x.path) && seen.add(x.path));
+    return { results: flat.slice(0, 60).map((x) => ({ name: x.name, path: x.path, kind: x.kind })), indexing: !spotlight.index.stats };
+  }));
+  // Right-click menu: native, like the rest of the app. Resolves with the
+  // chosen action id (or null), the renderer carries it out.
+  ipcMain.handle('files:menu', (_e, ctx) => new Promise((resolve) => {
+    const c = ctx || {};
+    const one = c.count === 1;
+    let chosen = null;
+    const item = (label, id, extra = {}) => ({ label, click: () => { chosen = id; }, ...extra });
+    const template = c.count ? [
+      item(one && c.dir ? 'Open' : 'Open', 'open'),
+      item(process.platform === 'win32' ? 'Show in Explorer' : 'Show in Files', 'reveal', { enabled: one }),
+      { type: 'separator' },
+      item('Copy', 'copy'), item('Cut', 'cut'),
+      item('Paste here', 'paste', { enabled: !!c.canPaste && one && c.dir }),
+      ...(c.inPool ? [] : [item('Copy to File Pool', 'to-pool')]),
+      { type: 'separator' },
+      item('Rename…', 'rename', { enabled: one }),
+      item(process.platform === 'win32' ? 'Delete (Recycle Bin)' : 'Move to Trash', 'trash'),
+      { type: 'separator' },
+      item('Copy path', 'copy-path', { enabled: one })
+    ] : [
+      item('New folder', 'mkdir'),
+      item('Paste', 'paste', { enabled: !!c.canPaste }),
+      { type: 'separator' },
+      item(process.platform === 'win32' ? 'Open in Explorer' : 'Open in Files', 'reveal-here'),
+      item(c.showHidden ? 'Hide hidden files' : 'Show hidden files', 'toggle-hidden')
+    ];
+    Menu.buildFromTemplate(template).popup({ window: win, callback: () => setImmediate(() => resolve(chosen)) });
+  }));
+  // Drag files out of the browser into other apps (Explorer, mail, editors).
+  ipcMain.on('files:drag', (e, paths) => {
+    const list = [].concat(paths || []).filter((p) => typeof p === 'string');
+    if (!list.length) return;
+    try { e.sender.startDrag({ file: list[0], files: list, icon: nativeImage.createFromPath(path.join(__dirname, '..', '..', 'build', 'icon.png')).resize({ width: 32 }) }); } catch { /* drag cancelled */ }
+  });
+  ipcMain.handle('files:copy-path', (_e, p) => { require('electron').clipboard.writeText(String(p || '')); return true; });
 
   // Devices: identity, pairing and the mesh (src/main/mesh). Off by default.
   deviceService = new (require('./mesh/service').DeviceService)({

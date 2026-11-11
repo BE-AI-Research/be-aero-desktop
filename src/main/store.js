@@ -101,12 +101,19 @@ const DEFAULTS = {
     tasks: true,
     media: true,
     scratchpad: true,
+    files: true,             // file browser: on, but parked in the dock by default (widgetMinimized)
     ai: true
+  },
+  files: {
+    poolDir: '',             // the File Pool folder; '' = ~/BE-Aero Pool
+    showHidden: false,
+    view: 'list',            // list | grid
+    last: ''                 // folder the browser was last showing
   },
   scratchpad: '',
   // Built-in widgets parked in the dock (id -> true). Web widgets and the
   // AI chat carry their own minimized flags.
-  widgetMinimized: {},
+  widgetMinimized: { files: true },   // the file browser starts parked in the dock
   // Spell checking for the sidebar's own inputs and for web widgets.
   spellcheck: {
     enabled: true,

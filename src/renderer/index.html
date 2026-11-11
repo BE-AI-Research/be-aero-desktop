@@ -86,6 +86,25 @@
                 placeholder="Jot down quick thoughts...&#10;- Supports raw text&#10;- Saved automatically"></textarea>
     </section>
 
+    <!-- Widget: file browser + File Pool -->
+    <section class="widget widget-hit files-widget" data-widget="files">
+      <div class="files-head">
+        <h3 class="widget-title">FILES</h3>
+        <button class="icon-btn files-back" title="Back">&#8592;</button>
+        <button class="icon-btn files-up" title="Up one folder (Backspace)">&#8593;</button>
+        <button class="icon-btn files-new" title="New folder">&#65291;</button>
+        <button class="icon-btn files-pool" title="Open the File Pool">&#127754;</button>
+      </div>
+      <div class="files-crumbs"></div>
+      <input class="files-filter" type="search" spellcheck="false" placeholder="Search this folder and the whole PC">
+      <div class="files-body">
+        <nav class="files-places"></nav>
+        <div class="files-list" tabindex="0"></div>
+      </div>
+      <div class="files-preview hidden"></div>
+      <div class="files-status"></div>
+    </section>
+
     <!-- Widget: AI chat -->
     <section class="widget widget-hit ai-widget" data-widget="ai">
       <div class="ai-head">
@@ -496,6 +515,7 @@
           <option value="right">Right</option>
         </select>
         <label class="check"><input type="checkbox" data-toggle="scratchpad"> Scratchpad</label>
+        <label class="check"><input type="checkbox" data-toggle="files"> Files (file browser and File Pool)</label>
       </details>
 
       <details data-section="devices">
@@ -574,6 +594,7 @@
   <script src="notify-view.js"></script>
   <script src="uac-view.js"></script>
   <script src="devices-view.js"></script>
+  <script src="files-view.js"></script>
   <script src="layout.js"></script>
   <script src="app.js"></script>
 </body>

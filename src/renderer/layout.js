@@ -5,10 +5,11 @@
 (function () {
   'use strict';
 
-  const DEFAULT_H = { toolbar: 30, search: 48, clock: 304, weather: 144, telemetry: 220, tasks: 64, media: 160, scratchpad: 224 };
+  const DEFAULT_H = { toolbar: 30, search: 48, clock: 304, weather: 144, telemetry: 220, tasks: 64, media: 160, scratchpad: 224, files: 380 };
   const MIN = {
     toolbar: [180, 30], search: [200, 44], clock: [150, 150], weather: [220, 110],
-    telemetry: [200, 130], tasks: [140, 54], media: [200, 110], scratchpad: [200, 120]
+    telemetry: [200, 130], tasks: [140, 54], media: [200, 110], scratchpad: [200, 120],
+    files: [260, 220]
   };
   // Web widgets that have never been placed open in the MIDDLE of the home
   // display (cascaded), not in the sidebar column: they are content panes.
@@ -80,6 +81,14 @@
       }
       const docked = (layoutOf('docked')[k] || {}).h;
       const h = docked || DEFAULT_H[k] || 200;
+      // A column that has run off the bottom of the display: open this one
+      // in the middle instead (cascaded), where it is fully visible.
+      if (y + h > home.y + home.h - GAP) {
+        const w = Math.max(COL_W, (MIN[k] || [0])[0]);
+        out[k] = { x: Math.round(home.x + (home.w - w) / 2 + cascade * 28), y: Math.round(home.y + Math.max(GAP, (home.h - h) / 2) + cascade * 28), w, h };
+        cascade++;
+        continue;
+      }
       out[k] = { x, y, w: COL_W, h };
       y += h + GAP;
     }

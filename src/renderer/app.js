@@ -86,6 +86,7 @@
   if (window.AeroPower) AeroPower.init({ aero });
   if (window.AeroUac) AeroUac.init({ aero });
   if (window.AeroDevices) AeroDevices.init({ aero });
+  if (window.AeroFiles) AeroFiles.init({ aero });
   if (window.AeroNotify) AeroNotify.init({
     aero,
     focusWebWidget: (id) => {
@@ -252,8 +253,8 @@
   // ---------------------------------------------------------------
   // Search widget: typing hands off to the Spotlight launcher window
   // ---------------------------------------------------------------
-  const WIDGET_GLYPH = { search: '\uD83D\uDD0D', clock: '\uD83D\uDD52', weather: '\u26C5', telemetry: '\uD83D\uDCCA', media: '\uD83C\uDFB5', scratchpad: '\uD83D\uDCDD' };
-  const WIDGET_NAME = { search: 'Search', clock: 'Chronometer', weather: 'Weather', telemetry: 'System telemetry', media: 'Media controller', scratchpad: 'Scratchpad' };
+  const WIDGET_GLYPH = { search: '\uD83D\uDD0D', clock: '\uD83D\uDD52', weather: '\u26C5', telemetry: '\uD83D\uDCCA', media: '\uD83C\uDFB5', scratchpad: '\uD83D\uDCDD', files: '\uD83D\uDCC1' };
+  const WIDGET_NAME = { search: 'Search', clock: 'Chronometer', weather: 'Weather', telemetry: 'System telemetry', media: 'Media controller', scratchpad: 'Scratchpad', files: 'Files' };
   let voiceNames = null;   // TTS voices, filled lazily (used by applySettings before the voice section below)
   const searchInput = $('search-input');
   async function refreshHotkeyLabel() {
