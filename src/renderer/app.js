@@ -85,6 +85,7 @@
   if (window.AeroMedia) AeroMedia.init({ aero });
   if (window.AeroPower) AeroPower.init({ aero });
   if (window.AeroUac) AeroUac.init({ aero });
+  if (window.AeroDevices) AeroDevices.init({ aero });
   if (window.AeroNotify) AeroNotify.init({
     aero,
     focusWebWidget: (id) => {

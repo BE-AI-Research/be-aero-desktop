@@ -153,6 +153,11 @@ const DEFAULTS = {
       interrupt: true        // stop speaking when the microphone starts
     }
   },
+  devices: {
+    enabled: false,          // device connections (the mesh): off until turned on in Settings > Devices
+    name: '',                // this device's name for others ('' = the computer name)
+    port: 41801
+  },
   notifications: {
     toast: true,             // also show OS toasts for web-widget / AI notifications
     captureSystem: true      // Linux: mirror every app's desktop notifications into the center

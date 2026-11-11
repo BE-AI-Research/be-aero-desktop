@@ -498,6 +498,27 @@
         <label class="check"><input type="checkbox" data-toggle="scratchpad"> Scratchpad</label>
       </details>
 
+      <details data-section="devices">
+        <summary>Devices</summary>
+        <label class="check"><input id="set-dev-enabled" type="checkbox"> Connect with my other devices (BE-Aero on other computers)</label>
+        <div class="hint-text">Paired devices talk over an encrypted connection that only accepts the exact devices you paired. Turning this on opens network port <span id="dev-port">41801</span>; Windows may ask once whether to allow BE-Aero through its firewall.</div>
+        <div id="dev-error" class="hint-text dev-error hidden"></div>
+        <label class="field-label">This device</label>
+        <div class="row"><input id="set-dev-name" type="text" spellcheck="false" placeholder="Name shown to your other devices"></div>
+        <div class="dev-id-row"><code id="dev-id" class="dev-id"></code><button class="icon-btn" id="btn-dev-copy" title="Copy this device's ID">⧉</button></div>
+        <div id="dev-key-hint" class="hint-text"></div>
+        <div id="dev-live" class="hidden">
+          <label class="field-label">Add a device</label>
+          <div class="hint-text">On the device that shows a code, press "Show pairing code". On the other one, pick it from the list (or type its address) and enter the code. You confirm on both.</div>
+          <div class="row"><button class="btn" id="btn-dev-code">Show pairing code</button><span id="dev-code" class="dev-code hidden"></span></div>
+          <div id="dev-nearby" class="dev-nearby"></div>
+          <div class="row"><input id="dev-pair-addr" type="text" spellcheck="false" placeholder="Address (e.g. 192.168.1.20)"><input id="dev-pair-code" type="text" inputmode="numeric" maxlength="7" placeholder="Code" class="dev-code-input"><button class="btn" id="btn-dev-pair">Pair</button></div>
+          <div id="dev-pair-status" class="hint-text"></div>
+          <label class="field-label">Paired devices</label>
+          <div id="dev-list" class="dev-list"></div>
+        </div>
+      </details>
+
       <details data-section="extensions">
         <summary>Extensions</summary>
         <label class="field-label">Plugin widgets</label>
@@ -552,6 +573,7 @@
   <script src="visuals-view.js"></script>
   <script src="notify-view.js"></script>
   <script src="uac-view.js"></script>
+  <script src="devices-view.js"></script>
   <script src="layout.js"></script>
   <script src="app.js"></script>
 </body>

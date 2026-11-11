@@ -44,6 +44,7 @@ let whisper = null;
 let piper = null;
 let aiService = null;
 let notifyCenter = null;
+let deviceService = null;
 let linuxNotify = null;
 let dockHotkey = null;       // the accelerator actually registered for the dock
 let dockSummoned = false;    // sidebar lifted above everything by the dock hotkey
@@ -1927,6 +1928,14 @@ app.whenReady().then(() => {
   ipcMain.handle('ai:voice-speak', async (_e, text, opts) => {
     try { return await voice.speak(String(text || ''), opts || {}); } catch (err) { return { error: err.message }; }
   });
+
+  // Devices: identity, pairing and the mesh (src/main/mesh). Off by default.
+  deviceService = new (require('./mesh/service').DeviceService)({
+    userDataDir: app.getPath('userData'), store, getWindow: () => win
+  });
+  deviceService.registerIpc();
+  if ((store.get('devices') || {}).enabled) deviceService.start();
+  app.on('before-quit', () => { if (deviceService) deviceService.stop(); });
 
   aiService = new (require('./ai').AiService)({
     userDataDir: app.getPath('userData'),
