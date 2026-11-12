@@ -15,19 +15,34 @@ const { parseUnixBase, defaultBeCodeSocket, socketFetch } = require('./transport
 // local: a server on this machine or LAN (small windows, may restart - the
 // context buffer and reconnection are tuned for it). noTools: the endpoint
 // serves inference only, so the assistant answers without acting.
+// group: where it runs - 'online' (a service, needs an account and key),
+// 'local' (this computer), 'network' (a server on your network), 'custom'.
+// keyUrl: where to create an API key (Settings opens it).
 const PRESETS = {
-  anthropic: { label: 'Anthropic (Claude)', kind: 'anthropic', baseUrl: '', model: 'claude-opus-5-5', needsKey: true },
-  openai: { label: 'OpenAI', kind: 'openai', baseUrl: 'https://api.openai.com/v1', model: '', needsKey: true },
-  ollama: { label: 'Ollama (local)', kind: 'openai', baseUrl: 'http://localhost:11434/v1', model: '', needsKey: false, local: true },
-  ollamalan: { label: 'Ollama (LAN server)', kind: 'openai', baseUrl: '', model: '', needsKey: false, local: true,
+  anthropic: { label: 'Anthropic (Claude)', group: 'online', kind: 'anthropic', baseUrl: '', model: 'claude-opus-5-5', needsKey: true, keyUrl: 'https://console.anthropic.com/settings/keys' },
+  openai: { label: 'OpenAI (ChatGPT models)', group: 'online', kind: 'openai', baseUrl: 'https://api.openai.com/v1', model: '', needsKey: true, keyUrl: 'https://platform.openai.com/api-keys' },
+  gemini: { label: 'Google Gemini', group: 'online', kind: 'openai', baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', model: '', needsKey: true, keyUrl: 'https://aistudio.google.com/apikey',
+    hint: 'A free key from Google AI Studio works to start; the free tier has rate limits.' },
+  openrouter: { label: 'OpenRouter (many models, one key)', group: 'online', kind: 'openai', baseUrl: 'https://openrouter.ai/api/v1', model: '', needsKey: true, keyUrl: 'https://openrouter.ai/keys',
+    hint: 'One key for hundreds of models from many companies; pay per use. Pick a model that supports tools for the assistant to act.' },
+  groq: { label: 'Groq (very fast)', group: 'online', kind: 'openai', baseUrl: 'https://api.groq.com/openai/v1', model: '', needsKey: true, keyUrl: 'https://console.groq.com/keys' },
+  mistral: { label: 'Mistral AI', group: 'online', kind: 'openai', baseUrl: 'https://api.mistral.ai/v1', model: '', needsKey: true, keyUrl: 'https://console.mistral.ai/api-keys' },
+  deepseek: { label: 'DeepSeek', group: 'online', kind: 'openai', baseUrl: 'https://api.deepseek.com/v1', model: 'deepseek-chat', needsKey: true, keyUrl: 'https://platform.deepseek.com/api_keys' },
+  xai: { label: 'xAI (Grok)', group: 'online', kind: 'openai', baseUrl: 'https://api.x.ai/v1', model: '', needsKey: true, keyUrl: 'https://console.x.ai' },
+  together: { label: 'Together AI (open models)', group: 'online', kind: 'openai', baseUrl: 'https://api.together.xyz/v1', model: '', needsKey: true, keyUrl: 'https://api.together.ai/settings/api-keys' },
+  fireworks: { label: 'Fireworks AI (open models)', group: 'online', kind: 'openai', baseUrl: 'https://api.fireworks.ai/inference/v1', model: '', needsKey: true, keyUrl: 'https://fireworks.ai/account/api-keys' },
+  perplexity: { label: 'Perplexity (answers with web search)', group: 'online', kind: 'openai', baseUrl: 'https://api.perplexity.ai', model: 'sonar', needsKey: true, keyUrl: 'https://www.perplexity.ai/account/api/keys',
+    hint: 'Answers include web search. It does not list its models: type one (sonar, sonar-pro). Tool use is limited.' },
+  ollama: { label: 'Ollama (this computer)', group: 'local', kind: 'openai', baseUrl: 'http://localhost:11434/v1', model: '', needsKey: false, local: true },
+  ollamalan: { label: 'Ollama (server on your network)', group: 'network', kind: 'openai', baseUrl: '', model: '', needsKey: false, local: true,
     hint: 'A shared Ollama server on your network. Type its address, e.g. 192.168.1.20 - the port (11434) and /v1 are added for you. On the server, Ollama must listen on the network (OLLAMA_HOST=0.0.0.0).' },
-  lmstudio: { label: 'LM Studio (local)', kind: 'openai', baseUrl: 'http://localhost:1234/v1', model: '', needsKey: false, local: true },
-  llamacpp: { label: 'llama.cpp server (local)', kind: 'openai', baseUrl: 'http://localhost:8080/v1', model: '', needsKey: false, local: true },
-  becode: { label: 'BE-Code session (shared inference)', kind: 'openai', baseUrl: `unix://${defaultBeCodeSocket()}`, model: 'default', needsKey: true, local: true, noTools: true,
+  lmstudio: { label: 'LM Studio (this computer)', group: 'local', kind: 'openai', baseUrl: 'http://localhost:1234/v1', model: '', needsKey: false, local: true },
+  llamacpp: { label: 'llama.cpp server (this computer)', group: 'local', kind: 'openai', baseUrl: 'http://localhost:8080/v1', model: '', needsKey: false, local: true },
+  becode: { label: 'BE-Code session (shared inference)', group: 'local', kind: 'openai', baseUrl: `unix://${defaultBeCodeSocket()}`, model: 'default', needsKey: true, local: true, noTools: true,
     hint: 'A running BE-Code session with api.enabled serves ~/.be-code/api/api.sock. Register this app once (be-code apps add be-aero --tiers completions) and paste the key it prints. Inference only: the assistant answers but does not use tools.'
       + (process.platform === 'win32' ? ' On Windows this socket cannot be reached from the app yet (Node has no AF_UNIX client here); use it on Linux or macOS, or point a local provider at the BE-Code TCP endpoint when one exists.' : '') },
-  beaiengine: { label: 'BE AI Engine fabric', kind: 'openai', baseUrl: 'http://localhost:9800/v1', model: '', needsKey: true, local: true },
-  custom: { label: 'Custom OpenAI-compatible server', kind: 'openai', baseUrl: '', model: '', needsKey: false, local: true }
+  beaiengine: { label: 'BE AI Engine fabric', group: 'network', kind: 'openai', baseUrl: 'http://localhost:9800/v1', model: '', needsKey: true, local: true },
+  custom: { label: 'Custom OpenAI-compatible server', group: 'custom', kind: 'openai', baseUrl: '', model: '', needsKey: false, local: true }
 };
 
 // ------------------------------------------------------------ translation

@@ -998,12 +998,24 @@ function startTelemetry() {
 // Settings as sent to the renderer: stored values plus the resolved theme.
 function publicSettings() {
   const s = store.get();
-  return { ...s, themeVars: themeVars(s.theme), ...displayGeometry() };
+  // API keys stay in the main process (even encrypted, the page has no use for them).
+  const ai = s.ai ? { ...s.ai, apiKey: s.ai.apiKey ? '(saved)' : '', taskApiKey: s.ai.taskApiKey ? '(saved)' : '', keys: Object.fromEntries(Object.entries(s.ai.keys || {}).map(([k, v]) => [k, v ? '(saved)' : ''])) } : s.ai;
+  return { ...s, ai, themeVars: themeVars(s.theme), ...displayGeometry() };
 }
 
 ipcMain.handle('settings:get', () => publicSettings());
 ipcMain.handle('themes:list', () => Object.entries(PRESETS).map(([id, p]) => ({ id, ...p })));
-ipcMain.handle('settings:set', (_e, patch) => updateSettings(patch || {}));
+ipcMain.handle('settings:set', (_e, patch) => {
+  patch = patch || {};
+  // The page only ever sees "(saved)" for API keys; never let that come back as a key.
+  if (patch.ai && typeof patch.ai === 'object') {
+    const ai = { ...patch.ai };
+    for (const f of ['apiKey', 'taskApiKey']) if (ai[f] === '(saved)') delete ai[f];
+    if (ai.keys && typeof ai.keys === 'object') ai.keys = Object.fromEntries(Object.entries(ai.keys).filter(([, v]) => v !== '(saved)'));
+    patch = { ...patch, ai };
+  }
+  return updateSettings(patch);
+});
 // ---------------------------------------------------------------- Plugin files
 const PLUGIN_MIME = {
   '.html': 'text/html', '.htm': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript',

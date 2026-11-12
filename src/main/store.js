@@ -130,6 +130,7 @@ const DEFAULTS = {
     provider: 'anthropic',   // anthropic | openai | ollama | lmstudio | custom
     baseUrl: '',
     apiKey: '',
+    keys: {},                // API keys per provider (encrypted), so switching providers keeps each one
     model: '',
     permission: 'ask',       // ask | allow | deny  (reads are always allowed)
     systemPrompt: '',

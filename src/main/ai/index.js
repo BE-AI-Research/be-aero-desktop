@@ -24,6 +24,12 @@ class AiService {
   constructor(deps) {
     this.d = deps;
     this.conversations = new Conversations(path.join(deps.userDataDir, 'ai', 'conversations'));
+    // Keys per provider (1.2.8): the old single key belonged to the provider
+    // chosen then - move it into that provider's slot once.
+    {
+      const c = this.config();
+      if (c.apiKey && !(c.keys && Object.keys(c.keys).length)) deps.updateSettings({ ai: { keys: { [c.provider || 'anthropic']: c.apiKey }, apiKey: '' } });
+    }
     this.conversations.defaultLocal = () => (this.d.store.get('devices') || {}).newConversationsLocal === true;
     this.runs = new Map();          // conversationId -> AbortController
     this.queues = new Map();        // conversationId -> [text] waiting for the current turn
@@ -273,8 +279,17 @@ class AiService {
     return this.config().enabled !== false;
   }
 
+  // Keys are kept per provider (ai.keys[provider], encrypted), so switching
+  // providers and back keeps each one. ai.apiKey / ai.taskApiKey are the
+  // older single slots, still read.
   apiKey(field = 'apiKey') {
-    const raw = this.config()[field] || '';
+    const c = this.config();
+    const keys = c.keys || {};
+    const prov = field === 'taskApiKey' ? (c.taskProvider || '') : (c.provider || 'anthropic');
+    let raw = '';
+    // A provider with its own slot uses only that (even when empty: cleared).
+    if (field === 'taskApiKey') raw = c.taskApiKey || (prov ? keys[prov] : '') || '';
+    else raw = prov && Object.prototype.hasOwnProperty.call(keys, prov) ? keys[prov] : (c.apiKey || '');
     if (!raw) return '';
     if (raw.startsWith('enc:')) {
       try {
@@ -290,7 +305,18 @@ class AiService {
     if (stored && safeStorage.isEncryptionAvailable()) {
       stored = 'enc:' + safeStorage.encryptString(stored).toString('base64');
     }
-    this.d.updateSettings({ ai: { [field]: stored } });
+    const c = this.config();
+    const prov = field === 'taskApiKey' ? (c.taskProvider || '') : (c.provider || 'anthropic');
+    // The provider's own slot; the older single slot is cleared so it is
+    // not used for a different provider later.
+    if (prov) this.d.updateSettings({ ai: { keys: { [prov]: stored }, [field]: '' } });
+    else this.d.updateSettings({ ai: { [field]: stored } });
+  }
+
+  // Which providers have a key saved (never the keys themselves).
+  keyedProviders() {
+    const keys = this.config().keys || {};
+    return Object.keys(keys).filter((k) => keys[k]);
   }
 
   // Inference endpoints. 'chat' is Settings > Provider; 'task' is the
@@ -300,11 +326,14 @@ class AiService {
     const c = this.config();
     if (which === 'task' && c.taskProvider) {
       const preset = PRESETS[c.taskProvider] || PRESETS.custom;
-      return { id: 'task', provider: c.taskProvider, preset, baseUrl: normalizeBaseUrl(c.taskProvider, c.taskBaseUrl || preset.baseUrl), keyField: 'taskApiKey' };
+      // An online service always uses its own address (a stored one may be left over from another provider).
+      const url = preset.group === 'online' && preset.baseUrl ? preset.baseUrl : (c.taskBaseUrl || preset.baseUrl);
+      return { id: 'task', provider: c.taskProvider, preset, baseUrl: normalizeBaseUrl(c.taskProvider, url), keyField: 'taskApiKey' };
     }
     const provider = c.provider || 'anthropic';
     const preset = PRESETS[provider] || PRESETS.custom;
-    return { id: 'chat', provider, preset, baseUrl: normalizeBaseUrl(provider, c.baseUrl || preset.baseUrl), keyField: 'apiKey' };
+    const url = preset.group === 'online' && preset.baseUrl ? preset.baseUrl : (c.baseUrl || preset.baseUrl);
+    return { id: 'chat', provider, preset, baseUrl: normalizeBaseUrl(provider, url), keyField: 'apiKey' };
   }
 
   provider(ep = this.endpoint()) {
@@ -542,7 +571,8 @@ class AiService {
       contextTokens: Number(c.contextTokens) || 0, contextBudget: this.contextBudget(), compactWithModel: c.compactWithModel !== false,
       taskProvider: c.taskProvider || '', taskBaseUrl: c.taskBaseUrl || '', hasTaskKey: !!this.apiKey('taskApiKey'),
       taskEndpointUrl: this.endpoint('task').baseUrl, chatEndpointUrl: this.endpoint('chat').baseUrl,
-      presets: Object.entries(PRESETS).map(([id, p]) => ({ id, label: p.label, baseUrl: p.baseUrl, model: p.model, needsKey: p.needsKey, local: !!p.local, noTools: !!p.noTools, hint: p.hint || '' }))
+      keyed: this.keyedProviders(),
+      presets: Object.entries(PRESETS).map(([id, p]) => ({ id, label: p.label, group: p.group || 'custom', keyUrl: p.keyUrl || '', baseUrl: p.baseUrl, model: p.model, needsKey: p.needsKey, local: !!p.local, noTools: !!p.noTools, hint: p.hint || '' }))
     };
   }
 

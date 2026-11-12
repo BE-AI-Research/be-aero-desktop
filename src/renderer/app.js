@@ -695,11 +695,22 @@
     if (!st) return;
     aiPresets = st.presets || [];
     const sel = $('set-ai-provider');
-    if (!sel.options.length) {
-      for (const p of aiPresets) { const o = document.createElement('option'); o.value = p.id; o.textContent = p.label; sel.appendChild(o); }
+    const keyed = st.keyed || [];
+    // Grouped: online services, this computer, your network, custom. A
+    // service with a key saved says so.
+    sel.innerHTML = '';
+    for (const [g, label] of [['online', 'Online services (need an account and API key)'], ['local', 'On this computer'], ['network', 'On your network'], ['custom', 'Other']]) {
+      const items = aiPresets.filter((p) => (p.group || 'custom') === g);
+      if (!items.length) continue;
+      const og = document.createElement('optgroup');
+      og.label = label;
+      for (const p of items) { const o = document.createElement('option'); o.value = p.id; o.textContent = `${p.label}${p.needsKey && keyed.includes(p.id) ? '  ✓ key saved' : ''}`; og.appendChild(o); }
+      sel.appendChild(og);
     }
     sel.value = st.provider;
     const preset = aiPresets.find((p) => p.id === st.provider) || {};
+    $('btn-ai-getkey').classList.toggle('hidden', !preset.keyUrl);
+    $('set-ai-url').classList.toggle('hidden', preset.group === 'online' && preset.id !== 'custom');
     if (document.activeElement !== $('set-ai-url')) $('set-ai-url').value = st.baseUrl || '';
     $('set-ai-url').disabled = st.provider === 'anthropic';
     $('set-ai-url').placeholder = st.provider === 'anthropic' ? 'Default Anthropic endpoint' : st.provider === 'becode' ? 'unix://~/.be-code/api/api.sock' : st.provider === 'ollamalan' ? 'Server address (e.g. 192.168.1.20)' : 'Server URL (e.g. http://localhost:11434/v1)';
@@ -867,16 +878,56 @@
   $('set-ai-provider').addEventListener('change', async (e) => {
     const preset = aiPresets.find((p) => p.id === e.target.value) || {};
     await aero.setSettings({ ai: { provider: e.target.value, baseUrl: preset.baseUrl || '', model: preset.model || '' } });
-    refreshAiStatus();
+    $('set-ai-model-select').classList.add('hidden');
+    await refreshAiStatus();
+    // A service whose key is already saved: list its models straight away.
+    const st = await aero.aiStatus();
+    if (st && st.hasKey && preset.group === 'online') autoModels();
   });
+  $('btn-ai-getkey').addEventListener('click', () => {
+    const preset = aiPresets.find((p) => p.id === $('set-ai-provider').value) || {};
+    if (preset.keyUrl) aero.openExternal(preset.keyUrl);
+  });
+  // After a key is saved (or a keyed service is picked): fetch the models,
+  // which also proves the key works, and choose one if none is set.
+  async function autoModels() {
+    $('ai-status').textContent = 'Checking the key and listing models…';
+    const r = await aero.aiModels();
+    if (!r || !r.models) {
+      const err = String((r && r.error) || 'no answer');
+      $('ai-status').textContent = /\b(400|401|403)\b|api key|unauthori[sz]ed|invalid/i.test(err)
+        ? 'The service did not accept that key. Check it, or create a new one with Get a key.'
+        : /\b(404|405)\b/.test(err) ? 'This service does not list its models - type the model name below.'
+        : `Could not reach the service: ${err.slice(0, 160)}`;
+      return;
+    }
+    const sel = $('set-ai-model-select');
+    sel.innerHTML = '';
+    const ph = document.createElement('option'); ph.value = ''; ph.textContent = `Choose a model (${r.models.length} available)`; sel.appendChild(ph);
+    for (const m of r.models) { const o = document.createElement('option'); o.value = m; o.textContent = m; sel.appendChild(o); }
+    sel.classList.toggle('hidden', !r.models.length);
+    const cur = $('set-ai-model').value.trim();
+    if (cur && r.models.includes(cur)) sel.value = cur;
+    else if (!cur && r.models.length) {
+      // A sensible first pick: the provider's suggestion, else the first listed.
+      const preset = aiPresets.find((p) => p.id === $('set-ai-provider').value) || {};
+      const pick = r.models.includes(preset.model) ? preset.model : r.models[0];
+      sel.value = pick; $('set-ai-model').value = pick;
+      await aero.setSettings({ ai: { model: pick } });
+    }
+    await refreshAiStatus();
+    if (r.models.length) $('ai-status').textContent = `Connected: ${r.models.length} models available. ${$('ai-status').textContent}`;
+  }
   $('set-ai-url').addEventListener('change', (e) => aero.setSettings({ ai: { baseUrl: e.target.value.trim() } }).then(refreshAiStatus));
   $('set-ai-model').addEventListener('change', (e) => aero.setSettings({ ai: { model: e.target.value.trim() } }).then(refreshAiStatus));
   $('btn-ai-key').addEventListener('click', async () => {
     const v = $('set-ai-key').value;
     await aero.aiSetKey(v);
     $('set-ai-key').value = '';
-    refreshAiStatus();
+    await refreshAiStatus();
+    if (v.trim()) autoModels();
   });
+  $('set-ai-key').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('btn-ai-key').click(); });
   $('btn-ai-models').addEventListener('click', async () => {
     $('ai-status').textContent = 'Fetching models…';
     const r = await aero.aiModels();
