@@ -121,8 +121,10 @@ class Mesh extends EventEmitter {
   // identity: { keyPem, certPem, id, name }
   // peers:    { load() -> [peer], save([peer]) } - peer: { id, name, addresses, perms, pairedAt, lastSeen }
   // approvePairing({ id, name, address }) -> Promise<bool>   (asks the user)
-  constructor({ identity, peers, approvePairing, port = DEFAULT_PORT, discoveryPort = DISCOVERY_PORT, discovery = true, log = () => {} }) {
+  // role: 'device' (BE-Aero) or 'relay' (the BE-Aero Relay Server), told to peers in hello.
+  constructor({ identity, peers, approvePairing, port = DEFAULT_PORT, discoveryPort = DISCOVERY_PORT, discovery = true, log = () => {}, role = 'device' }) {
     super();
+    this.role = role;
     this.identity = identity;
     this.peerStore = peers;
     this.approvePairing = approvePairing || (async () => false);
@@ -370,10 +372,13 @@ class Mesh extends EventEmitter {
     this.conns.set(id, conn);
     conn.on('close', () => { if (this.conns.get(id) === conn) { this.conns.delete(id); this.changed(); } });
     conn.on('frame', (m) => this.onFrame(conn, m));
-    conn.send({ t: 'hello', name: this.identity.name, port: this.port, protocol: PROTOCOL });
+    conn.send({ t: 'hello', name: this.identity.name, port: this.port, protocol: PROTOCOL, role: this.role });
     const peer = this.peers.get(id);
     if (peer) {
       peer.lastSeen = Date.now();
+      // Keep its certificate (pinned by the ID): its public key is what we
+      // encrypt to when it is offline and messages go through a relay.
+      try { const raw = conn.socket.getPeerCertificate(true).raw; if (raw && deviceIdFromCert(raw) === id) peer.cert = raw.toString('base64'); } catch { /* no cert */ }
       if (address) {
         const a = `${String(address).replace(/^::ffff:/, '')}:${peer.port || DEFAULT_PORT}`;
         if (conn.outbound && !peer.addresses.includes(a)) { peer.addresses.unshift(a); peer.addresses = peer.addresses.slice(0, 5); }
@@ -390,6 +395,7 @@ class Mesh extends EventEmitter {
     if (!peer) { conn.close('no longer paired'); return; }
     if (m.t === 'hello') {
       peer.name = String(m.name || peer.name).slice(0, 60);
+      peer.role = m.role === 'relay' ? 'relay' : 'device';
       if (m.port) {
         peer.port = Number(m.port);
         // An inbound connection tells us where this device listens.
