@@ -966,7 +966,15 @@
     for (const m of list) {
       const row = document.createElement('div');
       row.className = 'plugin-row';
-      row.innerHTML = `<span class="plugin-name" title="${new Date(m.updatedAt).toLocaleString()}">${m.text.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]))}${m.tags && m.tags.length ? ` <small>[${m.tags.join(', ')}]</small>` : ''}</span><button class="icon-btn" title="Forget">\u2715</button>`;
+      // Text and tags come from the model: never markup.
+      const name = document.createElement('span');
+      name.className = 'plugin-name';
+      name.title = new Date(m.updatedAt).toLocaleString();
+      name.textContent = String(m.text || '');
+      if (m.tags && m.tags.length) { const t = document.createElement('small'); t.textContent = ` [${m.tags.map(String).join(', ')}]`; name.appendChild(t); }
+      const forget = document.createElement('button');
+      forget.className = 'icon-btn'; forget.title = 'Forget'; forget.textContent = '\u2715';
+      row.append(name, forget);
       row.querySelector('button').addEventListener('click', async () => { await aero.aiMemoryForget(m.id); renderMemory(); });
       box.appendChild(row);
     }

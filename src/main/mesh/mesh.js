@@ -145,6 +145,7 @@ class Mesh extends EventEmitter {
 
   // ---- lifecycle
   async start() {
+    this.stopped = false;
     this.server = tls.createServer({
       key: this.identity.keyPem, cert: this.identity.certPem,
       requestCert: true, rejectUnauthorized: false, minVersion: 'TLSv1.3'
@@ -162,6 +163,8 @@ class Mesh extends EventEmitter {
   }
 
   stop() {
+    // Dials still in flight finish later: attach() refuses them once stopped.
+    this.stopped = true;
     for (const t of this.timers) clearInterval(t);
     this.timers = [];
     for (const c of this.conns.values()) c.close('stopping');
@@ -314,7 +317,7 @@ class Mesh extends EventEmitter {
   }
 
   async connect(peer) {
-    if (!peer || this.conns.has(peer.id)) return;
+    if (this.stopped || !peer || this.conns.has(peer.id)) return;
     for (const a of peer.addresses || []) {
       const i = a.lastIndexOf(':');
       const host = a.slice(0, i);
@@ -334,6 +337,7 @@ class Mesh extends EventEmitter {
   }
 
   onInbound(socket) {
+    if (this.stopped) { socket.destroy(); return; }
     const cert = socket.getPeerCertificate(true);
     if (!cert || !cert.raw) { socket.destroy(); return; }
     const id = deviceIdFromCert(cert.raw);
@@ -374,6 +378,7 @@ class Mesh extends EventEmitter {
 
   // A pinned, paired connection: keep one per device, then serve requests.
   attach(conn, address) {
+    if (this.stopped) { conn.close('stopped'); return; }
     const id = conn.peerId;
     const existing = this.conns.get(id);
     if (existing && !existing.closed) {

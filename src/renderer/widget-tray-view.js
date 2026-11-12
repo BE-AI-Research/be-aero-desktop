@@ -155,9 +155,11 @@
     document.body.appendChild(panel);
     panel.querySelector('.wtray-add').addEventListener('click', toggleAdd);
     tileEl.classList.add('open');
+    const mine = panel;
     await load();
+    if (panel !== mine) return;                    // closed while loading
     place();
-    setTimeout(() => { document.addEventListener('pointerdown', outside, true); document.addEventListener('keydown', onKey, true); }, 0);
+    setTimeout(() => { if (panel !== mine) return; document.addEventListener('pointerdown', outside, true); document.addEventListener('keydown', onKey, true); }, 0);
   }
 
   function init(opts) {

@@ -2361,11 +2361,16 @@ app.whenReady().then(() => {
   // by another app, or by File Pool sync) refreshes it.
   // One watch per window (the desktop's widget and each file browser window).
   const viewWatches = new Map();   // webContents id -> { watch, timer }
+  const watchedSenders = new Set(); // webContents ids with a 'destroyed' cleanup attached
   ipcMain.handle('files:watch', (e, dir) => {
     const wc = e.sender;
     const old = viewWatches.get(wc.id);
     if (old) { clearTimeout(old.timer); try { old.watch.close(); } catch { /* closed */ } viewWatches.delete(wc.id); }
-    else wc.once('destroyed', () => { const v = viewWatches.get(wc.id); if (v) { try { v.watch.close(); } catch { /* */ } viewWatches.delete(wc.id); } });
+    if (!watchedSenders.has(wc.id)) {
+      watchedSenders.add(wc.id);
+      const id = wc.id;
+      wc.once('destroyed', () => { watchedSenders.delete(id); const v = viewWatches.get(id); if (v) { clearTimeout(v.timer); try { v.watch.close(); } catch { /* */ } viewWatches.delete(id); } });
+    }
     const d = String(dir || '');
     if (!d || /^(\\\\|smb:|aero:)/i.test(d)) return false;        // network and device folders: no watching
     try {

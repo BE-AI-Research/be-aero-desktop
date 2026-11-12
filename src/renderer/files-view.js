@@ -80,7 +80,34 @@
     if (jobs.some((j) => FINISHED.has(j.state) && before.has(j.id) && !FINISHED.has(before.get(j.id)))) softRefresh();
     if (!transfersEl) return;
     transfersEl.classList.toggle('hidden', !jobs.length);
-    transfersEl.innerHTML = jobs.map((j) => {
+    // One box per job, updated in place: rebuilding 4 times a second would
+    // swap a button out from under a click.
+    const keep = new Set(jobs.map((j) => j.id));
+    for (const box of [...transfersEl.children]) if (!keep.has(box.dataset.id)) box.remove();
+    jobs.forEach((j, i) => {
+      let box = transfersEl.querySelector(`.xfer[data-id="${CSS.escape(j.id)}"]`);
+      const html = jobHtml(j);
+      if (!box) {
+        const t = document.createElement('div'); t.innerHTML = html.full; box = t.firstElementChild;
+        box.dataset.state = j.state;
+      } else if (box.dataset.state !== j.state) {
+        const t = document.createElement('div'); t.innerHTML = html.full; const fresh = t.firstElementChild;
+        fresh.dataset.state = j.state; box.replaceWith(fresh); box = fresh;
+      } else {
+        const set = (sel, fn) => { const e = box.querySelector(sel); if (e) fn(e); };
+        set('.xfer-pct', (e) => { if (e.textContent !== html.pct) e.textContent = html.pct; });
+        set('.xfer-bar i', (e) => { e.style.width = `${html.pctNum}%`; });
+        set('.xfer-sub', (e) => { if (e.innerHTML !== html.sub) e.innerHTML = html.sub; });
+        const err = box.querySelector('.xfer-err');
+        if (html.err && !err) box.insertAdjacentHTML('beforeend', html.err);
+        else if (err && html.err) { const t = document.createElement('div'); t.innerHTML = html.err; err.replaceWith(t.firstElementChild); }
+      }
+      if (transfersEl.children[i] !== box) transfersEl.insertBefore(box, transfersEl.children[i] || null);
+    });
+  }
+
+  function jobHtml(j) {
+    {
       const pct = j.total > 0 ? Math.min(100, Math.round((j.done / j.total) * 100)) : (FINISHED.has(j.state) ? 100 : 0);
       const live = j.state === 'running' || j.state === 'paused' || j.state === 'stopping';
       const sub = live
@@ -94,13 +121,19 @@
       const btns = live
         ? `${j.state === 'paused' ? `<button class="icon-btn" data-act="resume" title="Resume">▶</button>` : `<button class="icon-btn" data-act="pause" title="Pause"${j.state === 'stopping' ? ' disabled' : ''}>⏸</button>`}<button class="icon-btn" data-act="cancel" title="Stop"${j.state === 'stopping' ? ' disabled' : ''}>⏹</button>`
         : '<button class="icon-btn" data-act="clear" title="Dismiss">✕</button>';
-      return `<div class="xfer xfer-${j.state}" data-id="${esc(j.id)}">
-        <div class="xfer-top"><span class="xfer-title" title="${esc(j.title)} → ${esc(j.dest)}">${esc(j.title)}</span><span class="xfer-pct">${live ? `${pct}%` : ''}</span><span class="xfer-btns">${btns}</span></div>
+      const pctText = live ? `${pct}%` : '';
+      const subHtml = `${esc(sub)}${live && j.current ? ` · <span class="xfer-cur">${esc(j.current)}</span>` : ''}`;
+      const err = j.errors && j.errors.length ? `<div class="xfer-err" title="${esc(j.errors.join('\n'))}">${esc(j.errors[j.errors.length - 1])}${j.errorCount > 1 ? ` (+${j.errorCount - 1} more)` : ''}</div>` : '';
+      return {
+        pct: pctText, pctNum: pct, sub: subHtml, err,
+        full: `<div class="xfer xfer-${j.state}" data-id="${esc(j.id)}">
+        <div class="xfer-top"><span class="xfer-title" title="${esc(j.title)} → ${esc(j.dest)}">${esc(j.title)}</span><span class="xfer-pct">${pctText}</span><span class="xfer-btns">${btns}</span></div>
         ${live ? `<div class="xfer-bar"><i style="width:${pct}%"></i></div>` : ''}
-        <div class="xfer-sub">${esc(sub)}${live && j.current ? ` · <span class="xfer-cur">${esc(j.current)}</span>` : ''}</div>
-        ${j.errors && j.errors.length ? `<div class="xfer-err" title="${esc(j.errors.join('\n'))}">${esc(j.errors[j.errors.length - 1])}${j.errorCount > 1 ? ` (+${j.errorCount - 1} more)` : ''}</div>` : ''}
-      </div>`;
-    }).join('');
+        <div class="xfer-sub">${subHtml}</div>
+        ${err}
+      </div>`
+      };
+    }
   }
 
   function status(text, isError) { statusEl.textContent = text || ''; statusEl.classList.toggle('err', !!isError); }
@@ -439,20 +472,20 @@
     const rows = visible().map((x) => x.path).concat(filter.length >= 2 ? found.map((x) => x.path) : []);
     if (e && e.shiftKey && anchor) {
       const a = rows.indexOf(anchor); const b = rows.indexOf(path);
-      if (a >= 0 && b >= 0) { selected = new Set(rows.slice(Math.min(a, b), Math.max(a, b) + 1)); renderList(); return; }
+      if (a >= 0 && b >= 0) { selected = new Set(rows.slice(Math.min(a, b), Math.max(a, b) + 1)); markSelection(); return; }
     }
     if (e && (e.ctrlKey || e.metaKey)) { if (selected.has(path)) selected.delete(path); else selected.add(path); }
     else selected = new Set([path]);
     anchor = path;
-    renderList();
+    markSelection();
   }
 
   // Selection changed: mark the rows (no rebuild - keeps a drag alive).
-  function markSelection() {
+  function markSelection({ preview = true } = {}) {
     for (const r of listEl.querySelectorAll('.files-row')) r.classList.toggle('sel', selected.has(r.dataset.path));
-    const n = visible().length;
+    const n = listEl.querySelectorAll('.files-row:not(.found)').length;
     status(`${n} item${n === 1 ? '' : 's'}${selected.size ? ` · ${selected.size} selected` : ''}`);
-    renderPreview();
+    if (preview) renderPreview();
   }
 
   const entryOf = (path) => (cur && cur.entries.find((x) => x.path === path)) || found.find((x) => x.path === path) || null;
@@ -561,6 +594,7 @@
       const at = (ev) => { const b = listEl.getBoundingClientRect(); return [ev.clientX - b.left + listEl.scrollLeft, ev.clientY - b.top + listEl.scrollTop]; };
       const [sx, sy] = at(e);
       const base = e.ctrlKey || e.metaKey ? new Set(selected) : new Set();
+      const boxes = [...listEl.querySelectorAll('.files-row')].map((r) => ({ p: r.dataset.path, l: r.offsetLeft, t: r.offsetTop, w: r.offsetWidth, h: r.offsetHeight }));
       let band = null;
       let last = e;
       const update = () => {
@@ -570,13 +604,13 @@
         const l = Math.min(x, sx); const t = Math.min(y, sy); const w = Math.abs(x - sx); const h = Math.abs(y - sy);
         Object.assign(band.style, { left: `${l}px`, top: `${t}px`, width: `${w}px`, height: `${h}px` });
         const sel = new Set(base);
-        for (const r of listEl.querySelectorAll('.files-row')) {
-          if (r.offsetLeft < l + w && r.offsetLeft + r.offsetWidth > l && r.offsetTop < t + h && r.offsetTop + r.offsetHeight > t) {
-            if (base.has(r.dataset.path)) sel.delete(r.dataset.path); else sel.add(r.dataset.path);
+        for (const r of boxes) {
+          if (r.l < l + w && r.l + r.w > l && r.t < t + h && r.t + r.h > t) {
+            if (base.has(r.p)) sel.delete(r.p); else sel.add(r.p);
           }
         }
         selected = sel;
-        markSelection();
+        markSelection({ preview: false });
       };
       // Near the top or bottom edge, the list scrolls on its own.
       const scroller = setInterval(() => {

@@ -200,6 +200,7 @@ class TaskWindows {
     };
     this.ps.on('exit', die);
     this.ps.on('error', die);
+    this.ps.stdin.on('error', () => {});      // a dead worker: 'exit' cleans up
   }
 
   send(command) {

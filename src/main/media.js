@@ -29,7 +29,7 @@ public class VolKeys {
 $asTaskGeneric = ([System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object { $_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 -and $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation\`1' })[0]
 function Await($op, $type) {
   $t = $asTaskGeneric.MakeGenericMethod($type).Invoke($null, @($op))
-  $t.Wait(8000) | Out-Null
+  $t.Wait(2500) | Out-Null
   $t.Result
 }
 $mgr = Await ([Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager]::RequestAsync()) ([Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager])
@@ -183,6 +183,7 @@ class MediaController {
     const die = () => { for (const w of this.waiters.splice(0)) w(null); this.ps = null; this.buffer = ''; };
     this.ps.on('exit', die);
     this.ps.on('error', die);
+    this.ps.stdin.on('error', () => {});      // a dead worker: 'exit' cleans up
   }
 
   send(command) {

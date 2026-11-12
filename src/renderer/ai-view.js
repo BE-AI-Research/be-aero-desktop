@@ -1010,7 +1010,7 @@
       const perm = (t.permission === 'allow' ? ' · autonomous' : t.permission === 'deny' ? ' · read-only' : '') + (t.model ? ` · ${t.model.split('/').pop()}` : '') + (t.readAloud ? ' · read aloud' : '') + (t.elsewhere ? ` · runs on ${t.elsewhere}` : '');
       row.innerHTML = `<button class="icon-btn t-state" title="${state === 'active' ? 'Pause' : 'Resume'}">${state === 'active' ? '⏸' : '▶'}</button>
         <div class="ai-task-main"><div class="ai-task-name">${esc(t.name)}${t.createdBy === 'agent' ? ' <span class="ai-task-by" title="Created by the assistant">AI</span>' : ''}</div>
-        <div class="ai-task-meta">${esc(t.summary || t.when || '')} · ${esc(status)}${esc(last)}${perm}</div>
+        <div class="ai-task-meta">${esc(t.summary || t.when || '')} · ${esc(status)}${esc(last)}${esc(perm)}</div>
         ${t.whenError ? `<div class="ai-task-meta bad">${esc(t.whenError)}</div>` : ''}</div>
         <div class="ai-task-actions"><button class="icon-btn t-run" title="${t.elsewhere ? `Runs on ${esc(t.elsewhere)}` : 'Run now'}"${t.running || t.elsewhere ? ' disabled' : ''}>⚡</button><button class="icon-btn t-open" title="Open its conversation"${t.conversationId ? '' : ' disabled'}>💬</button><button class="icon-btn t-edit" title="Edit">✎</button><button class="icon-btn t-del" title="Delete">🗑</button></div>`;
       row.querySelector('.t-state').addEventListener('click', () => aero.aiTaskToggle(t.id, state !== 'active'));

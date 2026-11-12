@@ -415,7 +415,10 @@ class WinSound {
       }
     });
     ps.stderr.on('data', (d) => { this.stderr = ((this.stderr || '') + d).slice(-4000); });
-    ps.on('exit', () => { this.ps = null; for (const w of this.waiters.splice(0)) w(null); });
+    const die = () => { if (this.ps === ps) this.ps = null; for (const w of this.waiters.splice(0)) w(null); };
+    ps.on('exit', die);
+    ps.on('error', die);
+    ps.stdin.on('error', () => {});            // a dead worker: 'exit' cleans up
   }
 
   send(cmd, timeout = 15000) {
@@ -440,8 +443,9 @@ class WinSound {
   async state() { return this.json('state', 30000); }       // first call compiles the helper
   async setMaster(v) { return (await this.send(`master ${Number(v).toFixed(3)}`)) === 'True'; }
   async muteMaster(m) { return (await this.send(`mastermute ${m ? 1 : 0}`)) === 'True'; }
-  async setApp(id, v) { return (await this.send(`session ${id} ${Number(v).toFixed(3)}`)) === 'True'; }
-  async muteApp(id, m) { return (await this.send(`sessionmute ${id} ${m ? 1 : 0}`)) === 'True'; }
+  // Ids go into the worker's line protocol: one token, no spaces or newlines.
+  async setApp(id, v) { if (!/^\S{1,400}$/.test(String(id))) return false; return (await this.send(`session ${id} ${Number(v).toFixed(3)}`)) === 'True'; }
+  async muteApp(id, m) { if (!/^\S{1,400}$/.test(String(id))) return false; return (await this.send(`sessionmute ${id} ${m ? 1 : 0}`)) === 'True'; }
   async setDefault(id) { return (await this.send(`default ${Buffer.from(String(id)).toString('base64')}`)) === 'True'; }
   async bluetooth() {
     const r = await this.json('bt', 20000);
