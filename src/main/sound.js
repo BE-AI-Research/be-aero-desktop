@@ -559,10 +559,63 @@ class LinuxSound {
   destroy() {}
 }
 
+// PipeWire without the PulseAudio tools (Debian 13's default): the nodes
+// from pw-dump, volumes through wpctl.
+function parseWpVolume(text) {
+  const m = /Volume:\s*([\d.]+)/.exec(String(text || ''));
+  return { volume: m ? Math.max(0, Math.min(1.5, Number(m[1]))) : 0, mute: /\[MUTED\]/.test(String(text || '')) };
+}
+
+// pw-dump JSON -> { sinks: [{ id, name }], streams: [{ id, name, exe, pid, icon }] }
+function parsePwDump(list) {
+  const sinks = [];
+  const streams = [];
+  for (const o of Array.isArray(list) ? list : []) {
+    if (!o || !/Node$/.test(String(o.type || ''))) continue;
+    const p = (o.info && o.info.props) || {};
+    const cls = String(p['media.class'] || '');
+    if (cls === 'Audio/Sink') sinks.push({ id: String(o.id), name: p['node.description'] || p['node.nick'] || p['node.name'] || `Output ${o.id}` });
+    else if (cls === 'Stream/Output/Audio') {
+      streams.push({
+        id: String(o.id), name: p['application.name'] || p['media.name'] || p['node.name'] || 'App',
+        exe: p['application.process.binary'] || '', pid: Number(p['application.process.id']) || 0, icon: p['application.icon-name'] || '',
+        active: String((o.info && o.info.state) || '') === 'running'
+      });
+    }
+  }
+  return { sinks, streams };
+}
+
+class WpctlSound extends LinuxSound {
+  async state() {
+    const dump = await run('pw-dump', [], 8000);
+    if (dump === null) throw new Error('neither pactl nor PipeWire tools are available');
+    const { sinks, streams } = parsePwDump(JSON.parse(dump || '[]'));
+    const inspect = await run('wpctl', ['inspect', '@DEFAULT_AUDIO_SINK@'], 4000);
+    const defId = (/^id (\d+)/m.exec(String(inspect || '')) || [])[1] || '';
+    const master = sinks.length ? parseWpVolume(await run('wpctl', ['get-volume', '@DEFAULT_AUDIO_SINK@'], 4000)) : null;
+    const sessions = [];
+    for (const st of streams.slice(0, 30)) {
+      const v = parseWpVolume(await run('wpctl', ['get-volume', st.id], 4000));
+      sessions.push({ ...st, system: false, volume: v.volume, mute: v.mute });
+    }
+    return { devices: sinks.map((d) => ({ ...d, default: d.id === defId })), master, sessions };
+  }
+  async setMaster(v) { return (await run('wpctl', ['set-volume', '@DEFAULT_AUDIO_SINK@', Math.max(0, Math.min(1.5, v)).toFixed(3)])) !== null; }
+  async muteMaster(m) { return (await run('wpctl', ['set-mute', '@DEFAULT_AUDIO_SINK@', m ? '1' : '0'])) !== null; }
+  async setApp(id, v) { if (!/^\d+$/.test(String(id))) return false; return (await run('wpctl', ['set-volume', String(id), Math.max(0, Math.min(1.5, v)).toFixed(3)])) !== null; }
+  async muteApp(id, m) { if (!/^\d+$/.test(String(id))) return false; return (await run('wpctl', ['set-mute', String(id), m ? '1' : '0'])) !== null; }
+  async setDefault(id) { if (!/^\d+$/.test(String(id))) return false; return (await run('wpctl', ['set-default', String(id)])) !== null; }
+}
+
+function hasCommand(cmd) {
+  try { require('child_process').execFileSync('sh', ['-c', `command -v ${cmd}`], { stdio: 'ignore' }); return true; } catch { return false; }
+}
+
 function createSound() {
   if (process.platform === 'win32') return new WinSound();
-  if (process.platform === 'linux') return new LinuxSound();
+  if (process.platform === 'linux') return hasCommand('pactl') || !hasCommand('wpctl') ? new LinuxSound() : new WpctlSound();
   return null;
 }
 
-module.exports = { createSound, WinSound, LinuxSound, parseBtDevices, parseBtInfo, pactlVolume };
+module.exports = { createSound, WinSound, LinuxSound, WpctlSound, parseBtDevices, parseBtInfo, pactlVolume, parseWpVolume, parsePwDump };
