@@ -112,7 +112,9 @@ const DEFAULTS = {
     view: 'list',            // list | grid
     last: ''                 // folder the browser was last showing
   },
-  scratchpad: '',
+  scratchpad: '',            // the note being shown (what the assistant's scratchpad tools read)
+  scratchNotes: [],          // every note, the shown one included (scratchIndex)
+  scratchIndex: 0,
   // Built-in widgets parked in the dock (id -> true). Web widgets and the
   // AI chat carry their own minimized flags.
   widgetMinimized: { files: true },   // the file browser starts parked in the dock

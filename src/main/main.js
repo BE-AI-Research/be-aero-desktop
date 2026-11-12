@@ -2318,7 +2318,10 @@ app.whenReady().then(() => {
       if (!aiService) throw new Error('not ready');
       const on = syncOn();
       const m = new Map();
-      if (on.notes) m.set('scratchpad', { text: store.get('scratchpad') || '' });
+      if (on.notes) {
+        const list = store.get('scratchNotes');
+        m.set('scratchpad', { text: store.get('scratchpad') || '', ...(Array.isArray(list) && list.length > 1 ? { notes: list } : {}) });
+      }
       if (on.theme) m.set('theme', store.get('theme') || {});
       if (on.pins) m.set(`pins:${process.platform}`, ((store.get('appDock') || {}).pinned) || []);
       for (const w of store.get('webWidgets') || []) if (w.shared) m.set(`web:${w.id}`, webShared(w));
@@ -2340,7 +2343,13 @@ app.whenReady().then(() => {
       return true;
     },
     apply: (key, value, from) => {
-      if (key === 'scratchpad') updateSettings({ scratchpad: String((value && value.text) || '') });
+      if (key === 'scratchpad') {
+        const list = value && Array.isArray(value.notes) && value.notes.length ? value.notes.map(String).slice(0, 200) : null;
+        if (list) {
+          const i = Math.max(0, Math.min(list.length - 1, Number(store.get('scratchIndex')) || 0));
+          updateSettings({ scratchNotes: list, scratchIndex: i, scratchpad: list[i] });
+        } else updateSettings({ scratchpad: String((value && value.text) || ''), scratchNotes: [String((value && value.text) || '')], scratchIndex: 0 });
+      }
       else if (key === 'theme') updateSettings({ theme: value || {} });
       else if (key === `pins:${process.platform}`) updateSettings({ appDock: { pinned: Array.isArray(value) ? value : [] } });
       else if (key.startsWith('web:')) {

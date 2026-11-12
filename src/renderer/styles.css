@@ -532,10 +532,10 @@ body:not(.free) .toolbar > .resize-grip { display: none; }
 .scratch-widget { height: 224px; display: flex; flex-direction: column; overflow: hidden; }
 /* Always visible - saving a note should never require discovering a hover. */
 .scratch-save {
-  width: auto; height: 22px;
-  margin-left: auto;
-  margin-right: 8px;    /* breathing room before the .MD badge */
-  padding: 0 8px;
+  width: 26px; height: 22px; flex: none;
+  margin-left: 4px;
+  margin-right: 6px;    /* breathing room before the .MD badge */
+  padding: 0;
   display: flex; align-items: center; justify-content: center; gap: 5px;
   font-size: 10px; font-weight: 600; letter-spacing: 0.06em;
   color: rgba(var(--text-rgb), 0.75);
@@ -550,7 +550,7 @@ body:not(.free) .toolbar > .resize-grip { display: none; }
 }
 
 .scratch-head {
-  display: flex; justify-content: space-between; align-items: center;
+  display: flex; align-items: center; gap: 2px;
   padding: 12px;
   background: rgba(255, 255, 255, 0.05);
   border-bottom: 1px solid rgba(255, 255, 255, 0.1);
@@ -1132,6 +1132,13 @@ webview.plugin-frame { background: #fff; }
 .dev-relay { font-size: 11.5px; opacity: .85; line-height: 1.5; margin: 4px 0 2px; }
 .dev-relay .badge { margin-right: 6px; }
 .dev-relay-status { display: block; opacity: .75; font-size: 11px; }
+.scratch-head > .widget-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin: 0; }
+.scratch-head > .badge { flex: none; }
+.scratch-nav { display: inline-flex; align-items: center; gap: 1px; flex: none; }
+.scratch-nav .icon-btn { width: 22px; height: 20px; padding: 0; font-size: 14px; line-height: 1; }
+.scratch-nav .icon-btn:disabled { opacity: .3; cursor: default; }
+.scratch-count { font-size: 10px; opacity: .6; min-width: 26px; text-align: center; font-variant-numeric: tabular-nums; }
+.scratch-head .widget-min { position: static; margin-left: 4px; }
 .aiws-list { display: flex; flex-direction: column; gap: 4px; margin: 2px 0 4px; }
 .aiws-row { display: flex; align-items: center; gap: 6px; padding: 5px 8px; border-radius: 7px; background: rgba(255,255,255,.05); font-size: 12px; }
 .aiws-row .nm { font-weight: 600; }

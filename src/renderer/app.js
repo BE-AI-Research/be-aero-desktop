@@ -233,17 +233,61 @@
     if (res.error) console.warn('Scratchpad save failed:', res.error);
     setTimeout(() => { status.textContent = '.MD'; }, 1600);
   });
-  textarea.value = settings.scratchpad || '';
+  // Several notes: scratchNotes holds them all, scratchIndex the one shown,
+  // and scratchpad mirrors that one (the assistant's tools read it).
+  let notes = Array.isArray(settings.scratchNotes) && settings.scratchNotes.length ? settings.scratchNotes.map(String) : [settings.scratchpad || ''];
+  let noteIdx = Math.max(0, Math.min(notes.length - 1, Number(settings.scratchIndex) || 0));
+  if ((settings.scratchpad || '') !== notes[noteIdx]) notes[noteIdx] = settings.scratchpad || '';
+  textarea.value = notes[noteIdx];
+  const showCount = () => {
+    $('scratch-count').textContent = `${noteIdx + 1}/${notes.length}`;
+    $('btn-note-prev').disabled = noteIdx === 0;
+    $('btn-note-next').disabled = noteIdx >= notes.length - 1;
+  };
+  showCount();
+  const persistNotes = () => aero.setSettings({ scratchNotes: notes, scratchIndex: noteIdx, scratchpad: notes[noteIdx] });
   let saveTimer = null;
   textarea.addEventListener('input', () => {
     $('scratch-status').textContent = '...';
+    notes[noteIdx] = textarea.value;
     clearTimeout(saveTimer);
     saveTimer = setTimeout(async () => {
-      await aero.setSettings({ scratchpad: textarea.value });
+      await persistNotes();
       $('scratch-status').textContent = 'SAVED';
       setTimeout(() => { $('scratch-status').textContent = '.MD'; }, 1200);
     }, 500);
   });
+  // Move to another note; an empty one is dropped on the way out.
+  function goNote(i) {
+    clearTimeout(saveTimer);
+    notes[noteIdx] = textarea.value;
+    if (!notes[noteIdx].trim() && notes.length > 1 && i !== noteIdx) {
+      notes.splice(noteIdx, 1);
+      if (i > noteIdx) i -= 1;
+    }
+    noteIdx = Math.max(0, Math.min(notes.length - 1, i));
+    textarea.value = notes[noteIdx];
+    showCount();
+    persistNotes();
+  }
+  $('btn-note-prev').addEventListener('click', () => goNote(noteIdx - 1));
+  $('btn-note-next').addEventListener('click', () => goNote(noteIdx + 1));
+  $('btn-note-new').addEventListener('click', () => {
+    notes[noteIdx] = textarea.value;
+    if (!textarea.value.trim()) { textarea.focus(); return; }     // this one is already new
+    notes.push('');
+    goNote(notes.length - 1);
+    textarea.focus();
+  });
+  // Another device (sync) or the assistant changed the notes: follow.
+  window.__aeroNotesUpdate = (s) => {
+    if (document.activeElement === textarea) return;           // typing here wins
+    const list = Array.isArray(s.scratchNotes) && s.scratchNotes.length ? s.scratchNotes.map(String) : null;
+    if (list) { notes = list; noteIdx = Math.max(0, Math.min(notes.length - 1, Number(s.scratchIndex) || 0)); }
+    if (typeof s.scratchpad === 'string' && s.scratchpad !== notes[noteIdx]) notes[noteIdx] = s.scratchpad;
+    if (textarea.value !== notes[noteIdx]) textarea.value = notes[noteIdx];
+    showCount();
+  };
   // Tab inserts indentation instead of leaving the textarea.
   textarea.addEventListener('keydown', (e) => {
     if (e.key === 'Tab') {
@@ -432,6 +476,7 @@
     $('set-power-side').disabled = pm.enabled === false;
     if (window.AeroPower) AeroPower.update(s);
     $('scratchpad').spellcheck = (s.spellcheck || {}).enabled !== false;
+    if (window.__aeroNotesUpdate) window.__aeroNotesUpdate(s);   // notes changed elsewhere (sync, the assistant)
     if (window.AeroExtensions && AeroExtensions.setAiMinimized) AeroExtensions.setAiMinimized(!!aiCfg.minimized && aiCfg.enabled !== false && s.widgets.ai !== false);
     $('set-ai-enabled').checked = aiCfg.enabled !== false;
     if (document.activeElement !== $('set-ai-persona')) $('set-ai-persona').value = aiCfg.systemPrompt || '';
@@ -534,7 +579,7 @@
     b.addEventListener('click', (e) => { e.stopPropagation(); aero.setSettings({ widgetMinimized: { [wid]: true } }); });
     // A widget with its own header row (the file browser) gets the button
     // as the last one in that row, not floating over its other buttons.
-    const head = el.querySelector(':scope > .files-head, :scope > .sound-head');
+    const head = el.querySelector(':scope > .files-head, :scope > .sound-head, :scope > .scratch-head');
     if (head) head.appendChild(b); else el.appendChild(b);
   }
 

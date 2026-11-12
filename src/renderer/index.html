@@ -78,11 +78,17 @@
     <section class="widget widget-hit scratch-widget" data-widget="scratchpad">
       <div class="scratch-head">
         <h3 class="widget-title">SCRATCHPAD</h3>
+        <span class="scratch-nav">
+          <button class="icon-btn" id="btn-note-prev" title="Previous note">&#8249;</button>
+          <span class="scratch-count" id="scratch-count">1/1</span>
+          <button class="icon-btn" id="btn-note-next" title="Next note">&#8250;</button>
+          <button class="icon-btn scratch-new" id="btn-note-new" title="New note">+</button>
+        </span>
         <button class="icon-btn scratch-save" id="btn-scratch-save" title="Save this note to a file">
           <svg viewBox="0 0 16 16" aria-hidden="true" width="12" height="12">
             <path fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"
                   d="M2.5 2.5h8.5l2.5 2.5v8.5h-11zM5 2.5v3.5h5V2.5M4.5 13.5V9h7v4.5"/>
-          </svg>SAVE</button>
+          </svg></button>
         <span class="badge" id="scratch-status">.MD</span>
       </div>
       <textarea id="scratchpad" spellcheck="false"
