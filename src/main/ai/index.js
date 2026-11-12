@@ -603,7 +603,7 @@ class AiService {
       },
       webOp: (id, op, args) => this.webOp(id, op, args),
       webOpen: (url, name) => this.webOpen(url, name),
-      browser: (op, args) => this.browserOp(op, args),
+      browser: (op, args) => this.browserOp(op, args, conversationId),
       memory: this.memory,
       customTools: {
         save: (args, opts) => this.customTools.save(args, opts),
@@ -741,12 +741,42 @@ class AiService {
     return { ...(last || { ok: true }), id, name: name || host(url), created: true };
   }
 
-  async browserOp(op, args) {
+  // Clicking and typing need the assistant's own browser window (a separate
+  // profile: browsers refuse automation of the user's main one). It looks
+  // like a private window, so it is never opened without a reason: Settings
+  // decides (ask / allow / never); asked, the user can say "my browser".
+  async allowAssistantBrowser(url, conversationId) {
+    const mode = this.config().browserInteract || 'ask';
+    if (mode === 'allow' || this.config().browserMode === 'assistant') return true;
+    if (mode === 'never') return false;
+    const run = conversationId && this.runInfo.get(conversationId);
+    if (run && run.unattended) return false;                         // a scheduled task: nobody to ask
+    const win = this.d.getWindow();
+    const r = await dialog.showMessageBox(win && !win.isDestroyed() ? win : undefined, {
+      type: 'question', buttons: ['Use its window', 'Open in my browser instead'], defaultId: 1, cancelId: 1, noLink: true,
+      checkboxLabel: 'Always use its window when it needs to click or type',
+      title: 'AI assistant', message: 'The assistant wants to click and type in a web page.',
+      detail: `${String(url || '').slice(0, 200)}\n\nThat needs its own browser window - a separate profile, not signed in to your accounts (it can look like a private window). In your own browser it can show you the page but not use it.`
+    });
+    if (r.checkboxChecked && r.response === 0) this.d.updateSettings({ ai: { browserInteract: 'allow' } });
+    return r.response === 0;
+  }
+
+  async browserOp(op, args, conversationId) {
     const b = this.browser;
     try {
-      if (op === 'tabs') { const tabs = await b.tabs(); return { ok: true, browser: (b.exe || {}).name || b.info().browser, tabs: tabs.map((t) => ({ id: t.id, title: t.title, url: t.url })) }; }
+      if (op === 'tabs') {
+        const tabs = await b.tabs();
+        if (!tabs.length) return { ok: true, tabs: [], note: 'The assistant\'s browser window is not open. Pages you opened with browser_open are in the user\'s own browser, which you cannot see.' };
+        return { ok: true, browser: (b.exe || {}).name || b.info().browser, tabs: tabs.map((t) => ({ id: t.id, title: t.title, url: t.url })) };
+      }
       if (op === 'open') {
         if (!/^https?:\/\//i.test(args.url || '')) return { ok: false, error: 'http(s) URLs only' };
+        // Asked to act in the page: only with the user's say-so.
+        let refused = false;
+        if (args.interact && (this.config().browserMode || 'main') === 'main' && !(await b.isUp())) {
+          if (!(await this.allowAssistantBrowser(args.url, conversationId))) { args = { ...args, interact: false }; refused = true; }
+        }
         // The user's own browser and profile, unless the assistant has to
         // act in the page: Chromium refuses DevTools control of the main
         // profile, so clicking and typing need the assistant's profile.
@@ -761,7 +791,9 @@ class AiService {
           return {
             ok: true, openedIn: "the user's own browser (main profile)", url: args.url,
             ...(page && !page.error ? { title: page.title, text: page.text } : {}),
-            note: 'Opened in the user\'s own browser. You cannot click or type there; if you need to, call browser_open again with interact: true (the assistant browser profile).'
+            note: refused
+              ? 'Opened in the user\'s own browser - the user chose that over the assistant\'s window. You cannot click or type there: tell the user what to do in the page instead, and do not ask for interact again in this request.'
+              : 'Opened in the user\'s own browser. You cannot click or type there; only if the user asked you to act in the page, call browser_open again with interact: true.'
           };
         }
         const tab = await b.open(args.url);

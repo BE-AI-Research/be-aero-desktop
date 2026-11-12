@@ -389,7 +389,7 @@ const TOOLS = [
   },
   {
     name: 'browser_open', category: 'control',
-    description: "Open a URL for the user in their OS browser and return the page text. By default it opens in the user's own browser (their main profile, signed in, with their bookmarks) - you get the text but cannot click or type there. Pass interact: true when you must click, type, scroll or read further in the page: it then opens in the assistant's own browser profile (Chrome, Edge or Brave, driven through DevTools) and returns a tab id for browser_elements / browser_click / browser_type.",
+    description: "Open a URL for the user in their own browser (their normal profile, signed in, with their bookmarks) and return the page text. This is the right choice almost always: to show the user a page, or to read it. You cannot click or type there. Pass interact: true ONLY when the user asked you to fill in, click or operate something in the page yourself: that opens the assistant's own browser window (a separate profile, not signed in - it looks like a private window to the user, and the user may be asked first) and returns a tab id for browser_elements / browser_click / browser_type. Never use interact just to read a page.",
     input_schema: obj({ url: str('http(s) URL'), interact: { type: 'boolean', description: 'true = open in the assistant browser profile so you can click/type in it' } }, ['url']),
     run: async (input, ctx) => ctx.browser('open', { url: input.url, interact: !!input.interact })
   },

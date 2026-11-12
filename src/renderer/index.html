@@ -249,6 +249,12 @@
           <option value="main">Open it in my own browser (the assistant's profile only when it must click or type)</option>
           <option value="assistant">Always use the assistant's browser profile</option>
         </select>
+        <label class="field-label">When the assistant needs to click or type in a page</label>
+        <select id="set-ai-browser-interact" title="That needs the assistant's own browser window: a separate profile, not signed in (it can look like a private window)">
+          <option value="ask">Ask me first</option>
+          <option value="allow">Use the assistant's window</option>
+          <option value="never">Never - open pages in my browser only</option>
+        </select>
         <label class="field-label">Tool call format</label>
         <select id="set-ai-toolcalls">
           <option value="auto">Automatic (by model; Qwen XML, Llama, Mistral, Gemma understood)</option>

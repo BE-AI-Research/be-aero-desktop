@@ -122,8 +122,11 @@ class BrowserController {
     throw new Error(`${b.name} started but did not open its debugging port.`);
   }
 
+  // The assistant's browser window, if it is open. Listing or reading never
+  // starts it (that window is a separate, signed-out profile - it looks like
+  // a private window to the user); only open() does.
   async tabs() {
-    await this.ensureRunning();
+    if (!(await this.isUp())) return [];
     const list = await fetchJson(`http://127.0.0.1:${PORT}/json/list`);
     return list.filter((t) => t.type === 'page' && !/^(devtools|chrome-extension):/.test(t.url || ''))
       .map((t) => ({ id: t.id, title: t.title, url: t.url, ws: t.webSocketDebuggerUrl }));
@@ -132,7 +135,7 @@ class BrowserController {
   // Tab by id (or id prefix), by title/url fragment, or the only tab.
   async resolveTab(hint) {
     const tabs = await this.tabs();
-    if (!tabs.length) return { error: 'the browser has no open tabs - use browser_open first' };
+    if (!tabs.length) return { error: 'the assistant\'s browser window is not open. Pages opened with browser_open go to the user\'s own browser, which you cannot see or control - you already got their text. Call browser_open with interact: true only if you must click or type in a page.' };
     const h = String(hint || '').trim();
     if (!h) return tabs.length === 1 ? tabs[0] : { error: 'several tabs are open - pass the tab id', tabs: tabs.map((t) => ({ id: t.id, title: t.title, url: t.url })) };
     const t = tabs.find((x) => x.id === h) || tabs.find((x) => x.id.startsWith(h))

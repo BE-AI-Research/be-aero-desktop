@@ -488,6 +488,7 @@
     $('set-ai-unload').value = aiCfg.unloadAfter || '1m';
     $('set-ai-evict').value = aiCfg.evictBlocking || 'ask';
     $('set-ai-browser').value = aiCfg.browserMode || 'main';
+    $('set-ai-browser-interact').value = aiCfg.browserInteract || 'ask';
     $('set-ai-bus-desktop').checked = !!aiCfg.busOperateDesktop;
     $('set-ai-follow-shared').checked = aiCfg.followSharedModel !== false;
     fillBrowsers(aiCfg.browser || '');
@@ -732,6 +733,7 @@
   $('set-ai-unload').addEventListener('change', (e) => aero.setSettings({ ai: { unloadAfter: e.target.value } }));
   $('set-ai-evict').addEventListener('change', (e) => aero.setSettings({ ai: { evictBlocking: e.target.value } }));
   $('set-ai-browser').addEventListener('change', (e) => aero.setSettings({ ai: { browserMode: e.target.value } }));
+  $('set-ai-browser-interact').addEventListener('change', (e) => aero.setSettings({ ai: { browserInteract: e.target.value } }));
   $('set-ai-bus-desktop').addEventListener('change', (e) => aero.setSettings({ ai: { busOperateDesktop: e.target.checked } }));
   $('set-ai-follow-shared').addEventListener('change', (e) => aero.setSettings({ ai: { followSharedModel: e.target.checked } }));
 
