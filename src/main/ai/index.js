@@ -1100,7 +1100,7 @@ class AiService {
     const fsp = require('fs/promises');
     const base = await ensureAiFolder(this.d.store);
     const dir = p.join(base, 'AI Artifacts');
-    // Before 1.3.0 this folder was "Visuals": move it over once.
+    // Before 1.2.8 this folder was "Visuals": move it over once.
     try { await fsp.access(dir); } catch {
       try { await fsp.rename(p.join(base, 'Visuals'), dir); } catch { /* there was none */ }
       for (const v of this.visuals.list()) {

@@ -17,7 +17,7 @@ const os = require('os');
 const path = require('path');
 const http = require('http');
 
-const VERSION = '1.3.0';
+const VERSION = '1.2.8';
 const lib = (name) => { try { return require(`./lib/${name}`); } catch { return require(`../src/main/mesh/${name}`); } };
 const { Mesh } = lib('mesh');
 const { loadIdentity } = lib('identity');
