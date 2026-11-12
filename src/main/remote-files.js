@@ -54,7 +54,24 @@ const TEXT_EXT = /\.(txt|md|markdown|log|json|js|ts|py|go|rs|c|h|cpp|cs|java|sh|
 function parseRemote(url) {
   const m = /^aero:\/\/([A-Z2-7-]+)(?:\/(\d+))?(?:\/(.*))?$/i.exec(String(url || '').replace(/\\/g, '/'));
   if (!m) return null;
-  return { device: m[1].toUpperCase(), root: m[2] === undefined ? null : Number(m[2]), rel: (m[3] || '').replace(/\/+$/, '') };
+  const rel = (m[3] || '').replace(/\/+$/, '');
+  // Names come from the other device: no "..", "." or empty segments and no
+  // NULs - nothing that could climb out of a folder.
+  if (rel && rel.split('/').some((x) => !x || x === '.' || x === '..' || x.includes('\0'))) return null;
+  return { device: m[1].toUpperCase(), root: m[2] === undefined ? null : Number(m[2]), rel };
+}
+// The file name a remote url ends in, safe to use as a local file name.
+function remoteName(url) {
+  const r = parseRemote(url);
+  const name = r && r.rel ? r.rel.split('/').pop() : '';
+  if (!name) throw new Error('that file name cannot be used here');
+  return localName(name);
+}
+// A name from another device made safe for this one: on Windows the
+// characters it does not allow (":" would write an alternate data stream).
+function localName(name) {
+  const n = process.platform === 'win32' ? String(name).replace(/[<>:"|?*\x00-\x1f]/g, '_').replace(/[. ]+$/, '_') : String(name);
+  return n === '.' || n === '..' || !n ? '_' : n;
 }
 const isRemote = (p) => /^aero:\/\//i.test(String(p || ''));
 const remoteUrl = (device, root, rel = '') => `aero://${device}/${root}${rel ? `/${rel}` : ''}`;
@@ -316,7 +333,11 @@ class RemoteFiles {
   // For opening: a cached local copy, refreshed when the remote file changed.
   async cached(url) {
     const r = parseRemote(url);
-    const target = path.join(this.cacheDir, r.device.slice(0, 15), String(r.root), ...r.rel.split('/'));
+    if (!r || r.root === null || !r.rel) throw new Error('not a remote file');
+    const base = path.join(this.cacheDir, r.device.slice(0, 15), String(r.root));
+    const target = path.join(base, ...r.rel.split('/').map(localName));
+    const rp = path.relative(base, target);
+    if (!rp || rp.startsWith('..') || path.isAbsolute(rp)) throw new Error('not a remote file');
     return this.download(url, target);
   }
 
@@ -352,4 +373,4 @@ class RemoteFiles {
   }
 }
 
-module.exports = { RemoteFiles, parseRemote, isRemote, remoteUrl, confine, nameMatches, walkNames };
+module.exports = { RemoteFiles, parseRemote, isRemote, remoteUrl, remoteName, localName, confine, nameMatches, walkNames };

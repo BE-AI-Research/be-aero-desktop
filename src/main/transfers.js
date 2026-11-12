@@ -64,7 +64,7 @@ class Transfers {
     const list = [].concat(paths || []).map(String).filter(Boolean);
     if (!list.length) throw new Error('nothing to copy');
     const id = crypto.randomBytes(5).toString('hex');
-    const names = list.map((p) => decodeURIComponent(String(p).split(/[\\/]/).pop() || p));
+    const names = list.map((p) => String(p).split(/[\\/]/).pop() || p);
     const j = {
       id, kind: move ? 'move' : 'copy', paths: list, dest: String(dest),
       title: `${move ? 'Moving' : 'Copying'} ${list.length === 1 ? `"${names[0]}"` : `${list.length} items`}`,
@@ -120,7 +120,7 @@ class Transfers {
         for (const src of j.paths) {
           await ctl.check();
           if (this.isRemote(src)) {
-            const name = decodeURIComponent(String(src).split('/').pop() || 'file');
+            const name = require('./remote-files').remoteName(src);
             const target = path.join(dest, await freeName(dest, name));
             ctl.fileStart(name);
             j.results.push(await this.remote.download(src, target, ctl));
@@ -141,8 +141,12 @@ class Transfers {
               continue;
             } catch (err) { if (err.code !== 'EXDEV' && err.code !== 'EPERM') throw err; }
           }
+          const errorsBefore = j.errors.length;
           await this.copyTree(from, target, ctl, j);
-          if (j.kind === 'move') await this.trash(from);
+          if (j.kind === 'move') {
+            if (j.errors.length === errorsBefore) await this.trash(from);
+            else j.errors.push(`${path.basename(from)}: left where it was - some of it could not be copied`);
+          }
           j.results.push(target);
         }
       }
@@ -194,12 +198,19 @@ class Transfers {
       }
       return;
     }
-    if (st.isSymbolicLink()) { try { await fsp.symlink(await fsp.readlink(from), to); } catch { /* links that cannot be made here are skipped */ } return; }
+    if (st.isSymbolicLink()) {
+      try { await fsp.symlink(await fsp.readlink(from), to); } catch (err) {
+        // Skipped for a copy; for a move it counts, so the original stays.
+        if (j.kind === 'move') j.errors.push(`${path.basename(from)}: a link that could not be made here`);
+      }
+      return;
+    }
     if (!st.isFile()) return;
     ctl.fileStart(path.basename(from));
-    const part = `${to}.part`;
+    const part = `${to}.${crypto.randomBytes(3).toString('hex')}.part`;
     const src = await fsp.open(from, 'r');
-    const dst = await fsp.open(part, 'w');
+    let dst;
+    try { dst = await fsp.open(part, 'wx'); } catch (err) { await src.close().catch(() => {}); throw err; }
     try {
       const buf = Buffer.alloc(CHUNK);
       let off = 0;

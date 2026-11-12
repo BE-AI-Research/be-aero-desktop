@@ -522,8 +522,7 @@ function createWindow() {
   // turns mouse capture back on whenever the pointer is over a widget.
   applyInputModel();
 
-  if (!app.isPackaged) {
-    // Surface renderer warnings/errors in the terminal during development.
+  {
     // Harden every guest the renderer attaches: no preload, no node, always
     // sandboxed, only http(s) content, and only the web-widget partition. A
     // compromised renderer could otherwise attach a privileged guest.
@@ -547,6 +546,9 @@ function createWindow() {
       });
     });
 
+  }
+  if (!app.isPackaged) {
+    // Surface renderer warnings/errors in the terminal during development.
     win.webContents.on('console-message', (e) => {
       console.log(`[renderer:${e.level}] ${e.message} (${e.sourceId}:${e.lineNumber})`);
     });
@@ -584,9 +586,18 @@ function createWindow() {
 
   // External links open in the default browser, never inside the widget.
   win.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url);
+    openSafe(url);
     return { action: 'deny' };
   });
+}
+
+// Links that leave the app: web pages and mail only. Other schemes
+// (search-ms:, ms-msdt:, file:, ...) hand control to OS protocol handlers.
+function openSafe(url) {
+  const u = String(url || '');
+  if (!/^(https?|mailto):/i.test(u)) return false;
+  shell.openExternal(u);
+  return true;
 }
 
 function showWindow() {
@@ -1132,7 +1143,9 @@ function publicSettings() {
   const s = store.get();
   // API keys stay in the main process (even encrypted, the page has no use for them).
   const ai = s.ai ? { ...s.ai, apiKey: s.ai.apiKey ? '(saved)' : '', taskApiKey: s.ai.taskApiKey ? '(saved)' : '', keys: Object.fromEntries(Object.entries(s.ai.keys || {}).map(([k, v]) => [k, v ? '(saved)' : ''])) } : s.ai;
-  return { ...s, ai, themeVars: themeVars(s.theme), ...displayGeometry() };
+  // API tokens (this app's pairing token, each paired app's bearer token) never leave main either.
+  const api = s.api ? { ...s.api, token: s.api.token ? '(saved)' : '', apps: Object.fromEntries(Object.entries(s.api.apps || {}).map(([k, { token, ...a }]) => [k, a])) } : s.api;
+  return { ...s, ai, api, themeVars: themeVars(s.theme), ...displayGeometry() };
 }
 
 ipcMain.handle('settings:get', () => publicSettings());
@@ -2011,24 +2024,24 @@ function showContextMenu(contents, params, isGuest) {
   } else if (params.selectionText) {
     tpl.push({ label: 'Copy', role: 'copy' });
     tpl.push({ label: `Search the web for “${params.selectionText.trim().slice(0, 30)}${params.selectionText.trim().length > 30 ? '…' : ''}”`,
-      click: () => shell.openExternal(require('./spotlight').webSearchUrl((store.get('search') || {}).webEngine, params.selectionText.trim())) });
+      click: () => openSafe(require('./spotlight').webSearchUrl((store.get('search') || {}).webEngine, params.selectionText.trim())) });
   }
   if (params.linkURL) {
     if (tpl.length) tpl.push({ type: 'separator' });
-    tpl.push({ label: 'Open link in browser', click: () => shell.openExternal(params.linkURL) });
+    if (/^(https?|mailto):/i.test(params.linkURL)) tpl.push({ label: 'Open link in browser', click: () => openSafe(params.linkURL) });
     tpl.push({ label: 'Copy link address', click: () => require('electron').clipboard.writeText(params.linkURL) });
   }
   if (params.hasImageContents && params.srcURL) {
     if (tpl.length) tpl.push({ type: 'separator' });
     tpl.push({ label: 'Copy image address', click: () => require('electron').clipboard.writeText(params.srcURL) });
-    tpl.push({ label: 'Open image in browser', click: () => shell.openExternal(params.srcURL) });
+    if (/^https?:/i.test(params.srcURL)) tpl.push({ label: 'Open image in browser', click: () => openSafe(params.srcURL) });
   }
   if (isGuest) {
     if (tpl.length) tpl.push({ type: 'separator' });
     tpl.push({ label: 'Back', enabled: contents.navigationHistory ? contents.navigationHistory.canGoBack() : contents.canGoBack(), click: () => (contents.navigationHistory ? contents.navigationHistory.goBack() : contents.goBack()) });
     tpl.push({ label: 'Forward', enabled: contents.navigationHistory ? contents.navigationHistory.canGoForward() : contents.canGoForward(), click: () => (contents.navigationHistory ? contents.navigationHistory.goForward() : contents.goForward()) });
     tpl.push({ label: 'Reload', click: () => contents.reload() });
-    tpl.push({ label: 'Open page in browser', click: () => shell.openExternal(contents.getURL()) });
+    tpl.push({ label: 'Open page in browser', click: () => openSafe(contents.getURL()) });
   }
   if (!tpl.length) return;
   Menu.buildFromTemplate(tpl).popup({ window: win || undefined });
@@ -2125,11 +2138,14 @@ app.whenReady().then(() => {
   // The layout and every other preference live in settings.json under the
   // user profile - app updates never touch it. On each healthy start, keep a
   // backup copy beside it so a corrupted write can never cost the layout.
-  try {
-    require('fs').writeFileSync(
-      path.join(app.getPath('userData'), 'settings.backup.json'),
-      JSON.stringify(store.get(), null, 2), 'utf8');
-  } catch (err) { console.warn('settings backup failed:', err.message); }
+  // Only from a cleanly read settings.json: never overwrite a good backup with defaults.
+  if (store.loadedOk) {
+    try {
+      require('fs').writeFileSync(
+        path.join(app.getPath('userData'), 'settings.backup.json'),
+        JSON.stringify(store.get(), null, 2), 'utf8');
+    } catch (err) { console.warn('settings backup failed:', err.message); }
+  }
   createWindow();
   createTray();
   startTelemetry();
@@ -2701,7 +2717,7 @@ app.whenReady().then(() => {
       action: (name, id) => (taskWindows ? taskWindows.action(name, id) : linuxTasks ? linuxTasks.action(name, id) : false)
     },
     notify: (title, body) => notifyCenter.add({ source: 'ai', sourceName: 'AI assistant', title, body }),
-    openWebSearch: (q) => shell.openExternal(require('./spotlight').webSearchUrl(store.get('search').webEngine, q)),
+    openWebSearch: (q) => openSafe(require('./spotlight').webSearchUrl(store.get('search').webEngine, q)),
     clipboard: {
       read: () => require('electron').clipboard.readText(),
       write: (t) => require('electron').clipboard.writeText(String(t || ''))
@@ -2754,7 +2770,15 @@ app.whenReady().then(() => {
   const widgetSession = session.fromPartition('persist:webwidgets');
   // Guest pages notify through the host's shim (notification center), so the
   // OS-level permission is refused - otherwise every site would toast twice.
-  widgetSession.setPermissionRequestHandler((_wc, permission, callback) => callback(permission !== 'notifications'));
+  // Everything else a site might ask for is refused: camera, microphone,
+  // location, raw devices, reading the clipboard, and opening other apps
+  // (only web and mail links leave the widget).
+  const WIDGET_OK = new Set(['fullscreen', 'clipboard-sanitized-write', 'pointerLock', 'idle-detection']);
+  widgetSession.setPermissionRequestHandler((_wc, permission, callback, details) => {
+    if (permission === 'openExternal') return callback(/^(https?|mailto):/i.test((details && details.externalURL) || ''));
+    callback(WIDGET_OK.has(permission));
+  });
+  widgetSession.setPermissionCheckHandler((_wc, permission) => WIDGET_OK.has(permission));
   widgetSession.on('will-download', (_e, item) => {
     const dir = app.getPath('downloads');
     const base = (item.getFilename() || 'download').replace(/[\\/:*?"<>|]/g, '_');

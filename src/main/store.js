@@ -202,9 +202,18 @@ class Store {
   constructor() {
     this.file = path.join(app.getPath('userData'), 'settings.json');
     this.data = merge(DEFAULTS, {});
+    // loadedOk: settings.json read cleanly (main only refreshes the backup then).
+    this.loadedOk = !fs.existsSync(this.file);
+    const read = (f) => JSON.parse(fs.readFileSync(f, 'utf8'));
     try {
       if (fs.existsSync(this.file)) {
-        const saved = JSON.parse(fs.readFileSync(this.file, 'utf8'));
+        let saved;
+        try { saved = read(this.file); this.loadedOk = true; } catch (err) {
+          // A torn write (power loss): fall back to the backup, keep the broken file aside.
+          console.error('settings.json is unreadable, trying the backup:', err.message);
+          try { fs.copyFileSync(this.file, `${this.file}.broken`); } catch { /* best effort */ }
+          saved = read(path.join(path.dirname(this.file), 'settings.backup.json'));
+        }
         // Older builds stored the app-dock object under `dock`, colliding
         // with the layout mode of the same name. Move it to appDock.
         if (saved && saved.dock && typeof saved.dock === 'object') {
@@ -252,7 +261,10 @@ class Store {
     clearTimeout(this._timer);
     try {
       fs.mkdirSync(path.dirname(this.file), { recursive: true });
-      fs.writeFileSync(this.file, JSON.stringify(this.data, null, 2), 'utf8');
+      // Write beside it, then rename: a crash mid-write cannot leave a torn file.
+      const tmp = `${this.file}.tmp`;
+      fs.writeFileSync(tmp, JSON.stringify(this.data, null, 2), 'utf8');
+      fs.renameSync(tmp, this.file);
     } catch (err) {
       console.error('Failed to write settings:', err);
     }

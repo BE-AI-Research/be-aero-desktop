@@ -56,18 +56,28 @@ class DriveKeyring {
   }
 
   load() {
+    this.broken = null;
+    let raw;
+    try { raw = fs.readFileSync(this.file); } catch { return; }      // none yet
     try {
-      const raw = fs.readFileSync(this.file);
       const text = this.protect && this.protect.available() && raw[0] !== 0x7b ? this.protect.decrypt(raw) : raw.toString('utf8');
       for (const k of JSON.parse(text)) if (k && k.id && k.key) this.keys.set(k.id, { key: Buffer.from(k.key, 'base64'), created: Number(k.created) || 0 });
-    } catch { /* none yet */ }
+    } catch (err) {
+      // The keys exist but cannot be read now (the OS keyring is locked or
+      // changed). Making a new key would overwrite them and strand every
+      // file stored with them: refuse until they can be read again.
+      this.broken = `the storage keys on this device cannot be read right now (${err.message})`;
+    }
   }
 
   save() {
+    if (this.broken) return;                       // never overwrite keys that could not be read
     const text = JSON.stringify(this.export());
     fs.mkdirSync(path.dirname(this.file), { recursive: true });
     const data = this.protect && this.protect.available() ? this.protect.encrypt(text) : Buffer.from(text);
-    fs.writeFileSync(this.file, data, { mode: 0o600 });
+    const tmp = `${this.file}.tmp`;
+    fs.writeFileSync(tmp, data, { mode: 0o600 });
+    fs.renameSync(tmp, this.file);
   }
 
   export() { return [...this.keys].map(([id, k]) => ({ id, key: k.key.toString('base64'), created: k.created })); }
@@ -81,6 +91,7 @@ class DriveKeyring {
   }
 
   create() {
+    if (this.broken) throw new Error(this.broken);
     const id = crypto.randomBytes(8).toString('hex');
     this.keys.set(id, { key: crypto.randomBytes(32), created: Date.now() });
     this.save();

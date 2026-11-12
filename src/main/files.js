@@ -226,7 +226,7 @@ class FileService {
     for (const src of [].concat(paths || [])) {
       // From another device: download (always a copy, never a move).
       if (this.remote && require('./remote-files').isRemote(src)) {
-        const name = decodeURIComponent(String(src).split('/').pop() || 'file');
+        const name = require('./remote-files').remoteName(src);
         results.push(await this.remote.download(src, path.join(dest, await freeName(dest, name))));
         continue;
       }

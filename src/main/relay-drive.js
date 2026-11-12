@@ -272,7 +272,9 @@ class RelayDrive {
         const plainOff = (encOff / ENC_CHUNK) * PLAIN_CHUNK;
         if (plainOff >= st.size) break;
         if (ctl) await ctl.check();
-        const { bytesRead } = await fh.read(buf, 0, PLAIN_CHUNK, plainOff);
+        // Never past the size the upload was begun with (a growing file would
+        // make the last chunk too big for the relay).
+        const { bytesRead } = await fh.read(buf, 0, Math.min(PLAIN_CHUNK, st.size - plainOff), plainOff);
         if (!bytesRead) break;
         const enc = encryptChunk(k.key, buf.subarray(0, bytesRead));
         try {
@@ -289,8 +291,13 @@ class RelayDrive {
           else if (s2 && !s2.exists) throw new Error('the relay lost this upload; it will start again next time');
         }
       }
+      // Changed while it was being sent: what went up does not match its hash.
+      const after = await fsp.stat(file);
+      if (after.size !== st.size || after.mtimeMs !== st.mtimeMs) throw new Error('it changed while it was being stored; it will be stored again next time');
     } catch (err) {
-      if (ctl && ctl.cancelled) await this.req(relayId, 'drive.abort', { id }, 15000).catch(() => {});
+      // Nothing resumes an upload that failed here: let the relay drop it now
+      // (otherwise it holds space, and a device's open-upload slots, for a day).
+      await this.req(relayId, 'drive.abort', { id }, 15000).catch(() => {});
       throw err;
     } finally { await fh.close(); }
     // Commit, settling a conflict if another device changed this file meanwhile.
