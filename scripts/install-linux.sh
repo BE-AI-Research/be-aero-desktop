@@ -98,6 +98,23 @@ DESK
 command -v update-desktop-database >/dev/null && update-desktop-database || true
 command -v gtk-update-icon-cache >/dev/null && gtk-update-icon-cache -f /usr/share/icons/hicolor 2>/dev/null || true
 
+# The Sound widget uses pactl. On PipeWire desktops (Debian 13, Fedora...)
+# it is often missing; the package adds only the command-line tool, not the
+# PulseAudio sound server. Best effort: the widget falls back to wpctl.
+if ! command -v pactl >/dev/null; then
+  echo "Installing pactl for the Sound widget..."
+  if command -v apt-get >/dev/null; then
+    DEBIAN_FRONTEND=noninteractive apt-get install -y -q pulseaudio-utils >/dev/null 2>&1 || true
+  elif command -v dnf >/dev/null; then
+    dnf install -y -q pulseaudio-utils >/dev/null 2>&1 || true
+  elif command -v zypper >/dev/null; then
+    zypper --non-interactive install pulseaudio-utils >/dev/null 2>&1 || true
+  elif command -v pacman >/dev/null; then
+    pacman -S --needed --noconfirm libpulse >/dev/null 2>&1 || true
+  fi
+  if command -v pactl >/dev/null; then echo "pactl installed."; else echo "Could not install pactl; the Sound widget uses PipeWire's wpctl instead."; fi
+fi
+
 # GNOME on Wayland: the dock can only mirror real windows through a Shell
 # extension. Install it system-wide; the user enables it once.
 EXT_UUID=be-aero-dock@be-ai-research
