@@ -29,7 +29,11 @@ function parseToast(xml) {
     if (t) texts.push(t);
   }
   if (!texts.length) return null;
-  return { title: texts[0].slice(0, 200), body: texts.slice(1).join('\n').slice(0, 600) };
+  // <toast activationType="protocol" launch="app:..."> opens that link when clicked.
+  const tag = (/<toast\b[^>]*>/i.exec(String(xml)) || [''])[0];
+  const attr = (n) => { const m = new RegExp(`\\b${n}\\s*=\\s*"([^"]*)"`, 'i').exec(tag); return m ? unxml(m[1]) : ''; };
+  const uri = /^protocol$/i.test(attr('activationType')) ? attr('launch') : '';
+  return { title: texts[0].slice(0, 200), body: texts.slice(1).join('\n').slice(0, 600), ...(uri ? { uri } : {}) };
 }
 
 // "Microsoft.WindowsStore_8wekyb3d8bbwe!App" -> "Windows Store";
@@ -87,7 +91,7 @@ class WinNotificationWatcher {
         const t = parseToast(xml);
         if (!t) continue;
         const app = this.nameFor(r.app) || guessAppName(r.app);
-        try { this.onNotification({ app, title: t.title, body: t.body, ts: filetimeToMs(r.at) }); } catch { /* the center's problem */ }
+        try { this.onNotification({ app, appId: String(r.app || ''), uri: t.uri || '', title: t.title, body: t.body, ts: filetimeToMs(r.at) }); } catch { /* the center's problem */ }
       }
     } catch (err) {
       if (this.error !== err.message) this.log(`cannot read the Windows notification list: ${err.message}`);

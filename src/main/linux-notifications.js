@@ -39,11 +39,11 @@ function fromBusctl(msg) {
   if (!data) return null;
   if (msg.interface === FDO && msg.member === 'Notify') {
     // (app_name, replaces_id, app_icon, summary, body, actions, hints, timeout)
-    return { app: String(unwrap(data[0]) || ''), title: String(unwrap(data[3]) || ''), body: String(unwrap(data[4]) || '') };
+    return { app: String(unwrap(data[0]) || ''), appId: String(dictGet(data[6], 'desktop-entry') || ''), title: String(unwrap(data[3]) || ''), body: String(unwrap(data[4]) || '') };
   }
   if (msg.interface === GTK && msg.member === 'AddNotification') {
     // (app_id, notification_id, a{sv} with title / body)
-    return { app: String(unwrap(data[0]) || ''), title: String(dictGet(data[2], 'title') || ''), body: String(dictGet(data[2], 'body') || '') };
+    return { app: String(unwrap(data[0]) || ''), appId: String(unwrap(data[0]) || ''), title: String(dictGet(data[2], 'title') || ''), body: String(dictGet(data[2], 'body') || '') };
   }
   return null;
 }

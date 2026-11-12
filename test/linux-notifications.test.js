@@ -55,13 +55,16 @@ test('dbus-monitor output: Notify (with a multi-line body and nested strings) an
 test('busctl JSON: Notify and AddNotification, dicts as objects or pairs', () => {
   assert.deepStrictEqual(fromBusctl({ type: 'method_call', interface: 'org.freedesktop.Notifications', member: 'Notify',
     payload: { type: 'susssasa{sv}i', data: ['Slack', 0, '', 'Sam', 'Ready for lunch?', [], {}, -1] } }),
-  { app: 'Slack', title: 'Sam', body: 'Ready for lunch?' });
+  { app: 'Slack', appId: '', title: 'Sam', body: 'Ready for lunch?' });
+  // the desktop-entry hint names the app to open when it is clicked
+  assert.strictEqual(fromBusctl({ type: 'method_call', interface: 'org.freedesktop.Notifications', member: 'Notify',
+    payload: { data: ['Slack', 0, '', 'Sam', 'hi', [], { 'desktop-entry': { type: 's', data: 'slack' } }, -1] } }).appId, 'slack');
   assert.deepStrictEqual(fromBusctl({ type: 'method_call', interface: 'org.gtk.Notifications', member: 'AddNotification',
     payload: { type: 'ssa{sv}', data: ['org.gnome.Calendar', 'x', { title: { type: 's', data: 'Standup' }, body: { type: 's', data: 'in 5 minutes' } }] } }),
-  { app: 'org.gnome.Calendar', title: 'Standup', body: 'in 5 minutes' });
+  { app: 'org.gnome.Calendar', appId: 'org.gnome.Calendar', title: 'Standup', body: 'in 5 minutes' });
   assert.deepStrictEqual(fromBusctl({ type: 'method_call', interface: 'org.gtk.Notifications', member: 'AddNotification',
     payload: { data: ['app', 'y', [['title', { type: 's', data: 'T' }], ['body', { type: 's', data: 'B' }]]] } }),
-  { app: 'app', title: 'T', body: 'B' });
+  { app: 'app', appId: 'app', title: 'T', body: 'B' });
   assert.strictEqual(fromBusctl({ type: 'method_return', payload: { data: [3] } }), null);
   assert.strictEqual(fromBusctl({ type: 'signal', interface: 'org.freedesktop.Notifications', member: 'NotificationClosed', payload: { data: [3, 1] } }), null);
 });

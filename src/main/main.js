@@ -846,6 +846,39 @@ function buildMenuTemplate() {
 // Clipboard to and from my devices: off until turned on in Settings > Devices.
 const clipboardOn = () => (((store.get('devices') || {}).sync || {}).clipboard === true);
 
+// Clicking another app's notification brings that app up.
+// Windows: the toast's own link (activationType="protocol"), else an open
+// window of the app, else launch it by its app id (shell:AppsFolder).
+// Linux: its window, else launch its desktop entry.
+async function openNotificationApp(launch = {}) {
+  if (process.platform === 'linux') return linuxTasks ? linuxTasks.openApp({ appId: launch.appId, name: launch.name }) : false;
+  if (process.platform !== 'win32') return false;
+  const uri = String(launch.uri || '');
+  if (uri && /^[a-z][a-z0-9+.-]*:/i.test(uri) && !/^(file|javascript|vbscript|data|ms-msdt|search-ms):/i.test(uri)) {
+    try { await shell.openExternal(uri); return true; } catch { /* fall through */ }
+  }
+  const aumid = String(launch.aumid || '');
+  if (taskWindows) {
+    // Words of the app id / name a window's program should carry:
+    // "com.squirrel.Discord.Discord" -> discord, "Microsoft.Office.OUTLOOK.EXE.15" -> outlook.
+    const skip = /^(com|org|net|microsoft|windows|app|apps|exe|desktop|client|squirrel|google|mozilla|\d+)$/i;
+    const words = [...new Set([...aumid.split(/[.!_\\/\s-]+/), ...String(launch.name || '').split(/\s+/)]
+      .map((w) => w.toLowerCase().replace(/\.exe$/, '')).filter((w) => w.length > 2 && !skip.test(w)))];
+    try {
+      const wins = await taskWindows.list();
+      const hit = wins.find((w) => { const base = path.basename(String(w.exe || ''), '.exe').toLowerCase(); return base && words.some((x) => base === x || base.includes(x) || x.includes(base)); });
+      if (hit && await taskWindows.action('raise', hit.hwnd)) return true;
+    } catch { /* no window list */ }
+  }
+  if (aumid && /^[\w.!{}\\: -]+$/.test(aumid)) {
+    // A desktop app's id can be its full path; launch that directly.
+    const target = /^[a-z]:\\/i.test(aumid) || /^\{[0-9A-F-]+\}\\/i.test(aumid) ? null : `shell:AppsFolder\\${aumid}`;
+    const { spawn } = require('child_process');
+    if (target) { spawn('explorer.exe', [target], { detached: true, stdio: 'ignore' }).unref(); return true; }
+  }
+  return false;
+}
+
 // "Send clipboard to" - one item per paired device online now.
 function clipMenuItems() {
   const mesh = deviceService && deviceService.mesh;
@@ -1982,6 +2015,7 @@ app.whenReady().then(() => {
   notifyCenter = new (require('./notifications').NotificationCenter)({
     file: path.join(app.getPath('userData'), 'notifications.json'),
     getWindow: () => win,
+    openApp: (launch) => openNotificationApp(launch),
     toast: (title, body, onClick) => {
       if (!(store.get('notifications') || {}).toast || !SysNotification.isSupported()) return;
       const n = new SysNotification({ title, body, icon: loadIcon() });
@@ -1993,7 +2027,7 @@ app.whenReady().then(() => {
   // (read-only bus monitor; the desktop still shows its own popups).
   if (process.platform === 'linux') {
     linuxNotify = new (require('./linux-notifications').LinuxNotificationWatcher)({
-      onNotification: (n) => { if (notifyCenter) notifyCenter.add({ source: 'os', sourceName: n.app || 'An app', title: n.title || n.app || 'Notification', body: n.body, toast: false }); },
+      onNotification: (n) => { if (notifyCenter) notifyCenter.add({ source: 'os', sourceName: n.app || 'An app', title: n.title || n.app || 'Notification', body: n.body, toast: false, launch: { appId: n.appId || '', name: n.app || '' } }); },
       log: (m) => console.log('[notifications]', m)
     });
     if ((store.get('notifications') || {}).captureSystem !== false) linuxNotify.start();
@@ -2004,7 +2038,7 @@ app.whenReady().then(() => {
     linuxNotify = new (require('./win-notifications').WinNotificationWatcher)({
       ownIds: ['com.beaero.desktop'],
       nameFor: (id) => { const e = spotlight && spotlight.index.entries.find((x) => x.aumid && x.aumid.toLowerCase() === String(id).toLowerCase()); return e ? e.name : null; },
-      onNotification: (n) => { if (notifyCenter) notifyCenter.add({ source: 'os', sourceName: n.app || 'An app', title: n.title || n.app || 'Notification', body: n.body, toast: false }); },
+      onNotification: (n) => { if (notifyCenter) notifyCenter.add({ source: 'os', sourceName: n.app || 'An app', title: n.title || n.app || 'Notification', body: n.body, toast: false, launch: { aumid: n.appId || '', uri: n.uri || '', name: n.app || '' } }); },
       log: (m) => console.log('[notifications]', m)
     });
     if ((store.get('notifications') || {}).captureSystem !== false) linuxNotify.start();

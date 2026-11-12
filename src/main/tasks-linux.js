@@ -381,7 +381,7 @@ class LinuxTasks {
         const dir = arg0.startsWith('/') ? path.dirname(arg0) : '';
         let cg = null;
         try { cg = containerId(fs.readFileSync(`/proc/${n}/cgroup`, 'utf8')); } catch { /* fine */ }
-        const args = cmdline.split(' ').join(' ');
+        const args = cmdline.split('\0').join(' ');
         procs.push({ pid, comm, argv0, dir, args, webApp: /--app-id=/.test(args), flatpak: cg && cg.flatpak, snap: cg && cg.snap });
       } catch { /* process vanished */ }
     }
@@ -421,6 +421,25 @@ class LinuxTasks {
     });
     child.unref();
     return true;
+  }
+
+  // Bring up an app named by a notification: its window when one is open,
+  // else launch it. { appId: desktop id / GTK app id, name: app name }.
+  async openApp({ appId = '', name = '' } = {}) {
+    this.refreshEntries();
+    const id = String(appId).replace(/\.desktop$/i, '').toLowerCase();
+    const nm = String(name).toLowerCase();
+    const e = (id && this.entries.find((x) => x.id.toLowerCase() === id))
+      || (id && this.entries.find((x) => x.id.toLowerCase().endsWith(`.${id}`) || (x.wmClass && x.wmClass.toLowerCase() === id)))
+      || (nm && this.entries.find((x) => x.name.toLowerCase() === nm))
+      || (nm && this.entries.find((x) => x.base === nm || x.id.toLowerCase() === nm));
+    if (!e) return false;
+    try {
+      const wins = await this.list();
+      const w = wins.find((x) => x.exe === e.file);
+      if (w && await this.action('activate', w.hwnd)) return true;
+    } catch { /* no window list: launch */ }
+    return this.launch(e.file);
   }
 
   // Window verbs. With a real window source (shell helper, X11) they act on

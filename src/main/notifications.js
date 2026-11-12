@@ -8,8 +8,9 @@ const crypto = require('crypto');
 const MAX_ITEMS = 200;
 
 class NotificationCenter {
-  // { file, getWindow, toast(title, body, onClick) }
-  constructor({ file, getWindow, toast }) {
+  // { file, getWindow, toast(title, body, onClick), openApp(launch, item) }
+  constructor({ file, getWindow, toast, openApp = null }) {
+    this.openApp = openApp;
     this.file = file;
     this.getWindow = getWindow;
     this.toast = toast;
@@ -22,13 +23,18 @@ class NotificationCenter {
 
   // source: 'web' | 'ai' | 'system' | 'os' (another app's desktop
   // notification, Linux); sourceId: web widget id when web.
-  add({ source = 'system', sourceId = null, sourceName = '', title, body = '', url = null, icon = null, toast = true }) {
+  add({ source = 'system', sourceId = null, sourceName = '', title, body = '', url = null, icon = null, toast = true, launch = null }) {
     const item = {
       id: crypto.randomBytes(6).toString('hex'), ts: Date.now(),
       source, sourceId, sourceName: String(sourceName || '').slice(0, 80),
       title: String(title || '').slice(0, 200), body: String(body || '').slice(0, 1000),
       url: typeof url === 'string' && /^https?:\/\//i.test(url) ? url : null,
       icon: typeof icon === 'string' && /^(https?:|data:image\/)/i.test(icon) ? icon.slice(0, 4000) : null,
+      // How to bring up the app that sent it (another app's notification):
+      // { aumid, uri } on Windows, { appId, name } on Linux.
+      launch: launch && typeof launch === 'object'
+        ? Object.fromEntries(Object.entries(launch).filter(([k, v]) => ['aumid', 'uri', 'appId', 'name'].includes(k) && typeof v === 'string' && v).map(([k, v]) => [k, v.slice(0, 600)]))
+        : null,
       read: false
     };
     this.items.unshift(item);
@@ -69,6 +75,11 @@ class NotificationCenter {
     item.read = true;
     this.save();
     this.broadcast();
+    // Another app's notification: bring that app up (its window, or launch it).
+    if (item.launch && this.openApp) {
+      Promise.resolve(this.openApp(item.launch, item)).catch(() => {});
+      return;
+    }
     const win = this.getWindow();
     if (win && !win.isDestroyed()) {
       if (!win.isVisible()) win.show();
