@@ -63,7 +63,7 @@ class AiBus {
   devices() {
     const m = this.getMesh();
     if (!m) return [];
-    return [...m.peers.values()].map((p) => ({ id: p.id, name: p.label || p.name, online: m.conns.has(p.id), aiBus: !!(p.perms && p.perms.aiBus) }));
+    return [...m.peers.values()].filter((p) => p.role !== 'relay').map((p) => ({ id: p.id, name: p.label || p.name, online: m.conns.has(p.id), aiBus: !!(p.perms && p.perms.aiBus) }));
   }
 
   // A device by name (case-insensitive) or ID prefix.

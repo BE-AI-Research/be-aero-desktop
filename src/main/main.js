@@ -2247,7 +2247,7 @@ app.whenReady().then(() => {
   function shareMenu(dir) {
     if (!dir || /^aero:/i.test(dir) || /^(\\|smb:)/i.test(dir) || !path.isAbsolute(dir)) return [];
     const mesh = deviceService && deviceService.mesh;
-    const peers = mesh ? [...mesh.peers.values()] : [];
+    const peers = mesh ? [...mesh.peers.values()].filter((p) => p.role !== 'relay') : [];
     if (!peers.length) return [{ type: 'separator' }, { label: 'Shared index', submenu: [{ label: mesh ? 'No paired devices yet (Settings > Devices)' : 'Turn on device connections in Settings > Devices', enabled: false }] }];
     const has = (p) => (p.shares || []).some((s) => samePath(s.path, dir));
     const set = (p, on) => {

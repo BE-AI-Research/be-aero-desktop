@@ -157,7 +157,8 @@ class RemoteFiles {
   devices() {
     const m = this.getMesh();
     if (!m) return [];
-    return [...m.peers.values()].filter((p) => m.conns.has(p.id)).map((p) => ({ id: p.id, name: p.label || p.name }));
+    // A relay has no files of its own to browse: only devices.
+    return [...m.peers.values()].filter((p) => m.conns.has(p.id) && p.role !== 'relay').map((p) => ({ id: p.id, name: p.label || p.name }));
   }
 
   // Search every online paired device's shared folders by name.
