@@ -1,6 +1,7 @@
 // The widget tray: a dock tile (left of the bell) for the widgets you made -
 // AI widgets (also those made from .html files) and web widgets. Each one:
 // show / hide, open its location (its folder, or its web page), delete.
+// The + adds one: ask the assistant, pick an .html file, or a web page.
 // Built-in widgets are not listed here (they have Settings > Widgets).
 (function () {
   'use strict';
@@ -36,7 +37,7 @@
     const box = panel.querySelector('.wtray-list');
     box.textContent = '';
     if (!list.length) {
-      box.innerHTML = '<div class="wtray-empty">No widgets yet. Ask the assistant to make one, right-click an .html file > Create widget, or add a web widget in Settings.</div>';
+      box.innerHTML = '<div class="wtray-empty">No widgets yet. Click + to add one: the assistant can make one for you, or use an .html file or a web page.</div>';
       return;
     }
     for (const w of list) {
@@ -62,6 +63,65 @@
       });
       box.appendChild(row);
     }
+  }
+
+  // The + : three ways to add a widget.
+  function toggleAdd() {
+    const add = panel.querySelector('.wtray-addbox');
+    if (!add.classList.contains('hidden')) { add.classList.add('hidden'); place(); return; }
+    add.classList.remove('hidden');
+    add.innerHTML = `
+      <button class="wtray-addopt" data-add="ai"><span class="g">🤖</span><span><b>Ask the assistant</b><small>Describe it; the AI makes it</small></span></button>
+      <button class="wtray-addopt" data-add="html"><span class="g">📄</span><span><b>From an HTML file…</b><small>A page of your own, copied into AI Widgets</small></span></button>
+      <button class="wtray-addopt" data-add="web"><span class="g">🌐</span><span><b>A web page…</b><small>Any site, shown live on the desktop</small></span></button>
+      <div class="wtray-addmsg"></div>`;
+    const msg = add.querySelector('.wtray-addmsg');
+    add.querySelector('[data-add="ai"]').addEventListener('click', () => askAssistant());
+    add.querySelector('[data-add="html"]').addEventListener('click', async () => {
+      msg.textContent = '';
+      const r = await aero.widgetsAddHtml();
+      if (!r || r.canceled) return;
+      if (r.error) { msg.textContent = r.error; msg.classList.add('err'); return; }
+      add.classList.add('hidden');
+      await load();
+      place();
+    });
+    add.querySelector('[data-add="web"]').addEventListener('click', (e) => {
+      if (add.querySelector('.wtray-webform')) return;
+      const f = document.createElement('div');
+      f.className = 'wtray-webform';
+      f.innerHTML = '<input type="text" class="u" spellcheck="false" placeholder="Address, e.g. example.com"><input type="text" class="n" spellcheck="false" placeholder="Name (optional)"><button class="btn">Add</button>';
+      e.currentTarget.after(f);
+      const u = f.querySelector('.u');
+      u.focus();
+      const go = async () => {
+        const r = await aero.widgetsAddWeb(u.value, f.querySelector('.n').value);
+        if (!r || r.error) { msg.textContent = (r && r.error) || 'Could not add it.'; msg.classList.add('err'); return; }
+        add.classList.add('hidden');
+        await load();
+        place();
+      };
+      f.querySelector('button').addEventListener('click', go);
+      f.addEventListener('keydown', (ev) => { ev.stopPropagation(); if (ev.key === 'Enter') go(); if (ev.key === 'Escape') f.remove(); });
+      place();
+    });
+    place();
+  }
+
+  // Show the AI chat with the request started; the user finishes the sentence.
+  async function askAssistant() {
+    close();
+    try { const s = await aero.getSettings(); if (s.widgets && s.widgets.ai === false) await aero.setSettings({ widgets: { ai: true } }); } catch { /* shown */ }
+    setTimeout(() => {
+      const input = document.querySelector('.ai-widget .ai-input');
+      if (!input) return;
+      const w = input.closest('.ai-widget');
+      if (w && w.scrollIntoView) w.scrollIntoView({ block: 'nearest' });
+      input.value = 'Make me a widget that ';
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      input.focus();
+      input.setSelectionRange(input.value.length, input.value.length);
+    }, 150);
   }
 
   function place() {
@@ -91,8 +151,9 @@
     if (panel) { close(); return; }
     panel = document.createElement('div');
     panel.className = 'wtray-panel widget-hit';
-    panel.innerHTML = '<div class="wtray-head"><span>YOUR WIDGETS</span></div><div class="wtray-list"></div>';
+    panel.innerHTML = '<div class="wtray-head"><span>YOUR WIDGETS</span><button class="icon-btn wtray-add" title="Add a widget">＋</button></div><div class="wtray-addbox hidden"></div><div class="wtray-list"></div>';
     document.body.appendChild(panel);
+    panel.querySelector('.wtray-add').addEventListener('click', toggleAdd);
     tileEl.classList.add('open');
     await load();
     place();

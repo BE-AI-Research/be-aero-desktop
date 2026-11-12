@@ -919,6 +919,25 @@ ipcMain.handle('widgets:toggle', async (_e, kind, id, on) => {
   }
   return false;
 });
+// Add a widget from the tray: an .html file (copied into AI Widgets), or a web page.
+ipcMain.handle('widgets:add-html', async () => {
+  if (!aiService) return { error: 'Turn on the AI assistant first - widgets made from files live in its folder.' };
+  const { canceled, filePaths } = await dialog.showOpenDialog(win, {
+    title: 'Make a widget from an HTML file', properties: ['openFile'],
+    filters: [{ name: 'Web page', extensions: ['html', 'htm'] }]
+  });
+  if (canceled || !filePaths || !filePaths[0]) return { canceled: true };
+  try { return { ok: true, ...(await aiService.widgets.createFromFile(filePaths[0])) }; } catch (err) { return { error: String(err && err.message || err) }; }
+});
+ipcMain.handle('widgets:add-web', async (_e, rawUrl, rawName) => {
+  let url = String(rawUrl || '').trim();
+  if (!url) return { error: 'Enter the page address.' };
+  if (!/^https?:\/\//i.test(url)) url = `https://${url}`;
+  try { const u = new URL(url); if (!/^https?:$/.test(u.protocol) || !u.hostname) throw new Error(); } catch { return { error: 'That does not look like a web address.' }; }
+  const entry = { id: `w${Date.now().toString(36)}`, name: String(rawName || '').trim().slice(0, 40), url, height: 300 };
+  updateSettings({ webWidgets: [...(store.get('webWidgets') || []), entry] });
+  return { ok: true, id: entry.id };
+});
 ipcMain.handle('widgets:open', async (_e, kind, id) => {
   if (kind === 'ai' && aiService) { const w = aiService.widgets.get(String(id)); if (w) { shell.openPath(w.dir); return true; } }
   if (kind === 'web') { const w = (store.get('webWidgets') || []).find((x) => x.id === id); if (w && /^https?:/i.test(w.url)) { shell.openExternal(w.url); return true; } }

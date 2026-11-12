@@ -71,6 +71,8 @@ contextBridge.exposeInMainWorld('aero', {
   widgetsToggle: (kind, id, on) => ipcRenderer.invoke('widgets:toggle', kind, id, on),
   widgetsOpen: (kind, id) => ipcRenderer.invoke('widgets:open', kind, id),
   widgetsDelete: (kind, id) => ipcRenderer.invoke('widgets:delete', kind, id),
+  widgetsAddHtml: () => ipcRenderer.invoke('widgets:add-html'),
+  widgetsAddWeb: (url, name) => ipcRenderer.invoke('widgets:add-web', url, name),
   onAiWidgets: (cb) => subscribe('ai:widgets', cb),
   aiVisualWhere: (id, where) => ipcRenderer.invoke('ai:visual-where', id, where),
   aiVisualDelete: (id) => ipcRenderer.invoke('ai:visual-delete', id),
