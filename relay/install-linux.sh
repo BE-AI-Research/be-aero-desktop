@@ -54,7 +54,8 @@ WantedBy=multi-user.target
 UNIT
 
 systemctl daemon-reload
-systemctl enable --now be-aero-relay
+systemctl enable be-aero-relay >/dev/null 2>&1
+systemctl restart be-aero-relay      # an update must run the new code
 sleep 1
 systemctl --no-pager --lines=3 status be-aero-relay || true
 echo
