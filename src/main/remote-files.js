@@ -193,13 +193,13 @@ class RemoteFiles {
   }
 
   // Local files and folders into Shared storage.
-  async put(localPaths, destUrl) {
+  async put(localPaths, destUrl, ctl = null) {
     const r = this.relayOf(destUrl);
     if (!r || r.root !== 0) throw new Error('read-only');
     const out = [];
     for (const p of [].concat(localPaths || [])) {
       if (isRemote(p)) throw new Error('Copy it to this computer first, then into Shared storage.');
-      for (const x of await this.drive.put(r.device, r.rel, p)) out.push(remoteUrl(r.device, 0, x.path));
+      for (const x of await this.drive.put(r.device, r.rel, p, ctl)) out.push(remoteUrl(r.device, 0, x.path));
     }
     return out;
   }
@@ -279,10 +279,12 @@ class RemoteFiles {
     };
   }
 
-  async download(url, target) {
+  // ctl (optional, from transfers.js): check() between chunks (pause / stop),
+  // onBytes(n), addTotal(bytes, files).
+  async download(url, target, ctl = null) {
     const r = parseRemote(url);
     if (!r || r.root === null || !r.rel) throw new Error('not a remote file');
-    if (this.drive && this.drive.isRelay(r.device)) return this.drive.download(r.device, r.root, r.rel, target);
+    if (this.drive && this.drive.isRelay(r.device)) return this.drive.download(r.device, r.root, r.rel, target, ctl);
     const m = this.mesh();
     await fsp.mkdir(path.dirname(target), { recursive: true });
     const tmp = `${target}.${crypto.randomBytes(4).toString('hex')}.part`;
@@ -290,10 +292,13 @@ class RemoteFiles {
     let mtime = null;
     try {
       let offset = 0;
+      let sized = false;
       for (;;) {
+        if (ctl) await ctl.check();
         const c = await m.request(r.device, 'files.read', { root: r.root, rel: r.rel, offset, length: CHUNK }, 60000);
+        if (ctl && !sized && ctl.addTotal) { ctl.addTotal(c.size || 0, 1); sized = true; }
         const buf = Buffer.from(c.data || '', 'base64');
-        if (buf.length) { await fh.write(buf, 0, buf.length, offset); offset += buf.length; }
+        if (buf.length) { await fh.write(buf, 0, buf.length, offset); offset += buf.length; if (ctl) ctl.onBytes(buf.length); }
         mtime = c.mtime;
         if (c.eof || !buf.length) break;
       }

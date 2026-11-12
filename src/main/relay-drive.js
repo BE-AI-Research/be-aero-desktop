@@ -193,6 +193,7 @@ class RelayDrive {
     if (!e) throw new Error('not a file on the relay');
     const key = this.keyring.get(e.keyId);
     if (!key) throw new Error('this file was stored with a key this device does not have yet');
+    if (ctl && ctl.addTotal) ctl.addTotal(e.size, 1);
     await fsp.mkdir(path.dirname(target), { recursive: true });
     const tmp = `${target}.${e.id.slice(1, 9)}.part`;
     // Resume: whole plaintext chunks already written map to encrypted offsets.

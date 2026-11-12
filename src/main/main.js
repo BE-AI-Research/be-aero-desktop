@@ -2215,6 +2215,20 @@ app.whenReady().then(() => {
   ipcMain.handle('files:rename', fileCall((_e, p, name) => fileService.rename(p, name)));
   ipcMain.handle('files:trash', fileCall((_e, paths) => fileService.trash(paths)));
   ipcMain.handle('files:transfer', fileCall((_e, paths, dest, move) => fileService.transfer(paths, dest, { move: !!move })));
+  // Copy / move jobs with progress, pause, resume and stop (transfers.js).
+  const transfers = new (require('./transfers').Transfers)({
+    remote: remoteFiles,
+    trash: (p) => shell.trashItem(p),
+    onChange: (list) => {
+      for (const w of BrowserWindow.getAllWindows()) if (!w.isDestroyed()) w.webContents.send('transfers:update', list);
+    }
+  });
+  ipcMain.handle('transfers:start', fileCall((_e, paths, dest, move) => transfers.start(paths, dest, { move: !!move })));
+  ipcMain.handle('transfers:list', () => transfers.list());
+  ipcMain.handle('transfers:pause', (_e, id) => transfers.pause(String(id)));
+  ipcMain.handle('transfers:resume', (_e, id) => transfers.resume(String(id)));
+  ipcMain.handle('transfers:cancel', (_e, id) => transfers.cancel(String(id)));
+  ipcMain.handle('transfers:clear', (_e, id) => transfers.clear(String(id)));
   ipcMain.handle('files:to-pool', fileCall(async (_e, paths) => fileService.transfer(paths, await fileService.ensurePool())));
   ipcMain.handle('files:preview', fileCall((_e, p) => fileService.preview(p)));
   ipcMain.handle('files:icon', async (_e, p, size) => fileService.icon(p, size));
