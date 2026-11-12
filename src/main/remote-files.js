@@ -157,8 +157,51 @@ class RemoteFiles {
   devices() {
     const m = this.getMesh();
     if (!m) return [];
-    // A relay has no files of its own to browse: only devices.
-    return [...m.peers.values()].filter((p) => m.conns.has(p.id) && p.role !== 'relay').map((p) => ({ id: p.id, name: p.label || p.name }));
+    // A relay shows its storage (relay-drive.js) when that is wired in.
+    return [...m.peers.values()].filter((p) => m.conns.has(p.id) && (p.role !== 'relay' || this.drive))
+      .map((p) => ({ id: p.id, name: p.label || p.name, relay: p.role === 'relay' }));
+  }
+
+  relayOf(url) { const r = parseRemote(url); return r && this.drive && this.drive.isRelay(r.device) ? r : null; }
+
+  // Shared storage on a relay can be written to; everything else remote is read-only.
+  writable(url) { const r = this.relayOf(url); return !!(r && r.root === 0); }
+
+  async mkdir(url, name) {
+    const r = this.relayOf(url);
+    if (!r || r.root !== 0) throw new Error('read-only');
+    const n = String(name || 'New folder').replace(/[\\/:*?"<>|]/g, '').trim() || 'New folder';
+    const rel = await this.drive.mkdir(r.device, r.rel ? `${r.rel}/${n}` : n);
+    return remoteUrl(r.device, 0, rel);
+  }
+
+  async rename(url, name) {
+    const r = this.relayOf(url);
+    if (!r || r.root !== 0 || !r.rel) throw new Error('read-only');
+    return remoteUrl(r.device, 0, await this.drive.rename(r.device, r.rel, name));
+  }
+
+  async remove(urls) {
+    const by = new Map();
+    for (const u of [].concat(urls || [])) {
+      const r = this.relayOf(u);
+      if (!r || r.root !== 0 || !r.rel) throw new Error('read-only');
+      by.set(r.device, [...(by.get(r.device) || []), r.rel]);
+    }
+    for (const [dev, rels] of by) await this.drive.remove(dev, 0, rels);
+    return [].concat(urls || []);
+  }
+
+  // Local files and folders into Shared storage.
+  async put(localPaths, destUrl) {
+    const r = this.relayOf(destUrl);
+    if (!r || r.root !== 0) throw new Error('read-only');
+    const out = [];
+    for (const p of [].concat(localPaths || [])) {
+      if (isRemote(p)) throw new Error('Copy it to this computer first, then into Shared storage.');
+      for (const x of await this.drive.put(r.device, r.rel, p)) out.push(remoteUrl(r.device, 0, x.path));
+    }
+    return out;
   }
 
   // Search every online paired device's shared folders by name.
@@ -194,6 +237,7 @@ class RemoteFiles {
     if (!r) throw new Error('not a device path');
     const m = this.mesh();
     const name = this.peerName(r.device);
+    if (this.drive && this.drive.isRelay(r.device)) return this.listRelay(r, name);
     if (r.root === null) {
       const { roots } = await m.request(r.device, 'files.roots', {}, 15000);
       return {
@@ -213,9 +257,32 @@ class RemoteFiles {
   }
 
   // Download a remote file to `target` (written via a temp file).
+  // A relay: its two storage folders, then their contents.
+  async listRelay(r, name) {
+    if (r.root === null) {
+      return {
+        path: `aero://${r.device}`, parent: null, remote: true, relay: true, deviceName: name, inPool: false, truncated: false, writable: false,
+        entries: this.drive.roots().map((x) => ({ name: x.name, path: remoteUrl(r.device, x.index), dir: true, size: null, mtime: null, hidden: false, kind: x.kind }))
+      };
+    }
+    if (r.root > 1) throw new Error('no such folder on the relay');
+    const res = await this.drive.list(r.device, r.root, r.rel);
+    const parent = r.rel ? remoteUrl(r.device, r.root, r.rel.split('/').slice(0, -1).join('/')) : `aero://${r.device}`;
+    return {
+      path: remoteUrl(r.device, r.root, r.rel), parent, remote: true, relay: true, deviceName: name, inPool: false, truncated: false,
+      writable: r.root === 0, unreadable: res.unreadable, used: res.used, maxBytes: res.maxBytes,
+      entries: res.entries.map((e) => ({
+        name: e.name, dir: e.dir, size: e.size, mtime: e.mtime, hidden: false, link: false,
+        path: remoteUrl(r.device, r.root, r.rel ? `${r.rel}/${e.name}` : e.name),
+        kind: e.dir ? 'folder' : IMAGE_EXT.test(e.name) ? 'image' : TEXT_EXT.test(e.name) ? 'text' : 'file'
+      }))
+    };
+  }
+
   async download(url, target) {
     const r = parseRemote(url);
     if (!r || r.root === null || !r.rel) throw new Error('not a remote file');
+    if (this.drive && this.drive.isRelay(r.device)) return this.drive.download(r.device, r.root, r.rel, target);
     const m = this.mesh();
     await fsp.mkdir(path.dirname(target), { recursive: true });
     const tmp = `${target}.${crypto.randomBytes(4).toString('hex')}.part`;
@@ -252,6 +319,20 @@ class RemoteFiles {
   async preview(url, nativeImage) {
     const r = parseRemote(url);
     if (!r || r.root === null || !r.rel) return { kind: 'folder' };
+    if (this.drive && this.drive.isRelay(r.device)) {
+      // Relay storage is encrypted: preview from the decrypted local copy.
+      const file = await this.cached(url);
+      const st = await fsp.stat(file);
+      if (IMAGE_EXT.test(r.rel) && st.size <= 6 * 1024 * 1024) {
+        const img = nativeImage.createFromPath(file);
+        if (!img.isEmpty()) return { kind: 'image', dataUrl: img.resize({ width: Math.min(320, img.getSize().width) }).toDataURL(), size: st.size };
+      }
+      const head = Buffer.alloc(Math.min(st.size, 64 * 1024));
+      const fh = await fsp.open(file, 'r');
+      try { await fh.read(head, 0, head.length, 0); } finally { await fh.close(); }
+      if ((TEXT_EXT.test(r.rel) || st.size < 4096) && !head.includes(0)) return { kind: 'text', text: head.toString('utf8'), truncated: st.size > head.length, size: st.size };
+      return { kind: 'file', size: st.size };
+    }
     const m = this.mesh();
     const first = await m.request(r.device, 'files.read', { root: r.root, rel: r.rel, offset: 0, length: 64 * 1024 }, 20000);
     const buf = Buffer.from(first.data || '', 'base64');

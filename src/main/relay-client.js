@@ -13,7 +13,7 @@ const { deviceIdFromCert } = require('./mesh/identity');
 
 const INFO_MS = 60 * 1000;
 // What each kind needs from my side's permissions for the sending device.
-const KIND_PERM = { state: 'state', bus: 'aiBus', clipboard: 'clipboard', widget: 'state', notify: 'notify' };
+const KIND_PERM = { state: 'state', bus: 'aiBus', clipboard: 'clipboard', widget: 'state', notify: 'notify', drivekey: 'files' };
 
 class RelayClient extends EventEmitter {
   // { handlers: { kind: async (data, from, key) }, log }

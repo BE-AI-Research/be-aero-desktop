@@ -13,7 +13,7 @@ const out = path.join(root, 'release', name);
 
 fs.rmSync(out, { recursive: true, force: true });
 fs.mkdirSync(path.join(out, 'lib'), { recursive: true });
-for (const f of ['relay.js', 'store.js', 'README.md', 'Dockerfile', 'install-linux.sh', 'install-windows.ps1']) {
+for (const f of ['relay.js', 'store.js', 'drive.js', 'README.md', 'Dockerfile', 'install-linux.sh', 'install-windows.ps1']) {
   let text = fs.readFileSync(path.join(root, 'relay', f), 'utf8');
   if (f === 'relay.js') text = text.replace(/const VERSION = '[^']*';/, `const VERSION = '${version}';`);
   // LF for the shell script and Dockerfile, whatever git checked out.

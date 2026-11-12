@@ -48,6 +48,8 @@ let deviceService = null;
 // BE-Aero Relay Server client (relay-client.js): messages for my devices
 // that are offline go through a relay, sealed end to end.
 let relayClient = null;
+// Relay storage (relay-drive.js): Shared storage + the File Pool copy, encrypted here.
+let relayDrive = null;
 // My devices (not relays) I can send to now: online, or reachable through a relay.
 function sendTargets() {
   const mesh = deviceService && deviceService.mesh;
@@ -2323,7 +2325,8 @@ app.whenReady().then(() => {
       state: async (data, from, key) => { stateSync.applyIncoming(key, data && data.entry, data && data.value, from.name); },
       bus: async (data, from) => { if (!aiService) throw new Error('the assistant is not running'); await aiService.bus.receive(data && data.msg, from); },
       clipboard: (data, from) => receiveClipboard(data, from),
-      widget: (data, from) => receiveWidget(data, from)
+      widget: (data, from) => receiveWidget(data, from),
+      drivekey: (data) => { if (relayDrive) relayDrive.receiveKeys(data && data.keys); }
     },
     log: (m) => console.log('[relay]', m)
   });
@@ -2467,6 +2470,7 @@ app.whenReady().then(() => {
   }));
 
   // File Pool sync rides on the mesh: it runs while device connections are on.
+  const poolListeners = [];
   const poolSync = new (require('./pool-sync').PoolSync)({
     poolDir: () => fileService.poolDir(),
     indexFile: path.join(app.getPath('userData'), 'mesh', 'pool-index.json'),
@@ -2474,6 +2478,7 @@ app.whenReady().then(() => {
     trash: (p) => shell.trashItem(p),
     log: (m) => console.log('[pool]', m),
     onChange: (info) => {
+      for (const f of poolListeners) { try { f(info); } catch { /* a listener's problem */ } }
       if (!info || info.local || !notifyCenter) return;
       const n = (info.received || []).length;
       const parts = [];
@@ -2483,18 +2488,30 @@ app.whenReady().then(() => {
       if (parts.length) notifyCenter.add({ source: 'system', sourceName: 'File Pool', title: `File Pool: ${parts.join(', ')} from ${info.from}`, body: (info.received || []).slice(0, 5).join(', '), toast: false });
     }
   });
+  relayDrive = new (require('./relay-drive').RelayDrive)({
+    getMesh: () => (deviceService && deviceService.mesh) || null,
+    relayClient,
+    keyring: new (require('./mesh/drive-crypto').DriveKeyring)({
+      file: path.join(app.getPath('userData'), 'mesh', 'drive-keys.enc'),
+      protect: { available: () => require('electron').safeStorage.isEncryptionAvailable(), encrypt: (t) => require('electron').safeStorage.encryptString(String(t)), decrypt: (b) => require('electron').safeStorage.decryptString(b) }
+    }),
+    pool: { dir: () => fileService.poolDir(), index: () => poolSync.index, onChange: (cb) => poolListeners.push(cb) },
+    log: (m) => console.log('[relay storage]', m)
+  });
+  remoteFiles.drive = relayDrive;
   deviceService = new (require('./mesh/service').DeviceService)({
     userDataDir: app.getPath('userData'), store, getWindow: () => win,
     onStart: (mesh) => {
       poolSync.attach(mesh); poolSync.start(); remoteFiles.attach(mesh); stateSync.attach(mesh); stateSync.start(); attachWidgetSend(mesh); attachClipboard(mesh);
       relayClient.attach(mesh);
+      relayDrive.attach(mesh);
       // A relay only stores and forwards: it gets none of a device's permissions.
       const lockRelays = () => { for (const p of mesh.peers.values()) if (p.role === 'relay' && Object.values(p.perms || {}).some(Boolean)) mesh.setPerms(p.id, Object.fromEntries(Object.keys(p.perms).map((k) => [k, false]))); };
       mesh.on('change', lockRelays);
       lockRelays();
       if (aiService) { aiService.bus.attach(mesh); aiService.shared.attach(mesh); aiService.bus.relay = relayClient; }
     },
-    onStop: () => { poolSync.stop(); poolSync.mesh = null; stateSync.stop(); relayClient.stop(); }
+    onStop: () => { poolSync.stop(); poolSync.mesh = null; stateSync.stop(); relayClient.stop(); relayDrive.stop(); }
   });
   deviceService.registerIpc();
   if ((store.get('devices') || {}).enabled) deviceService.start();

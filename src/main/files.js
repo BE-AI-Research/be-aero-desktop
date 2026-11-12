@@ -176,11 +176,17 @@ class FileService {
     }
     return this.shell.openPath(path.resolve(p));
   }
-  readOnly(p) { if (this.remote && require('./remote-files').isRemote(p)) throw new Error('Folders on other devices are read-only from here. Copy files to this computer, or use the File Pool.'); }
+  readOnly(p) {
+    if (this.remote && require('./remote-files').isRemote(p) && !this.remote.writable(p)) {
+      throw new Error('Folders on other devices are read-only from here. Copy files to this computer, the File Pool, or Shared storage on your relay.');
+    }
+  }
+  onRelay(p) { return !!(this.remote && require('./remote-files').isRemote(p) && this.remote.writable(p)); }
   reveal(p) { this.shell.showItemInFolder(path.resolve(p)); return true; }
 
   async mkdir(dir, name) {
     this.readOnly(dir);
+    if (this.onRelay(dir)) return this.remote.mkdir(dir, name);
     const n = String(name || 'New folder').replace(/[\\/:*?"<>|]/g, '').trim() || 'New folder';
     const target = path.join(path.resolve(dir), await freeName(path.resolve(dir), n));
     await fsp.mkdir(target);
@@ -189,6 +195,7 @@ class FileService {
 
   async rename(p, name) {
     this.readOnly(p);
+    if (this.onRelay(p)) return this.remote.rename(p, name);
     const n = String(name || '').trim();
     if (!n || /[\\/]/.test(n) || (process.platform === 'win32' && /[:*?"<>|]/.test(n))) throw new Error('That name is not allowed.');
     const target = path.join(path.dirname(path.resolve(p)), n);
@@ -200,6 +207,10 @@ class FileService {
 
   async trash(paths) {
     for (const p of [].concat(paths || [])) this.readOnly(p);
+    // Shared storage on the relay has no Recycle Bin: removed for good.
+    const relayed = [].concat(paths || []).filter((p) => this.onRelay(p));
+    if (relayed.length) await this.remote.remove(relayed);
+    paths = [].concat(paths || []).filter((p) => !this.onRelay(p));
     const done = [];
     for (const p of [].concat(paths || [])) { await this.shell.trashItem(path.resolve(p)); done.push(p); }
     return done;
@@ -208,6 +219,8 @@ class FileService {
   // Copy (or move) each source into destDir, never overwriting.
   async transfer(paths, destDir, { move = false } = {}) {
     this.readOnly(destDir);
+    // Into Shared storage on the relay: encrypted and uploaded (always a copy).
+    if (this.onRelay(destDir)) return this.remote.put(paths, destDir);
     const dest = path.resolve(destDir);
     const results = [];
     for (const src of [].concat(paths || [])) {

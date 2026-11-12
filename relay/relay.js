@@ -22,6 +22,7 @@ const lib = (name) => { try { return require(`./lib/${name}`); } catch { return 
 const { Mesh } = lib('mesh');
 const { loadIdentity } = lib('identity');
 const { MailStore, DEV_RE } = require('./store');
+const { DriveStore } = require('./drive');
 
 const env = process.env;
 const DATA = env.RELAY_DATA || path.join(os.homedir(), '.be-aero-relay');
@@ -82,6 +83,9 @@ function createRelay({ dataDir = DATA, port = PORT, name = NAME, maxBytes, ttlMs
   });
   // A pairing code was shown on this machine (relay.js pair): whoever
   // presents it is approved - the code is the proof.
+  // Storage for my devices (Shared storage, the File Pool copy): encrypted
+  // on the devices, opaque here. It shares the size cap with the mailbox.
+  const drive = new DriveStore({ dir: dataDir, budget: () => store.maxBytes - store.used() - drive.used() });
   const mesh = new Mesh({ identity, peers, port, discovery, approvePairing: async () => true, role: 'relay', log: say });
   const paired = (id) => mesh.peers.has(id);
 
@@ -113,6 +117,13 @@ function createRelay({ dataDir = DATA, port = PORT, name = NAME, maxBytes, ttlMs
     return { id: it.meta.id, from: it.meta.from, kind: it.meta.kind, key: it.meta.key, at: it.meta.at, data: it.data.toString('base64') };
   });
   mesh.handle('relay.ack', null, async (a, from) => ({ removed: store.ack(from.id, a.ids) }));
+  mesh.handle('drive.index', null, async () => ({ objects: drive.index(), used: store.used() + drive.used(), maxBytes: store.maxBytes }));
+  mesh.handle('drive.begin', null, async (a) => ({ id: drive.begin(a.meta, a.size) }));
+  mesh.handle('drive.chunk', null, async (a) => ({ ok: drive.chunk(String(a.id), a.offset, a.data) }));
+  mesh.handle('drive.commit', null, async (a, from) => { drive.commit(String(a.id)); say(`stored object ${String(a.id).slice(0, 9)} from ${from.id.slice(0, 7)}`); return { ok: true }; });
+  mesh.handle('drive.read', null, async (a) => drive.read(String(a.id), a.offset, a.length));
+  mesh.handle('drive.meta', null, async (a) => ({ ok: drive.setMeta(String(a.id), a.meta) }));
+  mesh.handle('drive.remove', null, async (a) => ({ removed: drive.remove(a.ids) }));
 
   mesh.on('online', (id) => { say(`online: ${(mesh.peers.get(id) || {}).name || id}`); setTimeout(() => nudge(id), 1500); });
   mesh.on('change', () => {
@@ -122,7 +133,8 @@ function createRelay({ dataDir = DATA, port = PORT, name = NAME, maxBytes, ttlMs
   let sweeper = null;
   return {
     identity, mesh, store,
-    async start() { await mesh.start(); sweeper = setInterval(() => { const n = store.sweep(); if (n) say(`expired ${n} item(s)`); }, 3600 * 1000); return mesh.port; },
+    drive,
+    async start() { await mesh.start(); sweeper = setInterval(() => { const n = store.sweep(); if (n) say(`expired ${n} item(s)`); drive.sweep(); }, 3600 * 1000); return mesh.port; },
     stop() { clearInterval(sweeper); mesh.stop(); }
   };
 }
