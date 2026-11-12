@@ -56,11 +56,11 @@ function cspFor(approved) {
   const extra = (approved || []).join(' ');
   return [
     "default-src 'none'",
-    `script-src 'unsafe-inline' ${CDNS}`,
-    `style-src 'unsafe-inline' ${CDNS} https://fonts.googleapis.com`,
-    'font-src data: https://fonts.gstatic.com',
-    `img-src data: blob: https: ${extra}`.trim(),
-    'media-src data: blob:',
+    `script-src 'self' 'unsafe-inline' ${CDNS}`,
+    `style-src 'self' 'unsafe-inline' ${CDNS} https://fonts.googleapis.com`,
+    "font-src 'self' data: https://fonts.gstatic.com",
+    `img-src 'self' data: blob: https: ${extra}`.trim(),
+    "media-src 'self' data: blob:",
     `connect-src ${extra || "'none'"}`,
     "frame-src 'none'",
     "form-action 'none'",
@@ -203,6 +203,56 @@ class AiWidgets {
     const net = await this.askHosts(w);
     this.onChange(this.list());
     return { id, title: w.title, hosts: w.hosts, approvedHosts: net.approved };
+  }
+
+  // A widget from an .html file (file browser > Create widget): the page
+  // becomes index.html, and the local files it links to (styles, scripts,
+  // images beside it) are copied along so it looks the same.
+  async createFromFile(file) {
+    const st = await fsp.stat(file);
+    if (!st.isFile() || !/\.html?$/i.test(file)) throw new Error('not an HTML file');
+    if (st.size > MAX_HTML) throw new Error(`the page is too large (max ${MAX_HTML / 1024} KB)`);
+    const html = await fsp.readFile(file, 'utf8');
+    const title = (/<title[^>]*>([^<]{1,80})<\/title>/i.exec(html) || [])[1] || path.basename(file).replace(/\.html?$/i, '');
+    const r = await this.create({ title: title.trim(), html });
+    const w = this.get(r.id);
+    const srcDir = path.dirname(file);
+    const refs = new Set();
+    const re = /\b(?:src|href)\s*=\s*["']([^"'#?]+)/gi;
+    let m;
+    while ((m = re.exec(html))) {
+      const ref = m[1].trim();
+      if (!ref || /^[a-z][a-z0-9+.-]*:/i.test(ref) || ref.startsWith('//') || ref.startsWith('/')) continue;   // only relative, local files
+      refs.add(ref.replace(/\\/g, '/'));
+    }
+    let copied = 0;
+    let bytes = 0;
+    for (const ref of [...refs].slice(0, 60)) {
+      const from = path.resolve(srcDir, decodeURIComponent(ref));
+      if (path.relative(srcDir, from).startsWith('..')) continue;                 // stays inside the page's folder
+      const to = path.resolve(w.dir, decodeURIComponent(ref));
+      if (path.relative(w.dir, to).startsWith('..') || /^(index\.html|widget\.json|state\.json)$/i.test(path.relative(w.dir, to))) continue;
+      try {
+        const fst = await fsp.stat(from);
+        if (!fst.isFile() || bytes + fst.size > 20 * 1024 * 1024) continue;
+        await fsp.mkdir(path.dirname(to), { recursive: true });
+        await fsp.copyFile(from, to);
+        bytes += fst.size; copied++;
+      } catch { /* missing: the page shows without it */ }
+    }
+    return { ...r, copied };
+  }
+
+  // A file inside a widget's folder (its stylesheet, an image) for the
+  // aero-widget:// scheme; never outside the folder, never its own data.
+  asset(id, rel) {
+    const w = ID_RE.test(String(id)) && this.get(id);
+    if (!w) return null;
+    const clean = decodeURIComponent(String(rel || '')).replace(/\\/g, '/').replace(/^\/+/, '');
+    if (!clean || /^(widget|state)\.json$/i.test(clean)) return null;
+    const file = path.resolve(w.dir, clean);
+    if (path.relative(w.dir, file).startsWith('..') || path.isAbsolute(path.relative(w.dir, file))) return null;
+    try { return fs.statSync(file).isFile() ? file : null; } catch { return null; }
   }
 
   async remove(id, trash) {

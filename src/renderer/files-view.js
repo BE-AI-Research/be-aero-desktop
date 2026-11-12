@@ -453,6 +453,12 @@
         break;
       }
       case 'copy-path': aero.filesCopyPath(one); status('Path copied.'); break;
+      case 'html-widget': {
+        status('Making a widget…');
+        const r = await aero.filesHtmlWidget(one);
+        status(r && r.ok ? `"${r.title}" is on your desktop${r.copied ? ` (with ${r.copied} of its files)` : ''}. It lives in AI Folder > AI Widgets.` : `Could not make a widget: ${(r && r.error) || 'unknown error'}`);
+        break;
+      }
       case 'mkdir': {
         const r = await aero.filesMkdir(cur.path, 'New folder');
         if (r && r.ok) { await refresh(); selected = new Set([r.result]); renderList(); renameInline(r.result); }
@@ -477,7 +483,7 @@
       if (row && !selected.has(row.dataset.path)) selectRow(row.dataset.path, null);
       const paths = row ? [...selected] : [];
       const firstEntry = paths.length === 1 && entryOf(paths[0]);
-      const action = await aero.filesMenu({ count: paths.length, dir: !!(firstEntry && firstEntry.dir), inPool: cur.inPool, path: firstEntry && firstEntry.dir ? paths[0] : null, here: cur.path, canPaste: !!(clip && clip.paths.length) && !isRemote(cur.path), showHidden, readOnly: isRemote(cur.path) });
+      const action = await aero.filesMenu({ count: paths.length, dir: !!(firstEntry && firstEntry.dir), inPool: cur.inPool, path: firstEntry && firstEntry.dir ? paths[0] : null, here: cur.path, html: !!(firstEntry && !firstEntry.dir && /\.html?$/i.test(firstEntry.name || paths[0])), canPaste: !!(clip && clip.paths.length) && !isRemote(cur.path), showHidden, readOnly: isRemote(cur.path) });
       if (action) act(action, paths);
     });
     listEl.addEventListener('keydown', (e) => {

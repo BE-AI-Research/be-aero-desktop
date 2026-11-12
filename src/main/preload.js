@@ -142,6 +142,7 @@ contextBridge.exposeInMainWorld('aero', {
   filesMkdir: (dir, name) => ipcRenderer.invoke('files:mkdir', dir, name),
   filesRename: (p, name) => ipcRenderer.invoke('files:rename', p, name),
   filesTrash: (paths) => ipcRenderer.invoke('files:trash', paths),
+  filesHtmlWidget: (p) => ipcRenderer.invoke('files:html-widget', p),
   filesTransfer: (paths, dest, move) => ipcRenderer.invoke('files:transfer', paths, dest, move),
   filesToPool: (paths) => ipcRenderer.invoke('files:to-pool', paths),
   filesPreview: (p) => ipcRenderer.invoke('files:preview', p),

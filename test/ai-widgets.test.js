@@ -69,3 +69,26 @@ test('AI widgets: a folder per widget, approvals outside the AI folder, state, r
     assert.deepStrictEqual(await w2.load(), []);
   } finally { fs.rmSync(base, { recursive: true, force: true }); }
 });
+
+test('AI widgets: an html file becomes a widget with its own files; nothing outside is served', async () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'aero-aiw-html-'));
+  try {
+    const page = path.join(base, 'site');
+    fs.mkdirSync(path.join(page, 'img'), { recursive: true });
+    fs.writeFileSync(path.join(page, 'clock.html'), '<html><head><title>World clock</title><link rel="stylesheet" href="style.css"></head><body><img src="img/logo.png"><script src="https://cdn.jsdelivr.net/x.js"></script><a href="../secret.txt">x</a></body></html>');
+    fs.writeFileSync(path.join(page, 'style.css'), 'body{color:red}');
+    fs.writeFileSync(path.join(page, 'img', 'logo.png'), 'PNG');
+    fs.writeFileSync(path.join(base, 'secret.txt'), 'outside the page folder');
+    const w = new AiWidgets({ folder: async () => path.join(base, 'BE-Aero AI'), approvalsFile: path.join(base, 'ud', 'a.json'), approve: async () => false });
+    await w.load();
+    const r = await w.createFromFile(path.join(page, 'clock.html'));
+    assert.strictEqual(r.title, 'World clock');
+    assert.strictEqual(r.copied, 2, 'style.css and img/logo.png; not the remote script, not ../secret.txt');
+    assert.ok(w.asset(r.id, '/style.css'));
+    assert.ok(w.asset(r.id, '/img/logo.png'));
+    assert.strictEqual(w.asset(r.id, '/../../secret.txt'), null);
+    assert.strictEqual(w.asset(r.id, '/%2e%2e/%2e%2e/secret.txt'), null);
+    assert.strictEqual(w.asset(r.id, '/state.json'), null, 'its own data is not served');
+    await assert.rejects(w.createFromFile(path.join(page, 'style.css')), /not an HTML file/);
+  } finally { fs.rmSync(base, { recursive: true, force: true }); }
+});

@@ -2039,8 +2039,17 @@ app.whenReady().then(() => {
   // aero-widget://<id>/ - an AI widget, with a CSP that opens only the
   // sites the user approved for it.
   protocol.handle('aero-widget', (request) => {
-    const id = new URL(request.url).hostname;
+    const u = new URL(request.url);
+    const id = u.hostname;
     const w = aiService && aiService.widgets;
+    // Its own files (a stylesheet, images) - same CSP, from its folder only.
+    if (w && u.pathname && u.pathname !== '/' && !/^\/index\.html?$/i.test(u.pathname)) {
+      const file = w.asset(id, u.pathname);
+      if (!file) return new Response('not found', { status: 404 });
+      const ext = path.extname(file).toLowerCase();
+      const type = PLUGIN_MIME[ext] || 'application/octet-stream';
+      return new Response(require('fs').readFileSync(file), { headers: { 'content-type': type, 'content-security-policy': w.csp(id), 'cache-control': 'no-store' } });
+    }
     const page = w ? w.page(id) : null;
     if (!page) return new Response('no such widget', { status: 404 });
     return new Response(page, { headers: { 'content-type': 'text/html; charset=utf-8', 'content-security-policy': w.csp(id), 'cache-control': 'no-store' } });
@@ -2272,6 +2281,7 @@ app.whenReady().then(() => {
       item(process.platform === 'win32' ? 'Delete (Recycle Bin)' : 'Move to Trash', 'trash', { enabled: !c.readOnly }),
       { type: 'separator' },
       item('Copy path', 'copy-path', { enabled: one }),
+      ...(one && c.html && !c.readOnly ? [item('Create widget', 'html-widget')] : []),
       ...(one && c.dir ? shareMenu(c.path) : [])
     ] : [
       item('New folder', 'mkdir', { enabled: !c.readOnly }),
@@ -2290,6 +2300,14 @@ app.whenReady().then(() => {
     try { e.sender.startDrag({ file: list[0], files: list, icon: nativeImage.createFromPath(path.join(__dirname, '..', '..', 'build', 'icon.png')).resize({ width: 32 }) }); } catch { /* drag cancelled */ }
   });
   ipcMain.handle('files:copy-path', (_e, p) => { require('electron').clipboard.writeText(String(p || '')); return true; });
+  // An .html file -> a desktop widget (a copy, in AI Folder/AI Widgets).
+  ipcMain.handle('files:html-widget', async (_e, p) => {
+    try {
+      if (!aiService) throw new Error('turn on the AI assistant first (widgets live in its folder)');
+      const r = await aiService.widgets.createFromFile(String(p || ''));
+      return { ok: true, ...r };
+    } catch (err) { return { error: String(err && err.message || err) }; }
+  });
 
   // Devices: identity, pairing and the mesh (src/main/mesh). Off by default.
   // State sync (state-sync.js): notes, theme, pins, synced conversations,
