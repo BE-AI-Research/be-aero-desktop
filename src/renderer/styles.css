@@ -613,7 +613,7 @@ textarea::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.2); border
 }
 .hint-text { margin-top: 4px; font-size: 10px; line-height: 1.4; color: rgba(255, 255, 255, 0.4); }
 .row { display: flex; gap: 6px; }
-input[type=text], select {
+input[type=text], input[type=search], select {
   flex: 1;
   width: 100%;
   padding: 6px 8px;
@@ -625,7 +625,7 @@ input[type=text], select {
   outline: none;
   user-select: text;
 }
-input[type=text]:focus, select:focus { border-color: var(--accent); }
+input[type=text]:focus, input[type=search]:focus, select:focus { border-color: var(--accent); }
 select option { background: #1e293b; }
 input[type=range] { width: 100%; accent-color: var(--accent); }
 .check { display: flex; align-items: center; gap: 8px; cursor: pointer; }
@@ -1200,7 +1200,7 @@ webview.plugin-frame { background: #fff; }
 .files-crumb:not(:last-child)::after { content: ' \203A'; opacity: .5; }
 .files-crumb:hover { opacity: 1; background: rgba(255,255,255,.08); }
 .files-crumb:last-child { opacity: 1; font-weight: 600; }
-.files-filter { width: 100%; font-size: 12px; }
+.files-widget .files-filter { width: 100%; font-size: 12px; flex: 0 0 auto; padding: 4px 8px; }
 .files-body { flex: 1; min-height: 0; display: flex; gap: 6px; }
 .files-places { width: 108px; flex: 0 0 auto; overflow-y: auto; display: flex; flex-direction: column; gap: 1px; scrollbar-width: thin; scrollbar-color: rgba(255,255,255,.22) transparent; }
 .files-place { display: flex; align-items: center; gap: 5px; border: none; background: transparent; color: inherit; font: inherit; font-size: 11.5px; text-align: left; padding: 3px 5px; border-radius: 6px; cursor: pointer; opacity: .85; }
@@ -1244,6 +1244,34 @@ webview.plugin-frame { background: #fff; }
 .files-preview { max-height: 110px; overflow: hidden; border-radius: 8px; background: rgba(0,0,0,.2); display: flex; justify-content: center; }
 .files-preview img { max-height: 110px; max-width: 100%; object-fit: contain; }
 .files-preview pre { margin: 0; padding: 6px 8px; font-size: 10.5px; white-space: pre-wrap; overflow: hidden; width: 100%; opacity: .85; }
+/* Copy / move jobs */
+.files-transfers { display: flex; flex-direction: column; gap: 4px; max-height: 40%; overflow-y: auto; flex: 0 0 auto; scrollbar-width: thin; }
+.xfer { border: 1px solid rgba(255,255,255,.1); border-radius: 7px; background: rgba(0,0,0,.16); padding: 4px 6px 5px; font-size: 11px; }
+.xfer-top { display: flex; align-items: center; gap: 6px; }
+.xfer-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.xfer-pct { font-size: 10.5px; opacity: .7; font-variant-numeric: tabular-nums; }
+.xfer-btns { display: flex; gap: 2px; }
+.xfer-btns .icon-btn { width: 20px; height: 20px; font-size: 10px; padding: 0; }
+.xfer-bar { height: 5px; border-radius: 3px; background: rgba(255,255,255,.1); overflow: hidden; margin: 4px 0 3px; }
+.xfer-bar i { display: block; height: 100%; background: var(--accent); border-radius: 3px; transition: width 240ms linear; }
+.xfer-paused .xfer-bar i { background: #fbbf24; }
+.xfer-sub { opacity: .7; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.xfer-cur { opacity: .85; }
+.xfer-err { color: #fca5a5; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.xfer-failed .xfer-title, .xfer-stopped .xfer-title { opacity: .75; }
+/* Box selection; dropping onto a folder */
+.files-list { position: relative; }
+.files-band { position: absolute; border: 1px solid var(--accent); background: color-mix(in srgb, var(--accent) 16%, transparent); border-radius: 2px; pointer-events: none; z-index: 2; }
+.files-row.drop-into { background: color-mix(in srgb, var(--accent) 40%, transparent); outline: 1px solid var(--accent); }
+.files-row { cursor: pointer; }
+/* The file browser in its own window (files.html) */
+body.files-win { background: rgb(var(--glass-rgb)); user-select: none; }
+body.files-win .files-widget { height: 100vh; border-radius: 0; padding: 10px 12px 8px; }
+body.files-win .files-places { width: 168px; }
+body.files-win .files-place { font-size: 12.5px; padding: 4px 6px; }
+body.files-win .files-row { font-size: 13px; padding: 3px 6px; }
+body.files-win .files-row .s, body.files-win .files-row .t { font-size: 11.5px; }
+body.files-win .files-preview { max-height: 30vh; }
 .files-status { font-size: 10.5px; opacity: .6; min-height: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .files-status.err { color: #fca5a5; opacity: 1; }
 

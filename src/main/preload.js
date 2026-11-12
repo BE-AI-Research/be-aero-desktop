@@ -147,6 +147,7 @@ contextBridge.exposeInMainWorld('aero', {
   filesMkdir: (dir, name) => ipcRenderer.invoke('files:mkdir', dir, name),
   filesRename: (p, name) => ipcRenderer.invoke('files:rename', p, name),
   filesTrash: (paths) => ipcRenderer.invoke('files:trash', paths),
+  filesNewWindow: (start) => ipcRenderer.invoke('files:new-window', start),
   transferStart: (paths, dest, move) => ipcRenderer.invoke('transfers:start', paths, dest, move),
   transferList: () => ipcRenderer.invoke('transfers:list'),
   transferPause: (id) => ipcRenderer.invoke('transfers:pause', id),

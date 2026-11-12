@@ -27,6 +27,7 @@ const ICON_PATH = path.join(ROOT, 'build', 'icon.png');
 const TOGGLE_SHORTCUT = 'Control+Alt+W';
 
 let win = null;
+const filesWindows = new Set();   // file browser windows (files.html)
 let tray = null;
 let store = null;
 let telemetryTimer = null;
@@ -348,7 +349,7 @@ function applyBounds() {
       // Chromium re-lays-out at the window's scale; tell the renderer the
       // display map once the real bounds have settled.
       if (ok && win) setTimeout(() => {
-        win.webContents.send('settings:changed', publicSettings());
+        sendSettings();
       }, 150);
     });
   }
@@ -451,6 +452,31 @@ function setIgnoreMouse(ignore) {
       } catch { /* display going away */ }
     }, 120);
   }
+}
+
+// Settings (theme and all) go to the desktop and to every file browser window.
+function sendSettings() {
+  const s = publicSettings();
+  for (const w of [win, ...filesWindows]) if (w && !w.isDestroyed()) w.webContents.send('settings:changed', s);
+}
+
+// A file browser in its own window: resizable, in the taskbar, any number.
+function openFilesWindow(start) {
+  const bg = `rgb(${(themeVars(store.get('theme'))['--glass-rgb'] || '18, 24, 40')})`;
+  const w = new BrowserWindow({
+    width: 980, height: 640, minWidth: 520, minHeight: 320,
+    title: 'Files - BE-Aero', icon: loadIcon(), autoHideMenuBar: true, show: false,
+    backgroundColor: /^rgb\([\d,\s]+\)$/.test(bg) ? bg : '#121828',
+    webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: true }
+  });
+  w.setMenu(null);
+  filesWindows.add(w);
+  w.on('closed', () => filesWindows.delete(w));
+  w.once('ready-to-show', () => w.show());
+  w.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  w.webContents.on('will-navigate', (e) => e.preventDefault());
+  w.loadFile(path.join(ROOT, 'src', 'renderer', 'files.html'), { query: start ? { path: String(start) } : {} });
+  return true;
 }
 
 function createWindow() {
@@ -727,7 +753,7 @@ function updateSettings(patch) {
         applyInputModel();
       }
     }
-    win.webContents.send('settings:changed', publicSettings());
+    sendSettings();
   }
   if (patch.telemetry && ('interval' in patch.telemetry || 'metrics' in patch.telemetry)) startTelemetry();
   if (spotlight && patch.theme) spotlight.applyTheme && spotlight.applyTheme(s.theme);
@@ -1675,7 +1701,7 @@ ipcMain.handle('dock:menu', (_e, tile) => new Promise((resolve) => {
         dock.pinned = togglePinned(dock.pinned || [], exe, name);
         store.get().appDock = dock;
         store.save();
-        if (win) win.webContents.send('settings:changed', publicSettings());
+        if (win) sendSettings();
         done('pin');
       }
     });
@@ -2220,7 +2246,7 @@ app.whenReady().then(() => {
     remote: remoteFiles,
     trash: (p) => shell.trashItem(p),
     onChange: (list) => {
-      for (const w of BrowserWindow.getAllWindows()) if (!w.isDestroyed()) w.webContents.send('transfers:update', list);
+      for (const w of [win, ...filesWindows]) if (w && !w.isDestroyed()) w.webContents.send('transfers:update', list);
     }
   });
   ipcMain.handle('transfers:start', fileCall((_e, paths, dest, move) => transfers.start(paths, dest, { move: !!move })));
@@ -2235,21 +2261,27 @@ app.whenReady().then(() => {
   ipcMain.handle('files:pool', fileCall(() => fileService.ensurePool()));
   // The folder the file browser shows is watched; any change (made here,
   // by another app, or by File Pool sync) refreshes it.
-  let viewWatch = null;
-  let viewTimer = null;
-  ipcMain.handle('files:watch', (_e, dir) => {
-    if (viewWatch) { try { viewWatch.close(); } catch { /* closed */ } viewWatch = null; }
+  // One watch per window (the desktop's widget and each file browser window).
+  const viewWatches = new Map();   // webContents id -> { watch, timer }
+  ipcMain.handle('files:watch', (e, dir) => {
+    const wc = e.sender;
+    const old = viewWatches.get(wc.id);
+    if (old) { clearTimeout(old.timer); try { old.watch.close(); } catch { /* closed */ } viewWatches.delete(wc.id); }
+    else wc.once('destroyed', () => { const v = viewWatches.get(wc.id); if (v) { try { v.watch.close(); } catch { /* */ } viewWatches.delete(wc.id); } });
     const d = String(dir || '');
     if (!d || /^(\\\\|smb:|aero:)/i.test(d)) return false;        // network and device folders: no watching
     try {
-      viewWatch = require('fs').watch(d, () => {
-        clearTimeout(viewTimer);
-        viewTimer = setTimeout(() => { if (win && !win.isDestroyed()) win.webContents.send('files:changed', { dir: d }); }, 300);
+      const v = { watch: null, timer: null };
+      v.watch = require('fs').watch(d, () => {
+        clearTimeout(v.timer);
+        v.timer = setTimeout(() => { if (!wc.isDestroyed()) wc.send('files:changed', { dir: d }); }, 300);
       });
-      viewWatch.on('error', () => { try { viewWatch.close(); } catch { /* */ } viewWatch = null; });
+      v.watch.on('error', () => { try { v.watch.close(); } catch { /* */ } if (viewWatches.get(wc.id) === v) viewWatches.delete(wc.id); });
+      viewWatches.set(wc.id, v);
       return true;
     } catch { return false; }
   });
+  ipcMain.handle('files:new-window', (_e, start) => openFilesWindow(start ? String(start) : ''));
   // Search bar drop-down: recent files and recent apps (recent.js).
   const recentService = new (require('./recent').RecentService)({ store, shell, indexEntries: () => (spotlight ? spotlight.index.entries : []) });
   ipcMain.handle('search:recent', async () => { try { return await recentService.recent(); } catch { return { files: [], apps: [] }; } });
@@ -2321,6 +2353,7 @@ app.whenReady().then(() => {
     const item = (label, id, extra = {}) => ({ label, click: () => { chosen = id; }, ...extra });
     const template = c.count ? [
       item(one && c.dir ? 'Open' : 'Open', 'open'),
+      ...(one && c.dir ? [item('Open in new window', 'new-window')] : []),
       item(process.platform === 'win32' ? 'Show in Explorer' : 'Show in Files', 'reveal', { enabled: one && !c.readOnly }),
       { type: 'separator' },
       item('Copy', 'copy'), item('Cut', 'cut'),
@@ -2338,10 +2371,11 @@ app.whenReady().then(() => {
       item('Paste', 'paste', { enabled: !!c.canPaste }),
       { type: 'separator' },
       item(process.platform === 'win32' ? 'Open in Explorer' : 'Open in Files', 'reveal-here'),
+      item('Open in new window', 'new-window-here'),
       item(c.showHidden ? 'Hide hidden files' : 'Show hidden files', 'toggle-hidden'),
       ...shareMenu(c.here)
     ];
-    Menu.buildFromTemplate(template).popup({ window: win, callback: () => setImmediate(() => resolve(chosen)) });
+    Menu.buildFromTemplate(template).popup({ window: BrowserWindow.fromWebContents(_e.sender) || win, callback: () => setImmediate(() => resolve(chosen)) });
   }));
   // Drag files out of the browser into other apps (Explorer, mail, editors).
   ipcMain.on('files:drag', (e, paths) => {
@@ -2667,7 +2701,7 @@ app.whenReady().then(() => {
   // display map, and the tray's display list.
   const redock = () => {
     applyBounds();
-    if (win) win.webContents.send('settings:changed', publicSettings());
+    if (win) sendSettings();
     rebuildTrayMenu();
   };
   screen.on('display-metrics-changed', redock);

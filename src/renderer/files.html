@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:">
+  <title>Files - BE-Aero</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body class="files-win">
+  <section class="files-widget">
+    <div class="files-head">
+      <h3 class="widget-title">FILES</h3>
+      <button class="icon-btn files-back" title="Back">&#8592;</button>
+      <button class="icon-btn files-up" title="Up one folder (Backspace)">&#8593;</button>
+      <button class="icon-btn files-new" title="New folder">&#65291;</button>
+      <button class="icon-btn files-view" title="Show as tiles">&#9638;</button>
+      <button class="icon-btn files-pool" title="Open the File Pool">&#127754;</button>
+      <button class="icon-btn files-newwin" title="Open another window">&#10697;</button>
+    </div>
+    <div class="files-crumbs"></div>
+    <input class="files-filter" type="search" spellcheck="false" placeholder="Search this folder and the whole PC">
+    <div class="files-body">
+      <nav class="files-places"></nav>
+      <div class="files-list" tabindex="0"></div>
+    </div>
+    <div class="files-preview hidden"></div>
+    <div class="files-transfers hidden"></div>
+    <div class="files-status"></div>
+  </section>
+  <script src="files-view.js"></script>
+  <script src="files-window.js"></script>
+</body>
+</html>

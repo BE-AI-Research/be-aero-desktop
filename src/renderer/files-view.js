@@ -1,7 +1,10 @@
-// File browser widget: places (File Pool, user folders, drives), a folder
-// list with selection, keyboard, inline rename, copy/cut/paste, drag out to
-// other apps, drop in from them, and a small preview. All file access goes
-// through main (files.js); this only draws and asks.
+// File browser: the desktop widget and the separate file browser windows
+// (files.html) both run this. Places (File Pool, user folders, drives,
+// devices), a folder list (a click opens; Ctrl/Shift-click and dragging a
+// box select), keyboard, inline rename, copy/cut/paste, drag and drop
+// between windows and other apps, a small preview, and the copy / move
+// jobs with progress, pause and stop (transfers.js in main). All file
+// access goes through main; this only draws and asks.
 (function () {
   let aero = null;
   let root = null;
@@ -26,6 +29,10 @@
   let found = [];
   const lastRoots = {};           // device id -> { rootIndex: name } for crumbs                 // index matches elsewhere on this PC
   let searchTimer = null;
+  let opts0 = {};                 // { window: true, start } in a file browser window
+  let transfersEl = null;
+  let jobs = [];
+  const AERO_MIME = 'application/x-aero-paths';
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const GLYPH = { folder: '📁', image: '🖼️', text: '📄', file: '📦', pool: '🌊', ai: '🤖', drive: '💽', network: '🖧', share: '🗂️', device: '💻' };
   const isRemote = (p) => /^aero:\/\//i.test(String(p || ''));
@@ -44,12 +51,66 @@
     const d = new Date(ms);
     return Date.now() - ms < 86400000 ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : d.toLocaleDateString();
   }
+  function dur(s) {
+    if (s == null) return '';
+    if (s < 60) return `${Math.max(1, s)} s`;
+    if (s < 3600) return `${Math.round(s / 60)} min`;
+    return `${Math.floor(s / 3600)} h ${Math.round((s % 3600) / 60)} min`;
+  }
+  const trimSep = (p) => String(p || '').replace(/[\\/]+$/, '');
+  const parentOf = (p) => (isRemote(p) ? String(p).replace(/\/[^/]*$/, '') : String(p).replace(/[\\/][^\\/]*$/, ''));
+  const normSep = (p) => (IS_WIN && !isRemote(p) ? trimSep(String(p || '').replace(/\//g, '\\')).toLowerCase() : trimSep(p));
+  const samePath = (a, b) => normSep(a) === normSep(b);
+
+  // Start a copy or move job; its progress shows in the panel below the list.
+  async function transfer(paths, dest, move) {
+    // Dropping things where they already are does nothing (as in Explorer).
+    const list = paths.filter((p) => !samePath(p, dest) && !(samePath(parentOf(p), dest)));
+    if (!list.length) return;
+    const r = await aero.transferStart(list, dest, !!move);
+    if (!r || !r.ok) { status((r && r.error) || 'Could not start that.', true); return; }
+    status(`${move ? 'Moving' : 'Copying'} ${list.length} item${list.length === 1 ? '' : 's'}…`);
+  }
+
+  const FINISHED = new Set(['done', 'done-with-errors', 'failed', 'stopped']);
+  function renderTransfers(list) {
+    const before = new Map(jobs.map((j) => [j.id, j.state]));
+    jobs = Array.isArray(list) ? list : [];
+    // A job just finished: show what changed.
+    if (jobs.some((j) => FINISHED.has(j.state) && before.has(j.id) && !FINISHED.has(before.get(j.id)))) softRefresh();
+    if (!transfersEl) return;
+    transfersEl.classList.toggle('hidden', !jobs.length);
+    transfersEl.innerHTML = jobs.map((j) => {
+      const pct = j.total > 0 ? Math.min(100, Math.round((j.done / j.total) * 100)) : (FINISHED.has(j.state) ? 100 : 0);
+      const live = j.state === 'running' || j.state === 'paused' || j.state === 'stopping';
+      const sub = live
+        ? [j.total ? `${human(j.done)} of ${human(j.total)}` : human(j.done),
+            j.files > 1 ? `${j.filesDone} of ${j.files} files` : '',
+            j.state === 'paused' ? 'paused' : j.state === 'stopping' ? 'stopping…' : (j.speed ? `${human(j.speed)}/s` : ''),
+            j.state === 'running' && j.eta != null ? `${dur(j.eta)} left` : ''].filter(Boolean).join(' · ')
+        : j.state === 'done' ? `Done - ${j.filesDone} file${j.filesDone === 1 ? '' : 's'}, ${human(j.done)}`
+          : j.state === 'stopped' ? `Stopped - ${j.filesDone} file${j.filesDone === 1 ? '' : 's'} finished`
+            : j.state === 'failed' ? 'Failed' : `Done, ${j.errorCount} problem${j.errorCount === 1 ? '' : 's'}`;
+      const btns = live
+        ? `${j.state === 'paused' ? `<button class="icon-btn" data-act="resume" title="Resume">▶</button>` : `<button class="icon-btn" data-act="pause" title="Pause"${j.state === 'stopping' ? ' disabled' : ''}>⏸</button>`}<button class="icon-btn" data-act="cancel" title="Stop"${j.state === 'stopping' ? ' disabled' : ''}>⏹</button>`
+        : '<button class="icon-btn" data-act="clear" title="Dismiss">✕</button>';
+      return `<div class="xfer xfer-${j.state}" data-id="${esc(j.id)}">
+        <div class="xfer-top"><span class="xfer-title" title="${esc(j.title)} → ${esc(j.dest)}">${esc(j.title)}</span><span class="xfer-pct">${live ? `${pct}%` : ''}</span><span class="xfer-btns">${btns}</span></div>
+        ${live ? `<div class="xfer-bar"><i style="width:${pct}%"></i></div>` : ''}
+        <div class="xfer-sub">${esc(sub)}${live && j.current ? ` · <span class="xfer-cur">${esc(j.current)}</span>` : ''}</div>
+        ${j.errors && j.errors.length ? `<div class="xfer-err" title="${esc(j.errors.join('\n'))}">${esc(j.errors[j.errors.length - 1])}${j.errorCount > 1 ? ` (+${j.errorCount - 1} more)` : ''}</div>` : ''}
+      </div>`;
+    }).join('');
+  }
+
   function status(text, isError) { statusEl.textContent = text || ''; statusEl.classList.toggle('err', !!isError); }
 
   function visible() {
     const f = filter.toLowerCase();
+    // Half-copied files (".part") of a job still writing here are not shown.
+    const writing = cur && jobs.some((j) => (j.state === 'running' || j.state === 'paused' || j.state === 'stopping') && samePath(j.dest, cur.path));
     return (cur ? cur.entries : [])
-      .filter((e) => (showHidden || !e.hidden) && (!f || e.name.toLowerCase().includes(f)))
+      .filter((e) => (showHidden || !e.hidden) && (!f || e.name.toLowerCase().includes(f)) && !(writing && /\.part$/i.test(e.name)))
       .sort((a, b) => (a.dir !== b.dir ? (a.dir ? -1 : 1) : a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' })));
   }
 
@@ -353,7 +414,8 @@
     filter = '';
     filterEl.value = '';
     renderPlaces(); renderCrumbs(); renderList();
-    aero.setSettings({ files: { last: cur.path } });
+    if (opts0.window) document.title = `${(isRemote(cur.path) ? (cur.deviceName || 'Device') : '') || cur.path.split(/[\\/]/).filter(Boolean).pop() || cur.path} - Files`;
+    else aero.setSettings({ files: { last: cur.path } });
     if (aero.filesWatch) aero.filesWatch(cur.path);
     return true;
   }
@@ -383,6 +445,14 @@
     else selected = new Set([path]);
     anchor = path;
     renderList();
+  }
+
+  // Selection changed: mark the rows (no rebuild - keeps a drag alive).
+  function markSelection() {
+    for (const r of listEl.querySelectorAll('.files-row')) r.classList.toggle('sel', selected.has(r.dataset.path));
+    const n = visible().length;
+    status(`${n} item${n === 1 ? '' : 's'}${selected.size ? ` · ${selected.size} selected` : ''}`);
+    renderPreview();
   }
 
   const entryOf = (path) => (cur && cur.entries.find((x) => x.path === path)) || found.find((x) => x.path === path) || null;
@@ -424,12 +494,9 @@
   async function paste(into) {
     if (!clip || !clip.paths.length) return;
     const dest = into || cur.path;
-    status(clip.cut ? 'Moving…' : 'Copying…');
-    const r = await aero.filesTransfer(clip.paths, dest, clip.cut);
-    if (!r || !r.ok) { status(r && r.error || 'Could not paste.', true); return; }
-    if (clip.cut) clip = null;
-    await refresh();
-    status(`${r.result.length} item${r.result.length === 1 ? '' : 's'} ${clip ? 'copied' : 'moved'}.`);
+    const { paths, cut } = clip;
+    if (cut) { clip = null; renderList(); }
+    await transfer(paths, dest, cut);
   }
 
   async function act(action, paths) {
@@ -442,11 +509,12 @@
       case 'cut': clip = { paths, cut: true }; status(`${paths.length} cut - paste where they should go.`); renderList(); break;
       case 'paste': await paste(paths.length === 1 && (entryOf(one) || {}).dir ? one : null); break;
       case 'to-pool': {
-        status('Copying to the File Pool…');
-        const r = await aero.filesToPool(paths);
-        status(r && r.ok ? `Copied to the File Pool (${r.result.length}).` : (r && r.error) || 'Could not copy.', !(r && r.ok));
+        const r = await aero.filesPool();
+        if (r && r.ok) await transfer(paths, r.result, false); else status((r && r.error) || 'Could not open the File Pool.', true);
         break;
       }
+      case 'new-window': aero.filesNewWindow(one); break;
+      case 'new-window-here': aero.filesNewWindow(cur.path); break;
       case 'rename': renameInline(one); break;
       case 'trash': {
         const r = await aero.filesTrash(paths);
@@ -472,12 +540,64 @@
   }
 
   function wire() {
+    // A click opens (a folder goes in, a file opens in its app); Ctrl / Shift
+    // click selects; dragging a box over empty space selects what it covers.
     listEl.addEventListener('click', (e) => {
+      if (bandDone) { bandDone = false; return; }
+      if (e.target.closest('.files-rename')) return;
       const row = e.target.closest('.files-row');
       if (!row) { selected = new Set(); renderList(); return; }
-      selectRow(row.dataset.path, e);
+      if (e.ctrlKey || e.metaKey || e.shiftKey) { selectRow(row.dataset.path, e); return; }
+      if (e.detail > 1) return;                        // the second click of a double click
+      selected = new Set([row.dataset.path]); anchor = row.dataset.path;
+      markSelection();
+      openEntry(row.dataset.path);
     });
-    listEl.addEventListener('dblclick', (e) => { const row = e.target.closest('.files-row'); if (row) openEntry(row.dataset.path); });
+    let bandDone = false;
+    listEl.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0 || e.target.closest('.files-row, .files-rename')) return;
+      if (e.offsetX > listEl.clientWidth || e.offsetY > listEl.clientHeight) return;   // the scroll bar
+      listEl.focus();
+      const at = (ev) => { const b = listEl.getBoundingClientRect(); return [ev.clientX - b.left + listEl.scrollLeft, ev.clientY - b.top + listEl.scrollTop]; };
+      const [sx, sy] = at(e);
+      const base = e.ctrlKey || e.metaKey ? new Set(selected) : new Set();
+      let band = null;
+      let last = e;
+      const update = () => {
+        const [x, y] = at(last);
+        if (!band && Math.hypot(x - sx, y - sy) < 5) return;
+        if (!band) { band = document.createElement('div'); band.className = 'files-band'; listEl.appendChild(band); }
+        const l = Math.min(x, sx); const t = Math.min(y, sy); const w = Math.abs(x - sx); const h = Math.abs(y - sy);
+        Object.assign(band.style, { left: `${l}px`, top: `${t}px`, width: `${w}px`, height: `${h}px` });
+        const sel = new Set(base);
+        for (const r of listEl.querySelectorAll('.files-row')) {
+          if (r.offsetLeft < l + w && r.offsetLeft + r.offsetWidth > l && r.offsetTop < t + h && r.offsetTop + r.offsetHeight > t) {
+            if (base.has(r.dataset.path)) sel.delete(r.dataset.path); else sel.add(r.dataset.path);
+          }
+        }
+        selected = sel;
+        markSelection();
+      };
+      // Near the top or bottom edge, the list scrolls on its own.
+      const scroller = setInterval(() => {
+        if (!band) return;
+        const b = listEl.getBoundingClientRect();
+        if (last.clientY < b.top + 18) listEl.scrollTop -= 14; else if (last.clientY > b.bottom - 18) listEl.scrollTop += 14; else return;
+        update();
+      }, 30);
+      const move = (ev) => { last = ev; update(); };
+      const up = () => {
+        clearInterval(scroller);
+        listEl.removeEventListener('pointermove', move);
+        listEl.removeEventListener('pointerup', up);
+        listEl.removeEventListener('pointercancel', up);
+        if (band) { band.remove(); bandDone = true; setTimeout(() => { bandDone = false; }, 0); anchor = [...selected].pop() || null; renderList(); }
+      };
+      try { listEl.setPointerCapture(e.pointerId); } catch { /* gone */ }
+      listEl.addEventListener('pointermove', move);
+      listEl.addEventListener('pointerup', up);
+      listEl.addEventListener('pointercancel', up);
+    });
     listEl.addEventListener('contextmenu', async (e) => {
       e.preventDefault();
       const row = e.target.closest('.files-row');
@@ -511,29 +631,69 @@
         if (next) { selectRow(next.path, e.shiftKey ? { shiftKey: true } : null); const el = listEl.querySelector(`.files-row[data-path="${CSS.escape(next.path)}"]`); if (el) el.scrollIntoView({ block: 'nearest' }); }
       }
     });
-    // Drag out to other apps; drop in from them (copy; Shift = move).
+    // Drag and drop: between file browser windows, onto a folder, out to
+    // other apps and in from them. Copy; hold Shift to move. Files on this
+    // PC travel as real files (any app takes them); files on other devices
+    // travel as their aero:// addresses, which BE-Aero windows understand.
     listEl.addEventListener('dragstart', (e) => {
       const row = e.target.closest('.files-row');
       if (!row) return;
-      if (!selected.has(row.dataset.path)) selectRow(row.dataset.path, null);
+      if (!selected.has(row.dataset.path)) { selected = new Set([row.dataset.path]); anchor = row.dataset.path; markSelection(); }
+      const paths = [...selected];
+      if (paths.some(isRemote)) {
+        e.dataTransfer.setData(AERO_MIME, JSON.stringify(paths));
+        e.dataTransfer.setData('text/plain', paths.join('\n'));
+        e.dataTransfer.effectAllowed = 'copyMove';
+        return;
+      }
       e.preventDefault();
-      aero.filesDrag([...selected]);
+      aero.filesDrag(paths);
     });
-    listEl.addEventListener('dragover', (e) => { if (e.dataTransfer && [...e.dataTransfer.types].includes('Files')) { e.preventDefault(); listEl.classList.add('drop'); } });
-    listEl.addEventListener('dragleave', () => listEl.classList.remove('drop'));
+    const dropRow = (e) => {
+      const row = e.target.closest && e.target.closest('.files-row');
+      const en = row && entryOf(row.dataset.path);
+      return en && en.dir && !en.found ? row : null;
+    };
+    const clearDrop = () => { listEl.classList.remove('drop'); for (const r of listEl.querySelectorAll('.files-row.drop-into')) r.classList.remove('drop-into'); };
+    listEl.addEventListener('dragover', (e) => {
+      const types = e.dataTransfer ? [...e.dataTransfer.types] : [];
+      if (!types.includes('Files') && !types.includes(AERO_MIME)) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = e.shiftKey ? 'move' : 'copy';
+      const row = dropRow(e);
+      for (const r of listEl.querySelectorAll('.files-row.drop-into')) if (r !== row) r.classList.remove('drop-into');
+      if (row) row.classList.add('drop-into');
+      listEl.classList.toggle('drop', !row);
+    });
+    listEl.addEventListener('dragleave', (e) => { if (!listEl.contains(e.relatedTarget)) clearDrop(); });
     listEl.addEventListener('drop', async (e) => {
       e.preventDefault();
-      listEl.classList.remove('drop');
-      const paths = [...(e.dataTransfer.files || [])].map((f) => aero.pathForFile(f)).filter(Boolean);
-      if (!paths.length || !cur) return;
-      status(e.shiftKey ? 'Moving…' : 'Copying…');
-      const r = await aero.filesTransfer(paths, cur.path, e.shiftKey);
-      if (!r || !r.ok) status(r && r.error || 'Could not copy those files.', true);
-      else { await refresh(); status(`${r.result.length} item${r.result.length === 1 ? '' : 's'} ${e.shiftKey ? 'moved' : 'copied'} here.`); }
+      const row = dropRow(e);
+      clearDrop();
+      if (!cur) return;
+      let paths = [];
+      try { paths = JSON.parse(e.dataTransfer.getData(AERO_MIME) || '[]').filter((p) => typeof p === 'string'); } catch { paths = []; }
+      if (!paths.length) paths = [...(e.dataTransfer.files || [])].map((f) => aero.pathForFile(f)).filter(Boolean);
+      if (!paths.length) return;
+      const dest = row && !paths.some((p) => samePath(p, row.dataset.path)) ? row.dataset.path : cur.path;
+      await transfer(paths, dest, e.shiftKey);
     });
     root.querySelector('.files-back').addEventListener('click', () => { const p = back.pop(); if (p) { forward.push(cur.path); go(p, { push: false }); } });
     root.querySelector('.files-up').addEventListener('click', () => { if (cur && cur.parent) go(cur.parent); });
     root.querySelector('.files-new').addEventListener('click', () => act('mkdir', []));
+    const nw = root.querySelector('.files-newwin');
+    if (nw) {
+      if (opts0.window) nw.title = 'Open another window here';
+      nw.addEventListener('click', () => aero.filesNewWindow(cur ? cur.path : ''));
+    }
+    transfersEl.addEventListener('click', async (e) => {
+      const b = e.target.closest('button[data-act]');
+      const box = b && b.closest('.xfer');
+      if (!box) return;
+      const id = box.dataset.id;
+      const fn = { pause: aero.transferPause, resume: aero.transferResume, cancel: aero.transferCancel, clear: aero.transferClear }[b.dataset.act];
+      if (fn) await fn(id);
+    });
     root.querySelector('.files-pool').addEventListener('click', async () => { const r = await aero.filesPool(); if (r && r.ok) go(r.result); });
     root.querySelector('.files-view').addEventListener('click', () => { setView(view === 'grid' ? 'list' : 'grid'); aero.setSettings({ files: { view } }); });
     // Search: the current folder narrows as you type; after a pause the
@@ -579,6 +739,7 @@
 
   async function init(opts) {
     aero = opts.aero;
+    opts0 = opts;
     root = document.querySelector('.files-widget');
     if (!root || !aero.filesList) return;
     listEl = root.querySelector('.files-list');
@@ -587,7 +748,10 @@
     filterEl = root.querySelector('.files-filter');
     statusEl = root.querySelector('.files-status');
     previewEl = root.querySelector('.files-preview');
+    transfersEl = root.querySelector('.files-transfers');
+    if (!transfersEl) { transfersEl = document.createElement('div'); transfersEl.className = 'files-transfers hidden'; statusEl.before(transfersEl); }
     wire();
+    if (aero.onTransfers) { aero.onTransfers(renderTransfers); aero.transferList().then(renderTransfers).catch(() => {}); }
     if (aero.onFilesChanged) aero.onFilesChanged(({ dir }) => { if (cur && dir === cur.path) softRefresh(); });
     // Devices (and the relay) coming online or going: the places list follows.
     if (aero.onDevicesChanged) {
@@ -609,7 +773,7 @@
     places = pr && pr.ok ? pr.result : [];
     const home = (places.find((p) => p.id === 'home') || places[1] || {}).path;
     // Do not start on a network share (it may be slow or gone); start home.
-    const start = s.last && !/^(\\\\|smb:)/i.test(s.last) ? s.last : home;
+    const start = opts.start || (s.last && !/^(\\\\|smb:)/i.test(s.last) ? s.last : home);
     await go(start, { push: false });
     if (!cur && places[1]) await go(places[1].path, { push: false });
   }
