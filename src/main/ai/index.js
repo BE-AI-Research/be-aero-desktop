@@ -47,6 +47,21 @@ class AiService {
       log: (m) => console.log('[widgets]', m)
     });
     this.widgets.load().then(() => this.widgets.watch()).catch((err) => console.log('[widgets]', err.message));
+    // The tool workspace: tools the assistant writes (AI Folder/AI Tools),
+    // offered to it as tool_<name>. Script approvals live in the app's data.
+    this.customTools = new (require('./custom-tools').CustomTools)({
+      folder: () => require('../files').ensureAiFolder(deps.store),
+      approvalsFile: path.join(deps.userDataDir, 'ai', 'tool-approvals.json'),
+      approve: (t, code) => this.approveToolScript(t, code),
+      sandbox: (code, input, callTool, opts) => require('./tool-sandbox').runSandbox(code, input, callTool, opts),
+      onChange: (list) => { const win = this.d.getWindow(); if (win && !win.isDestroyed()) win.webContents.send('ai:tools-list', list); },
+      log: (m) => console.log('[ai tools]', m)
+    });
+    require('./tools').setDynamic(() => this.customTools.definitions((ctx) => (n, i) => {
+      if (!ctx.callTool) throw new Error('tools can only call other tools during a conversation');
+      return ctx.callTool(n, i);
+    }));
+    this.customTools.load().then(() => this.customTools.watch()).catch((err) => console.log('[ai tools]', err.message));
     this.browser = new BrowserController({
       profileDir: path.join(deps.userDataDir, 'ai', 'browser-profile'),
       preferred: () => String(this.config().browser || ''),
@@ -560,6 +575,11 @@ class AiService {
       webOpen: (url, name) => this.webOpen(url, name),
       browser: (op, args) => this.browserOp(op, args),
       memory: this.memory,
+      customTools: {
+        save: (args, opts) => this.customTools.save(args, opts),
+        list: () => this.customTools.list(),
+        remove: (name) => this.customTools.remove(name, (dir) => require('electron').shell.trashItem(dir))
+      },
       widgets: {
         create: (args) => this.widgets.create(args),
         update: (id, args) => this.widgets.update(id, args),
@@ -1101,6 +1121,21 @@ class AiService {
     return file;
   }
 
+  // A script tool the assistant wrote: the user reads the code and approves
+  // it (or not). Asked again after every change.
+  async approveToolScript(t, code) {
+    const { dialog } = require('electron');
+    const win = this.d.getWindow();
+    const shown = String(code).length > 3500 ? `${String(code).slice(0, 3500)}\n... (${String(code).length - 3500} more characters - see the file)` : String(code);
+    const r = await dialog.showMessageBox(win && !win.isDestroyed() ? win : undefined, {
+      type: 'warning', buttons: ['Approve', 'Not now', 'Open the file'], defaultId: 1, cancelId: 1, noLink: true,
+      title: 'AI tool', message: `The assistant wrote a ${t.runtime} script tool "${t.name}". Approve it to run on this computer?`,
+      detail: `${t.description || ''}\n\nIt runs with your account's access, in ${t.dir}.\n\n${shown}`
+    });
+    if (r.response === 2) { require('electron').shell.openPath(t.file); return false; }
+    return r.response === 0;
+  }
+
   // A widget wants to reach sites: ask the user (native dialog).
   async approveWidgetHosts(w, hosts) {
     const { dialog } = require('electron');
@@ -1200,6 +1235,11 @@ class AiService {
     ipcMain.handle('ai:pin', (_e, on) => this.setPinned(on));
     ipcMain.handle('ai:probe', () => this.probe());
     ipcMain.handle('ai:widgets', () => this.widgets.list());
+    ipcMain.handle('ai:tools-list', () => this.customTools.list());
+    ipcMain.handle('ai:tool-approve', (_e, name) => this.customTools.requestApproval(String(name)).catch(() => false));
+    ipcMain.handle('ai:tool-revoke', (_e, name) => { this.customTools.revoke(String(name)); return true; });
+    ipcMain.handle('ai:tool-folder', (_e, name) => { const t = this.customTools.get(String(name)); if (t) require('electron').shell.openPath(t.dir); return !!t; });
+    ipcMain.handle('ai:tool-delete', (_e, name) => this.customTools.remove(String(name), (dir) => require('electron').shell.trashItem(dir)));
     ipcMain.handle('ai:widget-bridge', async (_e, id, op, args) => {
       try {
         if (op === 'load') return { result: await this.widgets.getState(String(id)) };

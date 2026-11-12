@@ -678,6 +678,61 @@
   $('set-ai-bus-desktop').addEventListener('change', (e) => aero.setSettings({ ai: { busOperateDesktop: e.target.checked } }));
   $('set-ai-follow-shared').addEventListener('change', (e) => aero.setSettings({ ai: { followSharedModel: e.target.checked } }));
 
+  // Settings > AI assistant: the assistant's own tools and widgets.
+  function aiwsRow(box, { name, desc, status, warn, actions }) {
+    const row = document.createElement('div');
+    row.className = 'aiws-row';
+    const nm = document.createElement('span'); nm.className = 'nm'; nm.textContent = name;
+    const ds = document.createElement('span'); ds.className = 'ds'; ds.textContent = desc || ''; ds.title = desc || '';
+    const st = document.createElement('span'); st.className = `st${warn ? ' warn' : ''}`; st.textContent = status;
+    row.append(nm, ds, st);
+    for (const [label, fn] of actions) { const b = document.createElement('button'); b.className = 'btn'; b.textContent = label; b.addEventListener('click', fn); row.appendChild(b); }
+    box.appendChild(row);
+  }
+  function renderAiTools(list) {
+    const box = $('ai-tools-list');
+    if (!box) return;
+    box.textContent = '';
+    if (!list || !list.length) { box.innerHTML = '<div class="aiws-empty">None yet. Ask the assistant to build a tool for something you do often.</div>'; return; }
+    for (const t of list) {
+      aiwsRow(box, {
+        name: `tool_${t.name}`, desc: t.description,
+        status: t.mode === 'script' ? (t.approved ? `${t.runtime} · approved` : `${t.runtime} · needs approval`) : 'sandbox', warn: t.needsApproval,
+        actions: [
+          ...(t.mode === 'script' ? [[t.approved ? 'Revoke' : 'Review…', () => (t.approved ? aero.aiToolRevoke(t.name) : aero.aiToolApprove(t.name))]] : []),
+          ['Open', () => aero.aiToolFolder(t.name)],
+          ['Delete', async (e) => { const b = e.target; if (b.dataset.sure) { await aero.aiToolDelete(t.name); } else { b.dataset.sure = '1'; b.textContent = 'Sure?'; setTimeout(() => { delete b.dataset.sure; b.textContent = 'Delete'; }, 2500); } }]
+        ]
+      });
+    }
+  }
+  function renderAiWidgetList(list) {
+    const box = $('ai-widgets-list');
+    if (!box) return;
+    box.textContent = '';
+    if (!list || !list.length) { box.innerHTML = '<div class="aiws-empty">None yet. Ask the assistant to make you a widget.</div>'; return; }
+    for (const w of list) {
+      const pending = (w.pendingHosts || []).length;
+      aiwsRow(box, {
+        name: w.title, desc: (w.hosts || []).length ? `Sites: ${w.hosts.join(', ')}` : 'No network',
+        status: pending ? `${pending} blocked` : (w.approvedHosts || []).length ? 'sites approved' : 'offline', warn: pending > 0,
+        actions: [
+          ...(pending ? [['Review…', () => aero.aiWidgetApprove(w.id)]] : []),
+          ...((w.approvedHosts || []).length ? [['Revoke', () => aero.aiWidgetRevoke(w.id)]] : []),
+          ['Open', () => aero.aiWidgetFolder(w.id)]
+        ]
+      });
+    }
+  }
+  if (aero.aiToolsList) {
+    aero.aiToolsList().then(renderAiTools).catch(() => {});
+    aero.onAiToolsList(renderAiTools);
+  }
+  if (aero.aiWidgets) {
+    aero.aiWidgets().then(renderAiWidgetList).catch(() => {});
+    aero.onAiWidgets(renderAiWidgetList);
+  }
+
   // "Browser the assistant uses": the installed browsers (listed once).
   var browserList = null;   // var: fillBrowsers can run before this line
   async function fillBrowsers(saved) {

@@ -226,6 +226,20 @@ async function runTurn({ provider, model, conversation, ctx, permit, emit, signa
       continue;
     }
 
+    // A tool the assistant made may call other tools (aero.call): each call
+    // is checked exactly like one the assistant makes itself.
+    {
+      const WORKSPACE = new Set(['create_tool', 'update_tool', 'delete_tool', 'test_tool']);
+      ctx.callTool = async (name, input, opts = {}) => {
+        const n = String(name || '');
+        if (!opts.allowCustom && (/^tool_/.test(n) || WORKSPACE.has(n))) throw new Error(`${n} cannot be called from inside a tool`);
+        if (ctx.toolFilter && !ctx.toolFilter(n)) throw new Error(`${n} is not available here`);
+        const bad = tools.validateInput(n, input || {});
+        if (bad) throw new Error(`invalid input for ${n}: ${bad}`);
+        if (tools.categoryOf(n) !== 'read' && !(await permit({ id: `nested-${n}`, name: n, input }))) throw new Error(`${n}: denied by the user`);
+        return tools.execute(n, input || {}, ctx);
+      };
+    }
     const results = [];
     for (const call of res.toolCalls) {
       if (signal && signal.aborted) return { stopped: true };

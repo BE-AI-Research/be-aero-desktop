@@ -225,6 +225,12 @@
         <div class="hint-text">Ollama servers. Unloading frees the server's memory for other models and programs; whoever uses a model next waits for it to load again. A model one of your paired devices is using is never unloaded for this one.</div>
         <label class="check"><input id="set-ai-bus-desktop" type="checkbox"> Let other devices' assistants operate this desktop (type, click, open apps, use the browser)</label>
         <div class="hint-text">Off: work requested by another device's assistant (Settings &gt; Devices, "AI requests") can read, search, use files and run tasks here, but never takes over the screen you or this assistant are using.</div>
+        <label class="field-label">AI tools (the assistant's workspace)</label>
+        <div id="ai-tools-list" class="aiws-list"></div>
+        <div class="hint-text">Tools the assistant built for itself, in your AI folder under AI Tools. Sandbox tools run isolated (no files, network or system) and can only use the assistant's own tools, with the same permission checks. Script tools run PowerShell, bash or Python on this computer and need your approval, again after every change.</div>
+        <label class="field-label">AI widgets</label>
+        <div id="ai-widgets-list" class="aiws-list"></div>
+        <div class="hint-text">Widgets the assistant made, in your AI folder under AI Widgets. They can only reach the sites you approved for them.</div>
         <label class="field-label">Browser the assistant uses</label>
         <select id="set-ai-browser-app" title="Which installed browser the assistant opens pages in"></select>
         <div class="hint-text" id="ai-browser-hint"></div>

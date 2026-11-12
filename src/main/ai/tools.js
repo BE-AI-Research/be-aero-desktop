@@ -548,6 +548,63 @@ const TOOLS = [
     input_schema: obj({ id: str('Widget id') }, ['id']),
     run: async (input, ctx) => ({ ok: !!(ctx.widgets && await ctx.widgets.remove(input.id)) })
   },
+  // ------------------------------------------------------- tool workspace
+  {
+    name: 'create_tool', category: 'control',
+    description: 'Build yourself a new tool (a reusable function) when a task would benefit from one - for example a unit converter, a parser, a calculation, or a routine that combines several of your tools. It is saved in your AI folder under "AI Tools/<name>/" and from then on you can call it as tool_<name>. mode "sandbox" (default, preferred): JavaScript that defines  async function run(input, aero) { ... return result; }  - it runs isolated with no network, files or system access; it can call your other tools with  await aero.call("tool_name", {...})  (same permission checks as you) and log with aero.log(...). mode "script": a PowerShell, bash or Python script for things the sandbox cannot do; it gets the input as JSON on stdin and must print its result (JSON or text) to stdout; the user must approve the code before it can run, and again after every change. Test it with test_tool before relying on it.',
+    input_schema: obj({
+      name: str('lowercase_with_underscores, 2-40 chars'),
+      description: str('What the tool does and returns (this is what you will read when choosing it)'),
+      input_schema: { type: 'object', description: 'JSON Schema for its input: {type:"object", properties:{...}, required:[...]}' },
+      mode: { type: 'string', enum: ['sandbox', 'script'], description: 'sandbox (default) or script' },
+      runtime: { type: 'string', enum: ['powershell', 'bash', 'python'], description: 'script mode only' },
+      code: str('The code')
+    }, ['name', 'description', 'code']),
+    run: async (input, ctx) => {
+      if (!ctx.customTools) return { error: 'the tool workspace is not available' };
+      const r = await ctx.customTools.save(input, { create: true });
+      return { ok: true, tool: `tool_${r.name}`, ...r, ...(r.mode === 'script' && !r.approved ? { note: 'Saved, but the user has not approved this script yet; it cannot run until they do (Settings > AI assistant > AI tools).' } : {}) };
+    }
+  },
+  {
+    name: 'update_tool', category: 'control',
+    description: 'Change a tool you made with create_tool: new code, description, input_schema, mode or runtime. Only pass what changes. A changed script needs the user\'s approval again.',
+    input_schema: obj({
+      name: str('The tool name (without tool_)'), description: str('New description'),
+      input_schema: { type: 'object', description: 'New input JSON Schema' },
+      mode: { type: 'string', enum: ['sandbox', 'script'], description: 'sandbox or script' },
+      runtime: { type: 'string', enum: ['powershell', 'bash', 'python'], description: 'script mode only' },
+      code: str('New code')
+    }, ['name']),
+    run: async (input, ctx) => {
+      if (!ctx.customTools) return { error: 'the tool workspace is not available' };
+      return { ok: true, ...(await ctx.customTools.save(input, { create: false })) };
+    }
+  },
+  {
+    name: 'test_tool', category: 'read',
+    description: 'Run one of your own tools with a sample input and see its output, logs and errors - use it to check a tool after creating or changing it.',
+    input_schema: obj({ name: str('The tool name (without tool_)'), input: { type: 'object', description: 'Sample input' } }, ['name']),
+    run: async (input, ctx) => {
+      if (!ctx.customTools || !ctx.callTool) return { error: 'the tool workspace is not available' };
+      try {
+        const out = await ctx.callTool(`tool_${String(input.name).replace(/^tool_/, '')}`, input.input || {}, { allowCustom: true });
+        return { ok: !(out && out.error), output: out };
+      } catch (err) { return { ok: false, error: err.message }; }
+    }
+  },
+  {
+    name: 'list_tools', category: 'read',
+    description: 'List the tools you made (name, mode, description, whether a script is approved, folder).',
+    input_schema: obj({}),
+    run: async (_in, ctx) => ({ tools: ctx.customTools ? ctx.customTools.list().map((t) => ({ tool: `tool_${t.name}`, mode: t.mode, runtime: t.runtime || undefined, description: t.description, approved: t.approved, folder: t.folder })) : [] })
+  },
+  {
+    name: 'delete_tool', category: 'control',
+    description: 'Delete a tool you made (its folder goes to the Recycle Bin / Trash).',
+    input_schema: obj({ name: str('The tool name (without tool_)') }, ['name']),
+    run: async (input, ctx) => ({ ok: !!(ctx.customTools && await ctx.customTools.remove(String(input.name).replace(/^tool_/, ''))) })
+  },
   {
     name: 'close_visual', category: 'read',
     description: 'Remove a visual made with show_visual (from the chat card store or the desktop).',
@@ -708,25 +765,37 @@ const DESKTOP_TOOLS = new Set([
   'browser_forward', 'browser_activate', 'browser_close_tab', 'browser_eval'
 ]);
 
+// The assistant's own saved tools (custom-tools.js), named tool_<name>.
+let dynamicTools = () => [];
+function setDynamic(fn) { dynamicTools = typeof fn === 'function' ? fn : () => []; }
+function find(name) {
+  const t = byName.get(name);
+  if (t) return t;
+  if (!/^tool_/.test(String(name))) return null;
+  try { return dynamicTools().find((d) => d.name === name) || null; } catch { return null; }
+}
+
 function definitions() {
-  return TOOLS.map(({ name, description, input_schema }) => ({ name, description, input_schema }));
+  let extra = [];
+  try { extra = dynamicTools(); } catch { extra = []; }
+  return [...TOOLS, ...extra].map(({ name, description, input_schema }) => ({ name, description, input_schema }));
 }
 
 function categoryOf(name) {
-  const t = byName.get(name);
+  const t = find(name);
   return t ? t.category : null;
 }
 
 // Light schema check: required keys present, declared types respected.
 function validateInput(name, input) {
-  const t = byName.get(name);
+  const t = find(name);
   if (!t) return `unknown tool ${name}`;
   if (!input || typeof input !== 'object') return 'input must be an object';
   for (const k of t.input_schema.required || []) {
     if (!(k in input)) return `missing required field "${k}"`;
   }
   for (const [k, v] of Object.entries(input)) {
-    const p = t.input_schema.properties[k];
+    const p = (t.input_schema.properties || {})[k];
     if (!p) return `unexpected field "${k}"`;
     if (p.type === 'string' && typeof v !== 'string') return `"${k}" must be a string`;
     if (p.type === 'number' && typeof v !== 'number') return `"${k}" must be a number`;
@@ -739,9 +808,9 @@ function validateInput(name, input) {
 }
 
 async function execute(name, input, ctx) {
-  const t = byName.get(name);
+  const t = find(name);
   if (!t) throw new Error(`unknown tool ${name}`);
   return t.run(input || {}, ctx);
 }
 
-module.exports = { DESKTOP_TOOLS, TOOLS, definitions, categoryOf, validateInput, execute, clip, sanitizeSettings, SETTABLE };
+module.exports = { DESKTOP_TOOLS, TOOLS, definitions, categoryOf, validateInput, execute, clip, sanitizeSettings, SETTABLE, setDynamic };

@@ -1097,6 +1097,14 @@ webview.plugin-frame { background: #fff; }
 .ai-conn.wait { background: #fbbf24; }
 .ai-msg.ai-notice { align-self: center; font-size: 10.5px; font-style: italic; opacity: .7; background: transparent; padding: 2px 8px; }
 .ai-msg.ai-blocked { opacity: 1; font-style: normal; text-align: center; }
+.aiws-list { display: flex; flex-direction: column; gap: 4px; margin: 2px 0 4px; }
+.aiws-row { display: flex; align-items: center; gap: 6px; padding: 5px 8px; border-radius: 7px; background: rgba(255,255,255,.05); font-size: 12px; }
+.aiws-row .nm { font-weight: 600; }
+.aiws-row .ds { opacity: .65; font-size: 11px; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.aiws-row .st { font-size: 10px; padding: 1px 6px; border-radius: 8px; background: rgba(255,255,255,.1); }
+.aiws-row .st.warn { background: rgba(251,191,36,.25); }
+.aiws-row button { font-size: 11px; padding: 1px 8px; }
+.aiws-empty { opacity: .55; font-size: 11.5px; padding: 2px 2px 4px; }
 .ai-task-section { font-size: 9.5px; letter-spacing: .08em; text-transform: uppercase; opacity: .55; padding: 8px 4px 2px; }
 
 /* Search bar drop-down: recent files and apps */
