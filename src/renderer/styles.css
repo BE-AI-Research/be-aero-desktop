@@ -1004,6 +1004,10 @@ webview.plugin-frame { background: #fff; }
 .notify-item.child .n-ico { width: 18px; height: 18px; flex-basis: 18px; font-size: 12px; }
 .notify-item.child .n-ico img { width: 16px; height: 16px; }
 .notify-item.child .n-title { font-size: 12px; }
+.notify-conv { display: flex; flex-direction: column; gap: 3px; }
+.notify-conv > .notify-tree { margin-left: 10px; }
+.notify-item.lvl2 { padding: 5px 8px; background: rgba(255,255,255,.035); }
+.notify-item.lvl2 .n-title { font-size: 11.5px; font-weight: 500; opacity: .9; }
 .n-x:hover { opacity: 1; }
 
 #set-ai-model-select { flex: 1; min-width: 0; font-size: 12px; background: rgba(255,255,255,.08); color: inherit; border: 1px solid rgba(255,255,255,.14); border-radius: 6px; padding: 4px 6px; }

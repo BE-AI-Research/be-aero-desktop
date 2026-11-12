@@ -2,7 +2,8 @@
 // unread badge, and a popover listing everything that asked for attention.
 // Notifications are grouped by where they came from (an app, a web widget,
 // the assistant): the newest is the group's parent, the older ones fold
-// into a sub-tree under it ("3 earlier").
+// into a sub-tree under it ("3 earlier") - by conversation (the title: the
+// sender or the room) when there are several, each with its own older ones.
 (function () {
   let aero = null;
   let state = { items: [], unread: 0 };
@@ -33,44 +34,92 @@
 
   const sourceLabel = (it) => it.sourceName || (it.source === 'ai' ? 'AI assistant' : it.source === 'web' ? 'Web widget' : it.source === 'os' ? 'An app' : 'BE-Aero Desktop');
   const groupKey = (it) => `${it.source || 'system'}|${it.sourceId || it.sourceName || ''}`;
+  // A conversation inside an app: its title (the sender or the room, for chat
+  // apps), without case or counters like "(3)" / "3 new messages".
+  const convKey = (it) => String(it.title || '').toLowerCase()
+    .replace(/^\(\d+\)\s*/, '').replace(/\s*\(\d+( new)?( messages?)?\)$/, '').replace(/\s*[-·:]?\s*\d+ new messages?$/, '').trim() || '(untitled)';
 
-  // Newest first in, groups out: [{ key, items }] in order of their newest.
-  function groups(items) {
+  // Newest first in, groups out (in order of their newest item).
+  function bucket(items, keyOf) {
     const byKey = new Map();
     for (const it of items) {
-      const k = groupKey(it);
+      const k = keyOf(it);
       if (!byKey.has(k)) byKey.set(k, { key: k, items: [] });
       byKey.get(k).items.push(it);
     }
     return [...byKey.values()];
   }
 
-  function itemRow(it, { child = false, group = null } = {}) {
+  // One notification row. opts: { level: 0 app parent | 1 conversation | 2 older
+  // in a conversation, more: { key, count, label, unread }, dismiss: [items] }
+  function itemRow(it, { level = 0, more = null, dismiss = [it] } = {}) {
     const row = document.createElement('div');
-    row.className = `notify-item${it.read ? '' : ' unread'}${child ? ' child' : ''}`;
-    const older = group && group.items.length > 1 ? group.items.length - 1 : 0;
-    const open = group && expanded.has(group.key);
-    const olderUnread = older ? group.items.slice(1).filter((x) => !x.read).length : 0;
+    row.className = `notify-item${it.read ? '' : ' unread'}${level ? ` child lvl${level}` : ''}`;
+    const open = more && expanded.has(more.key);
+    const meta = level === 0 ? `${esc(sourceLabel(it))} · ${ago(it.ts)}` : ago(it.ts);
     row.innerHTML = `<div class="n-ico">${sourceGlyph(it)}</div>
       <div class="n-body"><div class="n-title">${esc(it.title)}</div>
       ${it.body ? `<div class="n-text">${esc(it.body)}</div>` : ''}
-      <div class="n-meta">${child ? '' : `${esc(sourceLabel(it))} · `}${ago(it.ts)}</div>
-      ${older ? `<button class="n-more${open ? ' open' : ''}" title="${open ? 'Hide' : 'Show'} the earlier ones"><span class="chev">▸</span>${older} earlier${olderUnread ? ` <span class="n-new">${olderUnread} new</span>` : ''}</button>` : ''}</div>
-      <button class="n-x" title="${older ? `Dismiss all ${older + 1} from ${esc(sourceLabel(it))}` : 'Dismiss'}">✕</button>`;
+      <div class="n-meta">${meta}</div>
+      ${more ? `<button class="n-more${open ? ' open' : ''}" title="${open ? 'Hide' : 'Show'} the earlier ones"><span class="chev">▸</span>${esc(more.label)}${more.unread ? ` <span class="n-new">${more.unread} new</span>` : ''}</button>` : ''}</div>
+      <button class="n-x" title="${dismiss.length > 1 ? `Dismiss these ${dismiss.length}` : 'Dismiss'}">✕</button>`;
     row.addEventListener('click', (e) => {
       if (e.target.closest('.n-more')) {
-        if (expanded.has(group.key)) expanded.delete(group.key); else expanded.add(group.key);
+        if (expanded.has(more.key)) expanded.delete(more.key); else expanded.add(more.key);
         renderPanel();
         return;
       }
-      if (e.target.closest('.n-x')) {
-        // The parent's ✕ clears its whole group; a child's, just that one.
-        for (const x of (!child && group ? group.items : [it])) aero.notifyRemove(x.id);
-        return;
-      }
+      if (e.target.closest('.n-x')) { for (const x of dismiss) aero.notifyRemove(x.id); return; }
       aero.notifyOpen(it.id);
     });
     return row;
+  }
+
+  const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
+  const unreadIn = (list) => list.filter((x) => !x.read).length;
+  const tree = () => { const t = document.createElement('div'); t.className = 'notify-tree'; return t; };
+
+  // An app's group: the newest notification is the parent. Its older ones
+  // fold under it - straight in, or by conversation when there are several.
+  function appGroup(g) {
+    const box = document.createElement('div');
+    box.className = 'notify-group';
+    const [parent, ...rest] = g.items;
+    const convs = bucket(g.items, convKey);
+    // The conversations below the parent: the parent's own one only if it has older messages.
+    const threads = bucket(rest, convKey);
+    const byConv = threads.length > 1;
+    const label = rest.length ? `${rest.length} earlier${byConv ? ` · ${plural(convs.length, 'conversation')}` : ''}` : '';
+    box.appendChild(itemRow(parent, {
+      level: 0,
+      more: rest.length ? { key: g.key, label, unread: unreadIn(rest) } : null,
+      dismiss: g.items
+    }));
+    if (!rest.length || !expanded.has(g.key)) return box;
+    const t = tree();
+    if (!byConv) {
+      for (const it of rest) t.appendChild(itemRow(it, { level: 2 }));
+    } else {
+      for (const th of threads) {
+        const k = `${g.key}#${th.key}`;
+        const [head, ...older] = th.items;
+        const conv = document.createElement('div');
+        conv.className = 'notify-conv';
+        conv.appendChild(itemRow(head, {
+          level: 1,
+          more: older.length ? { key: k, label: `${older.length} earlier`, unread: unreadIn(older) } : null,
+          dismiss: th.items
+        }));
+        if (older.length && expanded.has(k)) {
+          const t2 = tree();
+          for (const it of older) t2.appendChild(itemRow(it, { level: 2 }));
+          conv.appendChild(t2);
+        }
+        t.appendChild(conv);
+      }
+    }
+    box.appendChild(t);
+    return box;
   }
 
   function renderPanel() {
@@ -86,21 +135,12 @@
       list.appendChild(e);
       return;
     }
-    const gs = groups(state.items);
-    const live = new Set(gs.map((g) => g.key));
+    const gs = bucket(state.items, groupKey);
+    // Forget open/closed state for groups and conversations that are gone.
+    const live = new Set();
+    for (const g of gs) { live.add(g.key); for (const th of bucket(g.items.slice(1), convKey)) live.add(`${g.key}#${th.key}`); }
     for (const k of [...expanded]) if (!live.has(k)) expanded.delete(k);
-    for (const g of gs) {
-      const box = document.createElement('div');
-      box.className = 'notify-group';
-      box.appendChild(itemRow(g.items[0], { group: g }));
-      if (g.items.length > 1 && expanded.has(g.key)) {
-        const tree = document.createElement('div');
-        tree.className = 'notify-tree';
-        for (const it of g.items.slice(1)) tree.appendChild(itemRow(it, { child: true }));
-        box.appendChild(tree);
-      }
-      list.appendChild(box);
-    }
+    for (const g of gs) list.appendChild(appGroup(g));
     list.scrollTop = top;
   }
 
