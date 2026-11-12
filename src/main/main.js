@@ -45,6 +45,17 @@ let piper = null;
 let aiService = null;
 let notifyCenter = null;
 let deviceService = null;
+// BE-Aero Relay Server client (relay-client.js): messages for my devices
+// that are offline go through a relay, sealed end to end.
+let relayClient = null;
+// My devices (not relays) I can send to now: online, or reachable through a relay.
+function sendTargets() {
+  const mesh = deviceService && deviceService.mesh;
+  if (!mesh) return [];
+  return [...mesh.peers.values()].filter((p) => p.role !== 'relay')
+    .map((p) => ({ id: p.id, p, online: mesh.conns.has(p.id), relayed: !mesh.conns.has(p.id) && !!(relayClient && relayClient.reachable(p.id)) }))
+    .filter((x) => x.online || x.relayed);
+}
 let linuxNotify = null;
 let dockHotkey = null;       // the accelerator actually registered for the dock
 let dockSummoned = false;    // sidebar lifted above everything by the dock hotkey
@@ -855,6 +866,7 @@ const soundCall = (fn) => async (_e, ...args) => {
   if (!s) return { error: 'Sound controls are not available on this system.' };
   try { return { result: await fn(s, ...args) }; } catch (err) { return { error: String(err && err.message || err) }; }
 };
+ipcMain.handle('relay:status', () => (relayClient ? relayClient.status() : []));
 ipcMain.handle('sound:state', async () => {
   const s = sound();
   if (!s) return { error: 'Sound controls are not available on this system.', devices: [], sessions: [] };
@@ -914,9 +926,9 @@ async function openNotificationApp(launch = {}) {
 function clipMenuItems() {
   const mesh = deviceService && deviceService.mesh;
   if (!mesh || !clipboardOn()) return [];        // off in Settings > Devices
-  const online = [...mesh.conns.keys()].map((id) => ({ id, p: mesh.peers.get(id) })).filter((x) => x.p);
-  return [{ label: 'Send clipboard to', enabled: online.length > 0,
-    submenu: online.length ? online.map(({ id, p }) => ({ label: p.label || p.name || id.slice(0, 7), click: () => sendClipboardTo(id) }))
+  const targets = sendTargets();
+  return [{ label: 'Send clipboard to', enabled: targets.length > 0,
+    submenu: targets.length ? targets.map(({ id, p, relayed }) => ({ label: `${p.label || p.name || id.slice(0, 7)}${relayed ? '  (via relay)' : ''}`, click: () => sendClipboardTo(id) }))
       : [{ label: 'No paired devices online', enabled: false }] }];
 }
 
@@ -929,8 +941,10 @@ async function sendClipboardTo(peerId) {
   try {
     const msg = require('./clip-send').readClip(clipboard);
     if (!msg) { tell('Nothing to send', 'The clipboard has no text or image.'); return; }
-    await mesh.request(peerId, 'clipboard.put', msg, 30000);
-    tell(`Clipboard sent to ${name}`, msg.kind === 'image' ? `An image (${msg.width} × ${msg.height})` : String(msg.text).replace(/\s+/g, ' ').trim().slice(0, 80));
+    const viaRelay = !mesh.conns.has(peerId) && relayClient && relayClient.reachable(peerId);
+    if (viaRelay) await relayClient.send(peerId, 'clipboard', '', msg);
+    else await mesh.request(peerId, 'clipboard.put', msg, 30000);
+    tell(viaRelay ? `Clipboard sent to ${name} through the relay` : `Clipboard sent to ${name}`, msg.kind === 'image' ? `An image (${msg.width} × ${msg.height})` : String(msg.text).replace(/\s+/g, ' ').trim().slice(0, 80));
   } catch (err) {
     tell('Clipboard not sent', /turned off/.test(err.message) ? `${name} has clipboard sharing turned off (Settings > Devices on ${name}).` : /allowed/.test(err.message) ? `${name} has not allowed "Clipboard" for this device (Settings > Devices on ${name}).` : err.message);
   }
@@ -2274,7 +2288,29 @@ app.whenReady().then(() => {
   // A shared web widget syncs what it IS (name and address), never how it
   // sits on this screen (minimized, size, zoom, position).
   const webShared = (w) => ({ id: w.id, name: w.name || '', url: w.url });
+  relayClient = new (require('./relay-client').RelayClient)({
+    handlers: {
+      state: async (data, from, key) => { stateSync.applyIncoming(key, data && data.entry, data && data.value, from.name); },
+      bus: async (data, from) => { if (!aiService) throw new Error('the assistant is not running'); await aiService.bus.receive(data && data.msg, from); },
+      clipboard: (data, from) => receiveClipboard(data, from),
+      widget: (data, from) => receiveWidget(data, from)
+    },
+    log: (m) => console.log('[relay]', m)
+  });
   const stateSync = new (require('./state-sync').StateSync)({
+    // Changes here, for my devices that are offline but reachable through
+    // a relay (the newest version per item waits there).
+    onChanged: (items) => {
+      const mesh = deviceService && deviceService.mesh;
+      if (!mesh || !relayClient) return;
+      for (const p of mesh.peers.values()) {
+        if (p.role === 'relay' || !(p.perms && p.perms.state) || !relayClient.reachable(p.id)) continue;
+        for (const it of items) {
+          if (!it.entry) continue;
+          relayClient.send(p.id, 'state', it.key, { entry: it.entry, value: it.entry.deleted ? null : it.value }).catch((err) => console.log('[relay] state:', err.message));
+        }
+      }
+    },
     indexFile: path.join(app.getPath('userData'), 'mesh', 'state-index.json'),
     collect: () => {
       // Not before the AI service is up: a scan without its conversations and
@@ -2327,14 +2363,15 @@ app.whenReady().then(() => {
   });
 
   // Send to device, receiving side: onto this clipboard, and say so.
+  async function receiveClipboard(a, from) {
+    if (!clipboardOn()) throw new Error(`clipboard sharing is turned off on ${store.get('devices').name || require('os').hostname()}`);
+    const { clipboard } = require('electron');
+    const what = require('./clip-send').writeClip(clipboard, nativeImage, a);
+    if (notifyCenter) notifyCenter.add({ source: 'system', title: `Clipboard from ${from.name || 'another device'}`, body: what, toast: true });
+    return { ok: true };
+  }
   function attachClipboard(mesh) {
-    mesh.handle('clipboard.put', 'clipboard', async (a, from) => {
-      if (!clipboardOn()) throw new Error(`clipboard sharing is turned off on ${store.get('devices').name || require('os').hostname()}`);
-      const { clipboard } = require('electron');
-      const what = require('./clip-send').writeClip(clipboard, nativeImage, a);
-      if (notifyCenter) notifyCenter.add({ source: 'system', title: `Clipboard from ${from.name || 'another device'}`, body: what, toast: true });
-      return { ok: true };
-    });
+    mesh.handle('clipboard.put', 'clipboard', receiveClipboard);
     // Devices coming and going: the "Send clipboard to" list follows.
     let t = null;
     mesh.on('change', () => { clearTimeout(t); t = setTimeout(rebuildTrayMenu, 500); });
@@ -2343,18 +2380,19 @@ app.whenReady().then(() => {
 
   // A web widget sent to one device: a copy there, not kept in sync.
   const toast = (title, body) => { try { if (Notification.isSupported()) new Notification({ title, body, icon: loadIcon() }).show(); } catch { /* no toasts */ } };
+  async function receiveWidget(a, from) {
+    const w = a && a.widget;
+    if (!w || !/^https?:\/\//i.test(String(w.url || ''))) throw new Error('not a web widget');
+    const list = (store.get('webWidgets') || []).slice();
+    if (!list.some((x) => x.url === w.url)) {
+      list.push({ id: `w${Date.now().toString(36)}`, name: String(w.name || '').slice(0, 40), url: String(w.url), height: 300 });
+      updateSettings({ webWidgets: list });
+    }
+    toast('Web widget received', `${from.name || 'Another device'} sent "${w.name || w.url}".`);
+    return { ok: true };
+  }
   function attachWidgetSend(mesh) {
-    mesh.handle('widget.receive', 'state', async (a, from) => {
-      const w = a && a.widget;
-      if (!w || !/^https?:\/\//i.test(String(w.url || ''))) throw new Error('not a web widget');
-      const list = (store.get('webWidgets') || []).slice();
-      if (!list.some((x) => x.url === w.url)) {
-        list.push({ id: `w${Date.now().toString(36)}`, name: String(w.name || '').slice(0, 40), url: String(w.url), height: 300 });
-        updateSettings({ webWidgets: list });
-      }
-      toast('Web widget received', `${from.name || 'Another device'} sent "${w.name || w.url}".`);
-      return { ok: true };
-    });
+    mesh.handle('widget.receive', 'state', receiveWidget);
   }
 
   // Right-click a widget: lock it in place (free-form), and for a web
@@ -2375,11 +2413,12 @@ app.whenReady().then(() => {
         updateSettings({ webWidgets: (store.get('webWidgets') || []).map((x) => (x.id === w.id ? { ...x, shared: on } : x)) });
         stateSync.touch();
       };
+      const targets = sendTargets();
       tpl.push({ type: 'separator' },
         { label: 'Share with all my devices', type: 'checkbox', checked: !!w.shared, enabled: !!mesh, click: () => setShared(!w.shared) },
-        { label: 'Send to', enabled: online.length > 0, submenu: online.length ? online.map(({ id, p }) => ({
-          label: p.label || p.name || id.slice(0, 7),
-          click: () => mesh.request(id, 'widget.receive', { widget: webShared(w) }, 10000)
+        { label: 'Send to', enabled: targets.length > 0, submenu: targets.length ? targets.map(({ id, p, relayed }) => ({
+          label: `${p.label || p.name || id.slice(0, 7)}${relayed ? '  (via relay)' : ''}`,
+          click: () => (relayed ? relayClient.send(id, 'widget', '', { widget: webShared(w) }) : mesh.request(id, 'widget.receive', { widget: webShared(w) }, 10000))
             .then(() => toast('Web widget sent', `"${w.name || w.url}" is on ${p.label || p.name} now.`))
             .catch((err) => toast('Web widget not sent', /allowed/.test(err.message) ? `${p.label || p.name} has not allowed "Synced state" for this device.` : err.message))
         })) : [{ label: 'No paired devices online', enabled: false }] });
@@ -2407,8 +2446,16 @@ app.whenReady().then(() => {
   });
   deviceService = new (require('./mesh/service').DeviceService)({
     userDataDir: app.getPath('userData'), store, getWindow: () => win,
-    onStart: (mesh) => { poolSync.attach(mesh); poolSync.start(); remoteFiles.attach(mesh); stateSync.attach(mesh); stateSync.start(); attachWidgetSend(mesh); attachClipboard(mesh); if (aiService) { aiService.bus.attach(mesh); aiService.shared.attach(mesh); } },
-    onStop: () => { poolSync.stop(); poolSync.mesh = null; stateSync.stop(); }
+    onStart: (mesh) => {
+      poolSync.attach(mesh); poolSync.start(); remoteFiles.attach(mesh); stateSync.attach(mesh); stateSync.start(); attachWidgetSend(mesh); attachClipboard(mesh);
+      relayClient.attach(mesh);
+      // A relay only stores and forwards: it gets none of a device's permissions.
+      const lockRelays = () => { for (const p of mesh.peers.values()) if (p.role === 'relay' && Object.values(p.perms || {}).some(Boolean)) mesh.setPerms(p.id, Object.fromEntries(Object.keys(p.perms).map((k) => [k, false]))); };
+      mesh.on('change', lockRelays);
+      lockRelays();
+      if (aiService) { aiService.bus.attach(mesh); aiService.shared.attach(mesh); aiService.bus.relay = relayClient; }
+    },
+    onStop: () => { poolSync.stop(); poolSync.mesh = null; stateSync.stop(); relayClient.stop(); }
   });
   deviceService.registerIpc();
   if ((store.get('devices') || {}).enabled) deviceService.start();
@@ -2455,6 +2502,7 @@ app.whenReady().then(() => {
       else if (!store.get('alwaysOnTop')) { win.setAlwaysOnTop(false); sinkToDesktop(); }
     }
   });
+  aiService.bus.relay = relayClient;
   if (deviceService && deviceService.mesh) { aiService.bus.attach(deviceService.mesh); aiService.shared.attach(deviceService.mesh); }
   spotlight.aiEnabled = () => aiService.enabled();
   spotlight.askAi = (q) => aiService.askFromSearch(q);

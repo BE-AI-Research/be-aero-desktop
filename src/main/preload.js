@@ -52,6 +52,7 @@ contextBridge.exposeInMainWorld('aero', {
   aiVisuals: () => ipcRenderer.invoke('ai:visuals'),
   aiWidgets: () => ipcRenderer.invoke('ai:widgets'),
   soundState: () => ipcRenderer.invoke('sound:state'),
+  relayStatus: () => ipcRenderer.invoke('relay:status'),
   soundSet: (what, id, value) => ipcRenderer.invoke('sound:set', what, id, value),
   soundBt: (what, id, on) => ipcRenderer.invoke('sound:bt', what, id, on),
   aiToolsList: () => ipcRenderer.invoke('ai:tools-list'),

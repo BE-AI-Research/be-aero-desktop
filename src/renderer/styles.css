@@ -1129,6 +1129,9 @@ webview.plugin-frame { background: #fff; }
 .sound-bt-dot { width: 7px; height: 7px; border-radius: 50%; background: rgba(255,255,255,.25); }
 .sound-bt-dev.on .sound-bt-dot { background: #4ade80; box-shadow: 0 0 6px #4ade80; }
 .sound-bt-bat { font-size: 10.5px; opacity: .7; }
+.dev-relay { font-size: 11.5px; opacity: .85; line-height: 1.5; margin: 4px 0 2px; }
+.dev-relay .badge { margin-right: 6px; }
+.dev-relay-status { display: block; opacity: .75; font-size: 11px; }
 .aiws-list { display: flex; flex-direction: column; gap: 4px; margin: 2px 0 4px; }
 .aiws-row { display: flex; align-items: center; gap: 6px; padding: 5px 8px; border-radius: 7px; background: rgba(255,255,255,.05); font-size: 12px; }
 .aiws-row .nm { font-weight: 600; }

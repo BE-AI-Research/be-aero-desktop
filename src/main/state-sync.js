@@ -27,8 +27,11 @@ class StateSync {
   // tracked(key): false for an item that has stopped syncing (its category
   // turned off, a conversation moved to Local) - it is forgotten here, never
   // sent out as a delete, and remote copies of it are ignored.
-  constructor({ indexFile, collect, apply, remove, tracked = () => true, log = () => {}, onApplied = () => {} }) {
+  // onChanged(items): local changes, [{ key, entry, value }] - for devices
+  // that are offline now (they go through a relay).
+  constructor({ indexFile, collect, apply, remove, tracked = () => true, log = () => {}, onApplied = () => {}, onChanged = () => {} }) {
     this.tracked = tracked;
+    this.onChanged = onChanged;
     this.indexFile = indexFile;
     this.collect = collect;
     this.applyItem = apply;
@@ -127,6 +130,29 @@ class StateSync {
     return { applied, removed };
   }
 
+  // One item from another device that came through a relay: the same rule
+  // as a pull - the newer change wins, deletes travel.
+  applyIncoming(key, r, value, from) {
+    if (!key || !r || !this.tracked(key)) return false;
+    this.scan();
+    const local = this.index.get(key);
+    if (local && local.hash === r.hash && !!local.deleted === !!r.deleted) return false;
+    if (local && (local.t || 0) >= (r.t || 0)) return false;
+    if (r.deleted) {
+      if (!local || local.deleted) return false;
+      this.removeItem(key, from);
+      this.index.set(key, { hash: local.hash, t: r.t, deleted: true });
+    } else {
+      if (hashOf(value) !== r.hash) throw new Error('item does not match its hash');
+      this.applyItem(key, value, from);
+      this.index.set(key, { hash: r.hash, t: r.t, deleted: false });
+    }
+    this.save();
+    try { this.cache = this.collect(); } catch { /* next scan */ }
+    this.onApplied([key], from);
+    return true;
+  }
+
   sync(peerId) {
     if (this.pulling.has(peerId)) { this.again.add(peerId); return this.pulling.get(peerId); }
     const p = this.pullFrom(peerId).catch((err) => { this.log(`state sync: ${err.message}`); return null; })
@@ -144,8 +170,12 @@ class StateSync {
   touch() {
     clearTimeout(this.touchTimer);
     this.touchTimer = setTimeout(() => {
-      if (this.scan().length && this.mesh) {
+      const changed = this.scan();
+      if (changed.length && this.mesh) {
         for (const id of this.mesh.conns.keys()) if (this.allowed(id)) this.mesh.request(id, 'state.changed', {}, 10000).catch(() => {});
+      }
+      if (changed.length) {
+        try { this.onChanged(changed.map((key) => ({ key, entry: this.index.get(key), value: this.cache.get(key) }))); } catch (err) { this.log(`state out: ${err.message}`); }
       }
     }, 600);
   }

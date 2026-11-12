@@ -113,3 +113,27 @@ test('state sync: an item that stops syncing is forgotten here, not deleted on t
     assert.strictEqual(a.data.get('conv:7').title, 'Mine only');
   } finally { done(); }
 });
+
+test('state sync: an item that came through a relay follows the same newest-wins rule', () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'aero-state-in-'));
+  try {
+    const { hashOf } = require('../src/main/state-sync');
+    const data = new Map([['theme', { preset: 'aero' }]]);
+    const s = new StateSync({ indexFile: path.join(base, 'idx.json'), collect: () => new Map(data), apply: (k, v) => data.set(k, v), remove: (k) => data.delete(k) });
+    s.scan();
+    const mine = s.index.get('theme');
+    // older than ours: ignored
+    assert.strictEqual(s.applyIncoming('theme', { hash: hashOf({ preset: 'old' }), t: mine.t - 1000, deleted: false }, { preset: 'old' }, 'Laptop'), false);
+    assert.deepStrictEqual(data.get('theme'), { preset: 'aero' });
+    // newer: applied, and not reported back as a local change
+    const v = { preset: 'midnight' };
+    assert.strictEqual(s.applyIncoming('theme', { hash: hashOf(v), t: mine.t + 1000, deleted: false }, v, 'Laptop'), true);
+    assert.deepStrictEqual(data.get('theme'), v);
+    assert.deepStrictEqual(s.scan(), [], 'no echo');
+    // a value that does not match its hash is refused
+    assert.throws(() => s.applyIncoming('scratchpad', { hash: 'x', t: Date.now() + 5000, deleted: false }, { text: 'hi' }, 'Laptop'), /hash/);
+    // a newer delete travels
+    assert.strictEqual(s.applyIncoming('theme', { hash: hashOf(v), t: mine.t + 2000, deleted: true }, null, 'Laptop'), true);
+    assert.ok(!data.has('theme'));
+  } finally { fs.rmSync(base, { recursive: true, force: true }); }
+});

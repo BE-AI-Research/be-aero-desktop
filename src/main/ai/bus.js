@@ -113,7 +113,16 @@ class AiBus {
 
   async deliver(msg) {
     const m = this.getMesh();
-    if (!m || !m.conns.has(msg.to.device)) return false;
+    if (!m) return false;
+    // Offline, but a BE-Aero Relay Server holds messages for it.
+    if (!m.conns.has(msg.to.device) && this.relay && this.relay.reachable(msg.to.device)) {
+      try {
+        await this.relay.send(msg.to.device, 'bus', `bus:${msg.id}`, { msg });
+        await fsp.rm(path.join(this.outboxDir, `${msg.id}.json`), { force: true });
+        return true;
+      } catch (err) { this.log(`bus via relay: ${err.message}`); return false; }
+    }
+    if (!m.conns.has(msg.to.device)) return false;
     try {
       await m.request(msg.to.device, 'bus.deliver', { msg }, 20000);
       await fsp.rm(path.join(this.outboxDir, `${msg.id}.json`), { force: true });
