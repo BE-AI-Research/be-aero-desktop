@@ -207,6 +207,7 @@
     // The bell sits left of the OS settings gear when the power group is
     // shown; otherwise at the end of the dock.
     const bellSlot = document.querySelector('.tasks-widget .dock-power .notify-slot');
+    if (window.AeroWidgetTray) AeroWidgetTray.renderTile(bellSlot || barEl);    // left of the bell
     if (window.AeroNotify) AeroNotify.renderTile(bellSlot || barEl);
     if (!tiles.length && !minimizedWidgets.length && !window.AeroNotify) {
       // Wayland offers no way to list other applications' windows (that is a

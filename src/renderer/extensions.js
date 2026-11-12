@@ -203,7 +203,7 @@
 
   function renderWebWidgets(list) {
     const wanted = new Map((Array.isArray(list) ? list : [])
-      .filter((w) => w && w.id && /^https?:\/\//i.test(w.url || ''))
+      .filter((w) => w && w.id && !w.hidden && /^https?:\/\//i.test(w.url || ''))
       .map((w) => [w.id, w]));
 
     for (const [id, entry] of webFrames) {
@@ -300,7 +300,7 @@
   // has reported one (the guest keeps running while minimized, so it does).
   function pushMinimizedToDock() {
     if (!window.AeroTasks) return;
-    const parked = lastWebWidgets.filter((w) => w.minimized).map((w) => {
+    const parked = lastWebWidgets.filter((w) => w.minimized && !w.hidden).map((w) => {
       const entry = webFrames.get(w.id);
       return { id: w.id, name: w.name, url: w.url, favicon: (entry && entry.favicon) || null };
     });

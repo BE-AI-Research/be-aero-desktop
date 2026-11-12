@@ -45,7 +45,8 @@
   }
 
   function render(list) {
-    const want = new Map((Array.isArray(list) ? list : []).map((w) => [w.id, w]));
+    // Closed (hidden) widgets are not shown; the widget tray brings them back.
+    const want = new Map((Array.isArray(list) ? list : []).filter((w) => !w.hidden).map((w) => [w.id, w]));
     for (const [id, w] of widgets) {
       if (!want.has(id)) { w.section.remove(); widgets.delete(id); }
     }
@@ -72,6 +73,8 @@
       const del = el('button', 'icon-btn webw-btn visual-del', controls);
       del.innerHTML = '<svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>';
       del.title = 'Remove this widget (its folder goes to the Recycle Bin)';
+      const close = el('button', 'icon-btn webw-btn aiw-close', controls, '✕');
+      close.title = 'Close - it keeps its saved state; bring it back from the widget tray in the dock';
       el('span', 'badge', head, 'AI');
       const f = document.createElement('iframe');
       f.className = 'visual-frame';
@@ -81,6 +84,11 @@
       section.appendChild(f);
       reload.addEventListener('click', () => { f.src = srcFor(w.id, Date.now()); });
       folder.addEventListener('click', () => aero.aiWidgetFolder(w.id));
+      close.addEventListener('click', () => {
+        // Give the widget a moment to save (it gets "aero:close"), then hide it.
+        try { f.contentWindow.postMessage({ __aeroWidgetEvent: 'close' }, '*'); } catch { /* gone */ }
+        setTimeout(() => aero.aiWidgetHidden(w.id, true), 400);
+      });
       del.addEventListener('click', () => {
         if (!del.classList.contains('confirm')) { del.classList.add('confirm'); del.title = 'Click again to remove'; setTimeout(() => { del.classList.remove('confirm'); del.title = 'Remove this widget'; }, 2500); return; }
         aero.aiWidgetRemove(w.id);

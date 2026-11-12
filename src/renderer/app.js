@@ -84,6 +84,7 @@
   if (window.AeroAi) AeroAi.init({ aero });
   if (window.AeroMedia) AeroMedia.init({ aero });
   if (window.AeroSound) AeroSound.init({ aero });
+  if (window.AeroWidgetTray) AeroWidgetTray.init({ aero });
   if (window.AeroPower) AeroPower.init({ aero });
   if (window.AeroUac) AeroUac.init({ aero });
   if (window.AeroTrash) AeroTrash.init({ aero });

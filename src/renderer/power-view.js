@@ -130,6 +130,7 @@
       closePanel();
       if (wrap) wrap.remove();
       widget.classList.remove('has-power', 'power-left', 'power-right');
+      if (window.AeroWidgetTray && bar0) AeroWidgetTray.renderTile(bar0);
       if (window.AeroNotify && bar0) AeroNotify.renderTile(bar0);      // the bell goes back to the dock's end
       return;
     }
@@ -141,6 +142,7 @@
     const slot = wrap.querySelector('.notify-slot');
     const gearEl = wrap.querySelector('.os-settings-tile');
     if (cfg.side === 'left') wrap.insertBefore(slot, gearEl.nextSibling); else wrap.insertBefore(slot, gearEl);
+    if (window.AeroWidgetTray) AeroWidgetTray.renderTile(slot);
     if (window.AeroNotify) AeroNotify.renderTile(slot);
     widget.classList.add('has-power');
     widget.classList.toggle('power-left', cfg.side === 'left');

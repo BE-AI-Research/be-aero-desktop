@@ -869,6 +869,40 @@ const soundCall = (fn) => async (_e, ...args) => {
   try { return { result: await fn(s, ...args) }; } catch (err) { return { error: String(err && err.message || err) }; }
 };
 ipcMain.handle('relay:status', () => (relayClient ? relayClient.status() : []));
+
+// The widget tray (dock): the widgets you made - AI widgets (also those made
+// from .html files) and web widgets - with show/hide, open and delete.
+// Built-in widgets are not listed.
+ipcMain.handle('widgets:created', () => {
+  const out = [];
+  for (const w of (aiService && aiService.widgets ? aiService.widgets.list() : [])) {
+    out.push({ kind: 'ai', id: w.id, name: w.title, shown: !w.hidden, where: w.dir, sites: (w.approvedHosts || []).length });
+  }
+  for (const w of store.get('webWidgets') || []) {
+    let host = '';
+    try { host = new URL(w.url).hostname; } catch { host = w.url; }
+    out.push({ kind: 'web', id: w.id, name: w.name || host, shown: !w.hidden, where: w.url, shared: !!w.shared });
+  }
+  return out;
+});
+ipcMain.handle('widgets:toggle', async (_e, kind, id, on) => {
+  if (kind === 'ai' && aiService) return aiService.widgets.setHidden(String(id), !on);
+  if (kind === 'web') {
+    updateSettings({ webWidgets: (store.get('webWidgets') || []).map((w) => (w.id === id ? { ...w, hidden: !on, ...(on ? { minimized: false } : {}) } : w)) });
+    return true;
+  }
+  return false;
+});
+ipcMain.handle('widgets:open', async (_e, kind, id) => {
+  if (kind === 'ai' && aiService) { const w = aiService.widgets.get(String(id)); if (w) { shell.openPath(w.dir); return true; } }
+  if (kind === 'web') { const w = (store.get('webWidgets') || []).find((x) => x.id === id); if (w && /^https?:/i.test(w.url)) { shell.openExternal(w.url); return true; } }
+  return false;
+});
+ipcMain.handle('widgets:delete', async (_e, kind, id) => {
+  if (kind === 'ai' && aiService) return aiService.widgets.remove(String(id), (dir) => shell.trashItem(dir));
+  if (kind === 'web') { updateSettings({ webWidgets: (store.get('webWidgets') || []).filter((w) => w.id !== id) }); return true; }
+  return false;
+});
 ipcMain.handle('sound:state', async () => {
   const s = sound();
   if (!s) return { error: 'Sound controls are not available on this system.', devices: [], sessions: [] };

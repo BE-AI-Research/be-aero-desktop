@@ -1314,6 +1314,7 @@ class AiService {
     ipcMain.handle('ai:widget-folder', (_e, id) => { const w = this.widgets.get(String(id)); if (w) require('electron').shell.openPath(w.dir); return !!w; });
     ipcMain.handle('ai:widget-approve', async (_e, id) => { const w = this.widgets.get(String(id)); if (!w) return null; await this.widgets.askHosts(w); this.widgets.onChange(this.widgets.list()); return this.widgets.list().find((x) => x.id === w.id); });
     ipcMain.handle('ai:widget-revoke', (_e, id) => { this.widgets.revoke(String(id)); return true; });
+    ipcMain.handle('ai:widget-hidden', (_e, id, hidden) => this.widgets.setHidden(String(id), !!hidden));
     ipcMain.handle('ai:visuals', () => this.visuals.list().filter((v) => v.where === 'desktop'));
     ipcMain.handle('ai:visual-delete', (_e, id) => { const ok = this.visuals.remove(String(id || '')); this.visualsChanged(); return ok; });
     ipcMain.handle('ai:visual-where', async (_e, id, where) => {

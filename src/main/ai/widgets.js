@@ -72,7 +72,7 @@ function cspFor(approved) {
 // an approved host through the app (many APIs refuse a sandboxed frame's
 // "null" origin; the app's fetch is checked against the same approvals).
 const BRIDGE = `<script>(function(){var n=0,wait={};
-addEventListener('message',function(e){var d=e.data;if(!d||d.__aeroWidgetReply!==1||!wait[d.rid])return;var w=wait[d.rid];delete wait[d.rid];if(d.error)w[1](new Error(d.error));else w[0](d.result);});
+addEventListener('message',function(e){var d=e.data;if(d&&d.__aeroWidgetEvent==='close'){try{dispatchEvent(new Event('aero:close'));}catch(x){}return;}if(!d||d.__aeroWidgetReply!==1||!wait[d.rid])return;var w=wait[d.rid];delete wait[d.rid];if(d.error)w[1](new Error(d.error));else w[0](d.result);});
 function call(op,args){return new Promise(function(res,rej){var rid=++n;wait[rid]=[res,rej];parent.postMessage({__aeroWidget:1,rid:rid,op:op,args:args},'*');});}
 window.aeroWidget={load:function(){return call('load');},save:function(v){return call('save',v);},
 fetch:function(url,opts){return call('fetch',{url:String(url),method:(opts&&opts.method)||'GET',headers:(opts&&opts.headers)||{},body:opts&&opts.body!=null?String(opts.body):null});}};})();</script>`;
@@ -126,6 +126,7 @@ class AiWidgets {
           id: meta.id, title: String(meta.title || d.name).slice(0, 80), dir,
           hosts: (Array.isArray(meta.hosts) ? meta.hosts : []).map(normHost).filter(Boolean).slice(0, 20),
           width: Number(meta.width) || 320, height: Number(meta.height) || 240,
+          hidden: !!meta.hidden,
           createdAt: Number(meta.createdAt) || st.birthtimeMs, updatedAt: st.mtimeMs
         });
       } catch { /* not a widget folder */ }
@@ -146,7 +147,7 @@ class AiWidgets {
   get(id) { return this.widgets.get(id) || null; }
 
   async writeMeta(w) {
-    const meta = { id: w.id, title: w.title, hosts: w.hosts, width: w.width, height: w.height, createdAt: w.createdAt };
+    const meta = { id: w.id, title: w.title, hosts: w.hosts, width: w.width, height: w.height, createdAt: w.createdAt, ...(w.hidden ? { hidden: true } : {}) };
     await fsp.writeFile(path.join(w.dir, 'widget.json'), JSON.stringify(meta, null, 2), 'utf8');
   }
 
@@ -262,6 +263,16 @@ class AiWidgets {
     delete this.approvals[id];
     this.saveApprovals();
     try { if (trash) await trash(w.dir); else await fsp.rm(w.dir, { recursive: true, force: true }); } catch (err) { this.log(`widget folder not removed: ${err.message}`); }
+    this.onChange(this.list());
+    return true;
+  }
+
+  // Closed (hidden) or shown again; it keeps its folder and its saved state.
+  async setHidden(id, hidden) {
+    const w = this.get(id);
+    if (!w) return false;
+    w.hidden = !!hidden;
+    await this.writeMeta(w);
     this.onChange(this.list());
     return true;
   }
