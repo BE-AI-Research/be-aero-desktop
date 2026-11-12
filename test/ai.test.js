@@ -322,3 +322,9 @@ test('browser choice: a picked Chromium browser drives the assistant profile; Fi
     assert.ok(detectBrowser('not-installed'), 'an unknown choice falls back');
   }
 });
+
+test('tool names are unique (APIs reject a request with two tools of one name)', () => {
+  const names = tools.definitions().map((d) => d.name);
+  const dupes = names.filter((n, i) => names.indexOf(n) !== i);
+  assert.deepStrictEqual(dupes, []);
+});

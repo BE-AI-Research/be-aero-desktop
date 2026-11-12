@@ -131,7 +131,7 @@ const TOOLS = [
     run: async (input, ctx) => ctx.webOp(input.id, 'find', { query: input.query })
   },
   {
-    name: 'clipboard_read', category: 'read',
+    name: 'clipboard_read', category: 'sensitive',
     description: 'Read the text currently on the clipboard.',
     input_schema: obj({}),
     run: async (_in, ctx) => ({ text: ctx.clipboard.read() })
@@ -537,7 +537,7 @@ const TOOLS = [
     }
   },
   {
-    name: 'list_widgets', category: 'read',
+    name: 'list_ai_widgets', category: 'read',
     description: 'List the widgets made with create_widget (id, title, folder, approved and blocked sites).',
     input_schema: obj({}),
     run: async (_in, ctx) => ({ widgets: ctx.widgets ? ctx.widgets.list().map((w) => ({ id: w.id, title: w.title, folder: w.dir, approvedHosts: w.approvedHosts, blockedHosts: w.pendingHosts })) : [] })
@@ -618,7 +618,7 @@ const TOOLS = [
     run: async (_in, ctx) => ({ visuals: ctx.visuals ? ctx.visuals.list().slice(0, 50).map((v) => ({ id: v.id, title: v.title, where: v.where, updatedAt: new Date(v.updatedAt).toISOString() })) : [] })
   },
   {
-    name: 'memory_remember', category: 'read',
+    name: 'memory_remember', category: 'sensitive',
     description: "Save a lasting fact to your global memory - about the user (name, role, preferences, how they like things done), their work, or the machine. Memory persists across all conversations and is shown to you at the start of each one. Don't store transient details.",
     input_schema: obj({ text: str('The fact, in one or two sentences'), tags: { type: 'array', items: { type: 'string' }, description: 'Optional tags, e.g. ["preference"], ["project"]' } }, ['text']),
     run: async (input, ctx) => { const m = ctx.memory.remember(input.text, input.tags); return { ok: true, id: m.id }; }
@@ -630,7 +630,7 @@ const TOOLS = [
     run: async (input, ctx) => ({ memories: ctx.memory.recall(input.query || '').map((m) => ({ id: m.id, text: m.text, tags: m.tags })) })
   },
   {
-    name: 'memory_forget', category: 'read',
+    name: 'memory_forget', category: 'sensitive',
     description: 'Delete a memory entry by id (see memory_recall).',
     input_schema: obj({ id: str('Memory id') }, ['id']),
     run: async (input, ctx) => ({ ok: ctx.memory.forget(input.id) })
@@ -649,7 +649,7 @@ const TOOLS = [
       name: str('Short task name'),
       when: str('When to run, e.g. "daily 09:00", "every 2h", "in 20m", "weekdays 08:30", "mon,thu 14:30"'),
       prompt: str('What to do on each run, written as an instruction to yourself'),
-      permission: { type: 'string', enum: ['inherit', 'allow', 'deny'], description: 'What the run may change while the user is away (default inherit: the Settings permission, where "ask" means read-only)' },
+      permission: { type: 'string', enum: ['inherit', 'deny'], description: 'What the run may change while the user is away (default inherit: the Settings permission, where "ask" means read-only). Only the user can let a task change things unattended (Settings > Tasks).' },
       conversationMode: { type: 'string', enum: ['shared', 'new'], description: 'shared: one running conversation for the task (default); new: a fresh conversation each run' },
       model: str('Optional model id for this task only (see the models the server offers); omit to use the Tasks model from Settings, or the chat model'),
       readAloud: { type: 'boolean', description: 'Read the result out loud when the task finishes (for example a morning briefing)' },
@@ -657,10 +657,17 @@ const TOOLS = [
     }, ['name', 'prompt']),
     run: async (input, ctx) => {
       if (!input.when && !input.schedule && !input.id) return { error: 'when is required, e.g. "daily 09:00", "every 2h", "in 20m"' };
+      // Full unattended permission is the user's to give, in Settings - never
+      // the assistant's (a page it read could have asked for it).
+      let note;
+      if (input.permission === 'allow') {
+        const existing = input.id ? (ctx.tasks.list().find((x) => x.id === input.id) || null) : null;
+        if (!existing || existing.permission !== 'allow') { input = { ...input, permission: 'inherit' }; note = 'permission "allow" can only be set by the user in Settings > Tasks; the task uses the Settings permission'; }
+      }
       try {
         const t = ctx.tasks.add({ id: input.id, name: input.name, prompt: input.prompt, when: input.when, schedule: input.schedule, permission: input.permission, conversationMode: input.conversationMode, ...(input.model !== undefined ? { model: input.model } : {}), ...(input.readAloud !== undefined ? { readAloud: !!input.readAloud } : {}) });
         const next = ctx.tasks.list().find((x) => x.id === t.id);
-        return { ok: true, id: t.id, name: t.name, when: t.when, nextRun: next ? next.nextRun : null };
+        return { ok: true, id: t.id, name: t.name, when: t.when, nextRun: next ? next.nextRun : null, ...(note ? { note } : {}) };
       } catch (err) {
         return { error: err.message };
       }

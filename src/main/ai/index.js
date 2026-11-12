@@ -880,13 +880,21 @@ class AiService {
     if (mode === 'allow') return true;
     if (mode === 'deny') return false;
     const win = this.d.getWindow();
-    const summary = JSON.stringify(call.input || {}).slice(0, 300);
+    // The fields that decide what happens come first and in full; the rest is
+    // shortened. (The model picks the key order: a long prompt must not push
+    // "command" or "permission" out of view.)
+    const input = call.input || {};
+    const KEY = ['command', 'args', 'permission', 'url', 'path', 'to', 'when', 'id', 'keys'];
+    const lines = KEY.filter((k) => input[k] !== undefined).map((k) => `${k}: ${typeof input[k] === 'string' ? input[k] : JSON.stringify(input[k])}`);
+    const rest = Object.fromEntries(Object.entries(input).filter(([k]) => !KEY.includes(k)));
+    if (Object.keys(rest).length) lines.push(JSON.stringify(rest).slice(0, 300));
+    const sensitive = require('./tools').categoryOf(call.name) === 'sensitive';
     const { response } = await dialog.showMessageBox(win && !win.isDestroyed() ? win : undefined, {
       type: 'question',
-      title: 'AI assistant wants to act',
+      title: sensitive ? 'AI assistant wants to read or remember something' : 'AI assistant wants to act',
       message: `Allow the assistant to run "${call.name}"?`,
-      detail: summary,
-      buttons: ['Allow once', 'Always allow (change in Settings)', 'Deny'],
+      detail: lines.join('\n'),
+      buttons: ['Allow once', 'Always allow everything (change in Settings > AI)', 'Deny'],
       defaultId: 0, cancelId: 2, noLink: true
     });
     if (response === 1) this.d.updateSettings({ ai: { permission: 'allow' } });

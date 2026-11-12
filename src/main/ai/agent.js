@@ -252,6 +252,9 @@ async function runTurn({ provider, model, conversation, ctx, permit, emit, signa
       const invalid = offered ? tools.validateInput(call.name, call.input) : `${call.name} is not available for work requested by another device's assistant (it would act on this desktop). Answer with what you can find instead.`;
       let callKey = '';
       try { callKey = `${call.name}|${JSON.stringify(call.input || {})}`; } catch { callKey = ''; }
+      // A read repeated with nothing changed in between is refused (small
+      // models loop on it); after any action the memory resets, so reading a
+      // page again after clicking or navigating works.
       const repeat = !invalid && callKey && tools.categoryOf(call.name) === 'read' && seen.has(callKey);
       if (repeat) {
         content = `Already done earlier in this request (step ${seen.get(callKey)}); its result is above. Do not repeat it: use what you have, or give your answer.`;
@@ -281,6 +284,7 @@ async function runTurn({ provider, model, conversation, ctx, permit, emit, signa
         }
       }
       if (callKey && !repeat && !invalid) seen.set(callKey, steps);
+      if (!invalid && tools.categoryOf(call.name) !== 'read') seen.clear();      // something changed: lookups may differ now
       results.push({ id: call.id, name: call.name, content, isError, ...(images ? { images } : {}) });
       emit({ type: 'tool', id: call.id, name: call.name, input: call.input, ok: !isError, result: content.slice(0, 2000), image: images ? `data:${images[0].mime};base64,${images[0].data}` : null });
     }

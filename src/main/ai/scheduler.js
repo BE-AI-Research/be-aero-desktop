@@ -420,7 +420,9 @@ class TaskScheduler {
     if (this.running || !this.queue.length) return;
     const id = this.queue.shift();
     this.queued.delete(id);
-    await this.execute(id, { scheduled: true });
+    // A queued "Run now" runs even when it is not due.
+    const manual = !!(this.manual && this.manual.delete(id));
+    await this.execute(id, { scheduled: !manual });
     this.drain();
   }
 
@@ -527,8 +529,15 @@ class TaskScheduler {
     if (own && this.deps.owns && !this.deps.owns(own)) return false;    // runs on its own device
     if (this.running && this.running.id === id) return { error: 'already running' };
     if (!this.tasks().some((t) => t.id === id)) return { error: 'no such task' };
-    if (this.running) { this.queue.unshift(id); this.queued.add(id); return { queued: true }; }
-    return this.execute(id, { scheduled: false });
+    if (this.running) {
+      if (!this.manual) this.manual = new Set();
+      this.manual.add(id);
+      if (!this.queued.has(id)) { this.queue.unshift(id); this.queued.add(id); }
+      return { queued: true };
+    }
+    const r = await this.execute(id, { scheduled: false });
+    this.drain();                                    // tasks that came due meanwhile
+    return r;
   }
 
   async execute(id, { scheduled }) {
