@@ -75,7 +75,8 @@
       const b = document.createElement('button');
       b.className = `files-place${cur && (cur.path === p.path || (p.kind === 'pool' && cur.inPool && cur.path.startsWith(p.path))) ? ' on' : ''}`;
       b.title = p.path;
-      b.innerHTML = `<span class="g">${GLYPH[p.kind] || GLYPH.folder}</span><span class="n">${esc(p.name)}</span>`;
+      b.innerHTML = `<span class="g">${p.relay ? '\u{1F5C4}️' : (GLYPH[p.kind] || GLYPH.folder)}</span><span class="n">${esc(p.name)}</span>`;
+      if (p.relay) b.title = `${p.name}: Shared storage and the File Pool copy (encrypted)`;
       b.addEventListener('click', () => go(p.path));
       if (p.kind === 'network') {
         if (p.status && p.status !== 'OK') { b.classList.add('off'); b.title = `${p.remote} - ${p.status}`; }
@@ -588,6 +589,18 @@
     previewEl = root.querySelector('.files-preview');
     wire();
     if (aero.onFilesChanged) aero.onFilesChanged(({ dir }) => { if (cur && dir === cur.path) softRefresh(); });
+    // Devices (and the relay) coming online or going: the places list follows.
+    if (aero.onDevicesChanged) {
+      let last = '';
+      let t = null;
+      aero.onDevicesChanged((st) => {
+        const key = ((st && st.peers) || []).filter((p) => p.online).map((p) => p.id).sort().join(',');
+        if (key === last) return;
+        last = key;
+        clearTimeout(t);
+        t = setTimeout(reloadPlaces, 400);
+      });
+    }
     const s = (await aero.getSettings()).files || {};
     showHidden = !!s.showHidden;
     view = s.view === 'grid' ? 'grid' : 'list';

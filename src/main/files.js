@@ -115,7 +115,7 @@ class FileService {
       }
     }
     for (const n of net) out.push({ id: `net-${n.remote}`, name: n.letter ? `${n.name} (${n.letter})` : n.name, path: n.path, remote: n.remote, status: n.status, kind: 'network' });
-    for (const d of (this.remote ? this.remote.devices() : [])) out.push({ id: `dev-${d.id}`, name: d.name, path: `aero://${d.id}`, kind: 'device' });
+    for (const d of (this.remote ? this.remote.devices() : [])) out.push({ id: `dev-${d.id}`, name: d.name, path: `aero://${d.id}`, kind: 'device', ...(d.relay ? { relay: true } : {}) });
     return out;
   }
 
