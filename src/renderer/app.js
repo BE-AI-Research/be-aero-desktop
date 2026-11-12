@@ -83,6 +83,7 @@
   // to the layout system so it gets a resize grip and remembered geometry.
   if (window.AeroAi) AeroAi.init({ aero });
   if (window.AeroMedia) AeroMedia.init({ aero });
+  if (window.AeroSound) AeroSound.init({ aero });
   if (window.AeroPower) AeroPower.init({ aero });
   if (window.AeroUac) AeroUac.init({ aero });
   if (window.AeroTrash) AeroTrash.init({ aero });
@@ -255,8 +256,8 @@
   // ---------------------------------------------------------------
   // Search widget: typing hands off to the Spotlight launcher window
   // ---------------------------------------------------------------
-  const WIDGET_GLYPH = { search: '\uD83D\uDD0D', clock: '\uD83D\uDD52', weather: '\u26C5', telemetry: '\uD83D\uDCCA', media: '\uD83C\uDFB5', scratchpad: '\uD83D\uDCDD', files: '\uD83D\uDCC1' };
-  const WIDGET_NAME = { search: 'Search', clock: 'Chronometer', weather: 'Weather', telemetry: 'System telemetry', media: 'Media controller', scratchpad: 'Scratchpad', files: 'Files' };
+  const WIDGET_GLYPH = { search: '\uD83D\uDD0D', clock: '\uD83D\uDD52', weather: '\u26C5', telemetry: '\uD83D\uDCCA', media: '\uD83C\uDFB5', sound: '\uD83D\uDD0A', scratchpad: '\uD83D\uDCDD', files: '\uD83D\uDCC1' };
+  const WIDGET_NAME = { search: 'Search', clock: 'Chronometer', weather: 'Weather', telemetry: 'System telemetry', media: 'Media controller', sound: 'Sound', scratchpad: 'Scratchpad', files: 'Files' };
   let voiceNames = null;   // TTS voices, filled lazily (used by applySettings before the voice section below)
   const searchInput = $('search-input');
   async function refreshHotkeyLabel() {
@@ -533,7 +534,7 @@
     b.addEventListener('click', (e) => { e.stopPropagation(); aero.setSettings({ widgetMinimized: { [wid]: true } }); });
     // A widget with its own header row (the file browser) gets the button
     // as the last one in that row, not floating over its other buttons.
-    const head = el.querySelector(':scope > .files-head');
+    const head = el.querySelector(':scope > .files-head, :scope > .sound-head');
     if (head) head.appendChild(b); else el.appendChild(b);
   }
 

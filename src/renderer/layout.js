@@ -5,7 +5,7 @@
 (function () {
   'use strict';
 
-  const DEFAULT_H = { toolbar: 30, search: 48, clock: 304, weather: 144, telemetry: 220, tasks: 64, media: 160, scratchpad: 224, files: 380 };
+  const DEFAULT_H = { toolbar: 30, search: 48, clock: 304, weather: 144, telemetry: 220, tasks: 64, media: 160, sound: 220, scratchpad: 224, files: 380 };
   const MIN = {
     toolbar: [180, 30], search: [200, 44], clock: [150, 150], weather: [220, 110],
     telemetry: [200, 130], tasks: [140, 54], media: [200, 110], scratchpad: [200, 120],

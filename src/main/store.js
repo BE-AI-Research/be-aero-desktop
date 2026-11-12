@@ -101,6 +101,7 @@ const DEFAULTS = {
     telemetry: true,
     tasks: true,
     media: true,
+    sound: true,             // sound mixer + Bluetooth (sound.js)
     scratchpad: true,
     files: true,             // file browser: on, but parked in the dock by default (widgetMinimized)
     ai: true

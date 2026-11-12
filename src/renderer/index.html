@@ -66,6 +66,9 @@
     <!-- Widget: Media controller (rendered by media-view.js) -->
     <section class="widget widget-hit media-widget" data-widget="media"></section>
 
+    <!-- Widget: Sound mixer + Bluetooth (rendered by sound-view.js) -->
+    <section class="widget widget-hit sound-widget" data-widget="sound"></section>
+
     <!-- Widget: Application dock (rendered by tasks-view.js) -->
     <section class="widget widget-hit tasks-widget" data-widget="tasks">
       <div id="task-list" class="dock-bar"></div>
@@ -507,6 +510,7 @@
         <label class="check"><input type="checkbox" data-toggle="telemetry"> System telemetry</label>
         <label class="check"><input type="checkbox" data-toggle="tasks"> Application dock</label>
         <label class="check"><input type="checkbox" data-toggle="media"> Media controller (what is playing, play/pause, volume)</label>
+        <label class="check"><input type="checkbox" data-toggle="sound"> Sound (output device, each app's volume, Bluetooth devices)</label>
         <div id="dock-helper-row" class="hidden">
           <div id="dock-helper-status" class="hint"></div>
           <button id="btn-dock-helper" class="btn-small">Install GNOME dock helper</button>
@@ -617,6 +621,7 @@
   <script src="uac-view.js"></script>
   <script src="trash-view.js"></script>
   <script src="ai-widgets-view.js"></script>
+  <script src="sound-view.js"></script>
   <script src="devices-view.js"></script>
   <script src="files-view.js"></script>
   <script src="layout.js"></script>

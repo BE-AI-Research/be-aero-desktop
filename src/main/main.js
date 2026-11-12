@@ -770,6 +770,7 @@ function buildMenuTemplate() {
       })) },
       widgetItem('Scratchpad', 'scratchpad'),
       widgetItem('Files', 'files'),
+      widgetItem('Sound', 'sound'),
       widgetItem('AI chat', 'ai'),
       // Plugins and web widgets are widgets too - individually toggleable
       // from the same place.
@@ -845,6 +846,36 @@ function buildMenuTemplate() {
 
 // Clipboard to and from my devices: off until turned on in Settings > Devices.
 const clipboardOn = () => (((store.get('devices') || {}).sync || {}).clipboard === true);
+
+// Sound widget: mixer + Bluetooth (sound.js). The helper starts on first use.
+let soundService = null;
+const sound = () => (soundService || (soundService = require('./sound').createSound()));
+const soundCall = (fn) => async (_e, ...args) => {
+  const s = sound();
+  if (!s) return { error: 'Sound controls are not available on this system.' };
+  try { return { result: await fn(s, ...args) }; } catch (err) { return { error: String(err && err.message || err) }; }
+};
+ipcMain.handle('sound:state', async () => {
+  const s = sound();
+  if (!s) return { error: 'Sound controls are not available on this system.', devices: [], sessions: [] };
+  try { return await s.state(); } catch (err) { return { error: String(err && err.message || err), devices: [], sessions: [] }; }
+});
+ipcMain.handle('sound:set', soundCall((s, what, id, value) => {
+  if (what === 'master') return s.setMaster(Number(value));
+  if (what === 'master-mute') return s.muteMaster(!!value);
+  if (what === 'app') return s.setApp(String(id), Number(value));
+  if (what === 'app-mute') return s.muteApp(String(id), !!value);
+  if (what === 'default') return s.setDefault(String(id));
+  throw new Error('unknown setting');
+}));
+ipcMain.handle('sound:bt', soundCall((s, what, id, on) => {
+  if (what === 'state') return s.bluetooth();
+  if (what === 'connect') return s.btConnect(String(id), !!on);
+  if (what === 'power') return s.btPower(!!on);
+  if (what === 'settings') return s.openBluetoothSettings();
+  throw new Error('unknown request');
+}));
+app.on('will-quit', () => { if (soundService) soundService.destroy(); });
 
 // Clicking another app's notification brings that app up.
 // Windows: the toast's own link (activationType="protocol"), else an open
