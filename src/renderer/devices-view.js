@@ -12,7 +12,8 @@
     ['state', 'Synced state', 'Notes, theme, pins, conversations, tasks and web widgets'],
     ['aiBus', 'AI requests', 'Its assistant can send this one tasks, requests and questions'],
     ['notify', 'Notifications', 'Send notifications here'],
-    ['clipboard', 'Clipboard', 'Send things to this clipboard']
+    ['clipboard', 'Clipboard', 'Send things to this clipboard'],
+    ['media', 'Media & volume', 'See what plays here and control it, the volume and the mixer']
   ];
   let codeTimer = null;
 

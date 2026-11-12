@@ -1,5 +1,6 @@
 // BE-Aero Desktop - media controller widget: what is playing anywhere on the
-// machine, with transport and volume controls. Polls main while visible.
+// machine - or on another of my devices, picked from the dropdown - with
+// transport and volume controls. Polls main while visible.
 (function () {
   'use strict';
 
@@ -22,6 +23,8 @@
   let clock = { position: 0, duration: 0, playing: false, rate: 1, at: 0, canSeek: false };
   let scrub = null;       // { pct } while the user drags the thumb
   let raf = 0;
+  let picker = null;      // device dropdown (device-picker.js); '' = this device
+  const dev = () => (picker ? picker.value() : '');
 
   const esc = (s) => String(s || '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
@@ -62,6 +65,7 @@
     titleEl.title = info.title || '';
     subEl.textContent = [info.artist, info.album].filter(Boolean).join(' · ');
     const parts = [];
+    if (dev() && picker) parts.push(`on ${picker.name(dev())}`);
     if (info.app) parts.push(appName(info.app));
     if (typeof info.volume === 'number') parts.push(`vol ${info.volume}%${info.muted ? ' (muted)' : ''}`);
     appEl.textContent = parts.join(' · ');
@@ -134,7 +138,7 @@
       clock = { ...clock, position: target, at: performance.now() };
       paintProgress();
       tick();
-      try { await aero.mediaSeek(target); } catch { /* ignore */ }
+      try { await aero.mediaSeek(target, dev()); } catch { /* ignore */ }
       setTimeout(refresh, 700);
     };
     trackEl.addEventListener('pointermove', move);
@@ -144,7 +148,8 @@
 
   async function refresh() {
     if (!root || root.classList.contains('hidden') || document.hidden) return;
-    try { render(await aero.mediaInfo()); } catch { /* main busy */ }
+    const d = dev();
+    try { const info = await aero.mediaInfo(d); if (d === dev()) render(info); } catch { /* main busy */ }
   }
 
   function schedule() {
@@ -154,7 +159,7 @@
   }
 
   async function act(name) {
-    try { await aero.mediaAction(name); } catch { /* ignore */ }
+    try { await aero.mediaAction(name, dev()); } catch { /* ignore */ }
     setTimeout(refresh, 350);
   }
 
@@ -170,6 +175,10 @@
         <button class="icon-btn media-min" title="Minimize to the dock">&#8212;</button>
       </div>
       <div class="media-body"></div>`);
+    if (window.AeroDevicePicker && aero.mediaDevices) {
+      picker = AeroDevicePicker.create({ aero, key: 'media', onChange: () => { render({ status: 'none', available: true, hint: 'Asking…' }); refresh(); } });
+      widget.querySelector('.media-min').before(picker.el);
+    }
     widget.querySelector('.media-min').addEventListener('click', (e) => {
       e.stopPropagation();
       aero.setSettings({ widgetMinimized: { media: true } });

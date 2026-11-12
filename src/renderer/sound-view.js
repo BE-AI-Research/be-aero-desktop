@@ -1,5 +1,7 @@
 // Sound widget: output device, master volume, a slider per app playing
 // sound, and a Bluetooth panel (radio, paired devices, connect/disconnect).
+// The dropdown picks the device: this one, another of mine (its mixer, over
+// the mesh), or "All devices" (each device's volume, side by side).
 // Data comes from main (sound.js): Core Audio on Windows, pactl and
 // bluetoothctl on Linux.
 (function () {
@@ -13,6 +15,9 @@
   let bt = null;
   const busy = new Set();          // ids being dragged or changed: refresh leaves them alone
   const iconCache = new Map();
+  let picker = null;
+  const dev = () => (picker ? picker.value() : '');
+  const isAll = () => !!picker && dev() === AeroDevicePicker.ALL;
 
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const SPEAKER = (muted) => `<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path d="M4 9h4l5-4v14l-5-4H4z" fill="currentColor" opacity=".9"/>${muted ? '<path d="M16 9l5 6M21 9l-5 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>' : '<path d="M16 8.5a5 5 0 0 1 0 7M18.5 6a8.5 8.5 0 0 1 0 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>'}</svg>`;
@@ -63,16 +68,20 @@
     if (!root || !state) return;
     const body = root.querySelector('.sound-mixer');
     if (state.error) { body.innerHTML = `<div class="sound-empty">${esc(state.error)}</div>`; return; }
+    const d0 = dev();
     for (const e of body.querySelectorAll('.sound-empty:not(.sound-empty-apps)')) e.remove();   // "Starting…" 
     // Device picker
     const sel = root.querySelector('.sound-device');
-    if (!busy.has('device')) {
+    sel.classList.toggle('hidden', !!state.all);
+    root.querySelector('.sound-bt-btn').classList.toggle('hidden', !!d0);      // Bluetooth: this device only
+    if (!busy.has('device') && !state.all) {
       sel.innerHTML = state.devices.map((d) => `<option value="${esc(d.id)}"${d.default ? ' selected' : ''}>${esc(d.name)}</option>`).join('');
       sel.disabled = state.devices.length < 2;
     }
     // Master and apps: rebuild only what is not being dragged.
     const keyOf = (s) => `app:${s.id}`;
-    const want = ['master', ...state.sessions.map(keyOf)];
+    const devKey = (d) => `dev:${d.id || 'self'}`;
+    const want = state.all ? state.all.map(devKey) : ['master', ...state.sessions.map(keyOf)];
     for (const r of [...body.querySelectorAll('.sound-row')]) if (!want.includes(r.dataset.key)) r.remove();
     const put = (key, cls, icon, name, vol, muted, onVol, onMute) => {
       let row = body.querySelector(`.sound-row[data-key="${CSS.escape(key)}"]`);
@@ -87,15 +96,31 @@
       if (row) row.replaceWith(fresh); else body.appendChild(fresh);
       return fresh;
     };
+    // All devices: one volume per device.
+    if (state.all) {
+      for (const d of state.all) {
+        const key = devKey(d);
+        if (d.error || !d.master) {
+          let row = body.querySelector(`.sound-row[data-key="${CSS.escape(key)}"]`);
+          if (!row) { row = document.createElement('div'); row.className = 'sound-row sound-row-off'; row.dataset.key = key; body.appendChild(row); }
+          row.innerHTML = `<span class="sound-ico">${SPEAKER(true)}</span><span class="sound-name">${esc(d.name)}</span><span class="sound-off-why">${esc(d.error || 'no volume control')}</span>`;
+          continue;
+        }
+        put(key, `master${d.self ? '' : ' remote'}`, '', d.name, d.master.volume, d.master.mute,
+          (v) => aero.soundSet('master', null, v, d.id), (m) => aero.soundSet('master-mute', null, m, d.id));
+      }
+      const e = body.querySelector('.sound-empty-apps'); if (e) e.remove();
+      return;
+    }
     if (state.master) {
-      put('master', 'master', '', 'Volume', state.master.volume, state.master.mute,
-        (v) => aero.soundSet('master', null, v), (m) => aero.soundSet('master-mute', null, m));
+      put('master', 'master', '', d0 && picker ? `Volume on ${picker.name(d0)}` : 'Volume', state.master.volume, state.master.mute,
+        (v) => aero.soundSet('master', null, v, d0), (m) => aero.soundSet('master-mute', null, m, d0));
     }
     const sessions = state.sessions.filter((s) => !s.system || state.sessions.length > 0);
     for (const s of sessions) {
       const row = put(keyOf(s), `app${s.active ? ' playing' : ''}`, `<span class="sound-letter">${esc((s.name || '?').slice(0, 1).toUpperCase())}</span>`, s.name, s.volume, s.mute,
-        (v) => aero.soundSet('app', s.id, v), (m) => aero.soundSet('app-mute', s.id, m));
-      if (s.exe && row && !row.dataset.iconDone) {
+        (v) => aero.soundSet('app', s.id, v, d0), (m) => aero.soundSet('app-mute', s.id, m, d0));
+      if (s.exe && row && !row.dataset.iconDone && !d0) {                         // icons: from this device's files
         row.dataset.iconDone = '1';
         iconFor(s.exe).then((url) => { if (url && row.isConnected) row.querySelector('.sound-ico').innerHTML = `<img src="${esc(url)}" alt="">`; });
       }
@@ -110,7 +135,22 @@
 
   async function refresh() {
     if (!visible()) return;
-    try { state = await aero.soundState(); } catch (err) { state = { error: err.message }; }
+    const d = dev();
+    let next;
+    if (isAll()) {
+      const list = picker.devices();
+      const all = await Promise.all(list.map(async (x) => {
+        try {
+          const s = await aero.soundState(x.id);
+          return { id: x.id, name: x.self ? `${x.name} (this device)` : x.name, self: !!x.self, master: s && !s.error ? s.master : null, error: s && s.error ? s.error : '' };
+        } catch (err) { return { id: x.id, name: x.name, error: err.message }; }
+      }));
+      next = { all, devices: [], sessions: [] };
+    } else {
+      try { next = await aero.soundState(d); } catch (err) { next = { error: err.message }; }
+    }
+    if (d !== dev()) return;                           // the dropdown moved on meanwhile
+    state = next;
     if (state && state.error && /did not answer/.test(state.error)) state.error = 'Starting the sound helper…';
     render();
   }
@@ -169,6 +209,7 @@
     root.insertAdjacentHTML('afterbegin', `
       <div class="sound-head">
         <h3 class="widget-title">SOUND</h3>
+        <span class="sound-pick"></span>
         <button class="icon-btn sound-bt-btn" title="Bluetooth devices">${BT_ICON}</button>
       </div>
       <select class="sound-device" title="Output device"></select>
@@ -177,7 +218,21 @@
     const sel = root.querySelector('.sound-device');
     sel.addEventListener('focus', () => busy.add('device'));
     sel.addEventListener('blur', () => busy.delete('device'));
-    sel.addEventListener('change', async () => { await aero.soundSet('default', sel.value); busy.delete('device'); sel.blur(); setTimeout(refresh, 300); });
+    sel.addEventListener('change', async () => { await aero.soundSet('default', sel.value, null, dev()); busy.delete('device'); sel.blur(); setTimeout(refresh, 300); });
+    if (window.AeroDevicePicker && aero.mediaDevices) {
+      picker = AeroDevicePicker.create({
+        aero, key: 'sound', all: true,
+        onChange: () => {
+          // A different device: start the mixer over, and Bluetooth stays with this one.
+          busy.clear();
+          root.querySelector('.sound-mixer').innerHTML = '<div class="sound-empty">Asking…</div>';
+          const btBox = root.querySelector('.sound-bt');
+          if (dev() && !btBox.classList.contains('hidden')) toggleBt();
+          refresh();
+        }
+      });
+      root.querySelector('.sound-pick').replaceWith(picker.el);
+    } else root.querySelector('.sound-pick').remove();
     root.querySelector('.sound-bt-btn').addEventListener('click', (e) => { e.stopPropagation(); toggleBt(); });
     refresh();
     timer = setInterval(refresh, 2000);

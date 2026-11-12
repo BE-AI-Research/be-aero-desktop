@@ -948,19 +948,70 @@ ipcMain.handle('widgets:delete', async (_e, kind, id) => {
   if (kind === 'web') { updateSettings({ webWidgets: (store.get('webWidgets') || []).filter((w) => w.id !== id) }); return true; }
   return false;
 });
-ipcMain.handle('sound:state', async () => {
+ipcMain.handle('sound:state', async (_e, dev) => {
+  if (dev) {
+    try { return await meshCall(String(dev), 'sound.state', {}, 20000); } catch (err) { return { error: String(err && err.message || err), devices: [], sessions: [] }; }
+  }
   const s = sound();
   if (!s) return { error: 'Sound controls are not available on this system.', devices: [], sessions: [] };
   try { return await s.state(); } catch (err) { return { error: String(err && err.message || err), devices: [], sessions: [] }; }
 });
-ipcMain.handle('sound:set', soundCall((s, what, id, value) => {
+ipcMain.handle('sound:set', async (e, what, id, value, dev) => {
+  if (!dev) return soundSetLocal(e, what, id, value);
+  try { return { result: await meshCall(String(dev), 'sound.set', { what: String(what), id: id == null ? null : String(id), value }) }; } catch (err) { return { error: String(err && err.message || err) }; }
+});
+const soundSetLocal = soundCall((s, what, id, value) => {
   if (what === 'master') return s.setMaster(Number(value));
   if (what === 'master-mute') return s.muteMaster(!!value);
   if (what === 'app') return s.setApp(String(id), Number(value));
   if (what === 'app-mute') return s.muteApp(String(id), !!value);
   if (what === 'default') return s.setDefault(String(id));
   throw new Error('unknown setting');
-}));
+});
+
+// The devices whose media and volume can be controlled from here: this one
+// and my other devices that are connected now (live control needs a direct link).
+function controlDevices() {
+  const mesh = deviceService && deviceService.mesh;
+  const self = { id: '', name: (store.get('devices') || {}).name || require('os').hostname(), self: true };
+  if (!mesh) return [self];
+  return [self, ...[...mesh.peers.values()].filter((p) => p.role !== 'relay' && mesh.conns.has(p.id))
+    .map((p) => ({ id: p.id, name: p.label || p.name || p.id.slice(0, 7) }))];
+}
+function meshCall(dev, op, args, timeout = 10000) {
+  const mesh = deviceService && deviceService.mesh;
+  if (!mesh) return Promise.reject(new Error('Device connections are off.'));
+  if (!mesh.conns.has(dev)) return Promise.reject(new Error('That device is not connected right now.'));
+  return mesh.request(dev, op, args, timeout).catch((err) => {
+    if (/unknown request/.test(String(err && err.message))) throw new Error('That device needs a newer BE-Aero before it can be controlled from here.');
+    throw err;
+  });
+}
+// Answering: my media and mixer for my other devices (the "media" permission).
+function attachMedia(mesh) {
+  const crypto = require('crypto');
+  mesh.handle('media.info', 'media', async (a) => {
+    const r = await mediaCtl.info();
+    if (r && r.thumb) {
+      const key = crypto.createHash('sha1').update(r.thumb).digest('hex').slice(0, 16);
+      if (a && a.thumbKey === key) { delete r.thumb; r.thumbSame = true; }
+      r.thumbKey = key;
+    }
+    return r;
+  });
+  mesh.handle('media.action', 'media', async (a) => mediaCtl.action(String((a && a.name) || '')));
+  mesh.handle('media.seek', 'media', async (a) => mediaCtl.seek(Number(a && a.seconds)));
+  mesh.handle('sound.state', 'media', async () => {
+    const s = sound();
+    if (!s) return { error: 'Sound controls are not available on that device.', devices: [], sessions: [] };
+    return s.state();
+  });
+  mesh.handle('sound.set', 'media', async (a) => {
+    const r = await soundSetLocal(null, a && a.what, a && a.id, a && a.value);
+    if (r && r.error) throw new Error(r.error);
+    return r ? r.result : false;
+  });
+}
 ipcMain.handle('sound:bt', soundCall((s, what, id, on) => {
   if (what === 'state') return s.bluetooth();
   if (what === 'connect') return s.btConnect(String(id), !!on);
@@ -2201,9 +2252,21 @@ app.whenReady().then(() => {
 
   // OS-wide media controller (widget + AI tools) and offline voice input.
   mediaCtl = new (require('./media').MediaController)();
-  ipcMain.handle('media:info', () => mediaCtl.info());
-  ipcMain.handle('media:action', (_e, name) => mediaCtl.action(String(name || '')));
-  ipcMain.handle('media:seek', (_e, seconds) => mediaCtl.seek(Number(seconds)));
+  // Media and the sound mixer, here or on another of my devices (dev = its id).
+  const remoteThumbs = new Map();     // device id -> { key, thumb }: album art is sent once
+  ipcMain.handle('media:devices', () => controlDevices());
+  ipcMain.handle('media:info', async (_e, dev) => {
+    if (!dev) return mediaCtl.info();
+    try {
+      const memo = remoteThumbs.get(dev) || {};
+      const r = await meshCall(String(dev), 'media.info', { thumbKey: memo.key || '' }, 8000);
+      if (r && r.thumbSame) r.thumb = memo.thumb || '';
+      else if (r) remoteThumbs.set(dev, { key: r.thumbKey || '', thumb: r.thumb || '' });
+      return r;
+    } catch (err) { return { available: false, status: 'none', remote: true, hint: String(err && err.message || err) }; }
+  });
+  ipcMain.handle('media:action', (_e, name, dev) => (dev ? meshCall(String(dev), 'media.action', { name: String(name || '') }).catch(() => false) : mediaCtl.action(String(name || ''))));
+  ipcMain.handle('media:seek', (_e, seconds, dev) => (dev ? meshCall(String(dev), 'media.seek', { seconds: Number(seconds) }).catch(() => false) : mediaCtl.seek(Number(seconds))));
   whisper = new (require('./whisper').Whisper)({ dir: path.join(app.getPath('userData'), 'whisper') });
   piper = new (require('./piper').Piper)({ dir: path.join(app.getPath('userData'), 'piper') });
   voice = new (require('./voice').Voice)({
@@ -2604,7 +2667,7 @@ app.whenReady().then(() => {
   deviceService = new (require('./mesh/service').DeviceService)({
     userDataDir: app.getPath('userData'), store, getWindow: () => win,
     onStart: (mesh) => {
-      poolSync.attach(mesh); poolSync.start(); remoteFiles.attach(mesh); stateSync.attach(mesh); stateSync.start(); attachWidgetSend(mesh); attachClipboard(mesh);
+      poolSync.attach(mesh); poolSync.start(); remoteFiles.attach(mesh); stateSync.attach(mesh); stateSync.start(); attachWidgetSend(mesh); attachClipboard(mesh); attachMedia(mesh);
       relayClient.attach(mesh);
       relayDrive.attach(mesh);
       // A relay only stores and forwards: it gets none of a device's permissions.

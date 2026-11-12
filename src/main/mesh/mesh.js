@@ -37,7 +37,7 @@ const PROTOCOL = 1;
 
 // What a newly paired device may do. Files are limited to the File Pool by
 // the file service until the user shares more (design: decision 4).
-const DEFAULT_PERMS = Object.freeze({ files: true, pool: true, state: true, aiBus: true, notify: true, clipboard: true });
+const DEFAULT_PERMS = Object.freeze({ files: true, pool: true, state: true, aiBus: true, notify: true, clipboard: true, media: true });
 const PERM_NAMES = Object.keys(DEFAULT_PERMS);
 
 // ------------------------------------------------------------ framing
@@ -132,7 +132,7 @@ class Mesh extends EventEmitter {
     this.discoveryPort = discoveryPort;
     this.discoveryOn = discovery;
     this.log = log;
-    this.peers = new Map((peers.load() || []).map((p) => [p.id, { perms: { ...DEFAULT_PERMS }, addresses: [], ...p }]));
+    this.peers = new Map((peers.load() || []).map((p) => [p.id, { addresses: [], ...p, perms: { ...DEFAULT_PERMS, ...(p.perms || {}) } }]));
     this.conns = new Map();          // peerId -> Conn
     this.handlers = new Map();       // op -> { perm, fn }
     this.nearby = new Map();         // id -> { id, name, address, port, seen }
