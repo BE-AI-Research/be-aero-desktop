@@ -168,6 +168,7 @@ contextBridge.exposeInMainWorld('aero', {
   devicesClosePairing: () => ipcRenderer.invoke('devices:close-pairing'),
   devicesPairWith: (address, code) => ipcRenderer.invoke('devices:pair-with', address, code),
   devicesRemove: (id) => ipcRenderer.invoke('devices:remove', id),
+  devicesSetAddress: (id, address) => ipcRenderer.invoke('devices:set-address', id, address),
   devicesPerms: (id, perms) => ipcRenderer.invoke('devices:perms', id, perms),
   devicesPing: (id) => ipcRenderer.invoke('devices:ping', id),
   devicesCopyId: () => ipcRenderer.invoke('devices:copy-id'),

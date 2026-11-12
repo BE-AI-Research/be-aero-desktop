@@ -79,6 +79,7 @@
         <div class="dev-item-head"><span class="dev-dot${p.online ? ' on' : ''}" title="${p.online ? 'Connected' : 'Not connected'}"></span>
           <span class="dev-item-name" title="${esc(p.id)}">${esc(p.label || p.name)}</span>
           <button class="btn dev-ping" title="Check the connection">Ping</button>
+          <button class="btn dev-addr" title="It moved to another address? Tell this device where it is now">Address…</button>
           <button class="btn dev-remove" title="Unpair this device">Remove</button></div>
         <div class="dev-item-sub">${p.online ? 'Connected' : `Last seen ${ago(p.lastSeen)}`} · ${esc((p.id || '').split('-').slice(0, 2).join('-'))}… ${p.addresses && p.addresses[0] ? `· ${esc(p.addresses[0])}` : ''} <span class="dev-ping-out"></span></div>
         ${p.role === 'relay' ? `<div class="dev-relay"><span class="badge">RELAY SERVER</span> Holds messages, state changes and AI requests for your devices while they are offline - sealed, so it cannot read them. <span class="dev-relay-status"></span></div>` : `<div class="dev-perms">${PERMS.map(([k, label, tip]) => `<label title="${esc(tip)}"><input type="checkbox" data-perm="${k}"${p.perms && p.perms[k] ? ' checked' : ''}> ${label}</label>`).join('')}</div>`}
@@ -97,6 +98,23 @@
       }
       item.querySelector('.dev-share-add').addEventListener('click', () => aero.devicesShareAdd(p.id));
       item.querySelectorAll('.dev-share-x').forEach((b) => b.addEventListener('click', () => aero.devicesShareRemove(p.id, b.dataset.path)));
+      item.querySelector('.dev-addr').addEventListener('click', () => {
+        const sub = item.querySelector('.dev-item-sub');
+        if (item.querySelector('.dev-addr-form')) return;
+        const f = document.createElement('div');
+        f.className = 'dev-addr-form row';
+        f.innerHTML = `<input type="text" spellcheck="false" placeholder="${p.role === 'relay' ? '192.168.1.49:41811' : '192.168.1.20'}" value="${esc((p.addresses && p.addresses[0]) || '')}"><button class="btn">Connect</button>`;
+        sub.after(f);
+        const input = f.querySelector('input');
+        input.focus(); input.select();
+        const go = async () => {
+          const r = await aero.devicesSetAddress(p.id, input.value);
+          const out = item.querySelector('.dev-ping-out');
+          if (r && r.ok) { f.remove(); out.textContent = '· trying the new address…'; } else out.textContent = `· ${(r && r.error) || 'not changed'}`;
+        };
+        f.querySelector('button').addEventListener('click', go);
+        input.addEventListener('keydown', (e) => { if (e.key === 'Enter') go(); if (e.key === 'Escape') f.remove(); });
+      });
       item.querySelector('.dev-ping').addEventListener('click', async () => {
         const out = item.querySelector('.dev-ping-out');
         out.textContent = '· pinging…';

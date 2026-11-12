@@ -174,6 +174,12 @@ class DeviceService {
       }
     });
     ipcMain.handle('devices:remove', (_e, id) => (this.mesh ? this.mesh.removePeer(String(id)) : (this.savePeers(this.loadPeers().filter((p) => p.id !== id)), this.broadcast(), true)));
+    ipcMain.handle('devices:set-address', (_e, id, address) => {
+      if (!this.mesh) return { error: 'Turn on device connections first.' };
+      const m = /^\s*\[?([^\]\s]+?)\]?(?::(\d+))?\s*$/.exec(String(address || ''));
+      if (!m || !/^[A-Za-z0-9.:-]+$/.test(m[1])) return { error: 'Enter an address like 192.168.1.49 or 192.168.1.49:41811' };
+      return this.mesh.setAddress(String(id), m[1], m[2] ? Number(m[2]) : 0) ? { ok: true } : { error: 'No such device.' };
+    });
     ipcMain.handle('devices:perms', (_e, id, perms) => (this.mesh ? this.mesh.setPerms(String(id), perms || {}) : false));
     ipcMain.handle('devices:ping', async (_e, id) => {
       if (!this.mesh) return { error: 'device connections are off' };
