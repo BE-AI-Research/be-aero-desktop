@@ -11,7 +11,8 @@
 //
 // Settings (environment): RELAY_DATA (~/.be-aero-relay), RELAY_PORT (41811),
 // RELAY_ADMIN_PORT (41813, this machine only), RELAY_MAX_GB (2),
-// RELAY_TTL_DAYS (30), RELAY_NAME, RELAY_DISCOVERY (0).
+// RELAY_TTL_DAYS (30), RELAY_NAME, RELAY_DISCOVERY (1: announce on the LAN so
+// devices follow an address change; 0 turns it off).
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -67,7 +68,7 @@ function lanAddresses() {
 }
 
 // The relay itself, without the admin port: used by main() and by tests.
-function createRelay({ dataDir = DATA, port = PORT, name = NAME, maxBytes, ttlMs, discovery = env.RELAY_DISCOVERY === '1', quiet = false } = {}) {
+function createRelay({ dataDir = DATA, port = PORT, name = NAME, maxBytes, ttlMs, discovery = env.RELAY_DISCOVERY !== '0', quiet = false } = {}) {
   const say = quiet ? () => {} : log;
   fs.mkdirSync(dataDir, { recursive: true, mode: 0o700 });
   const identity = loadIdentity(path.join(dataDir, 'identity'), { name });
@@ -85,7 +86,7 @@ function createRelay({ dataDir = DATA, port = PORT, name = NAME, maxBytes, ttlMs
   // presents it is approved - the code is the proof.
   // Storage for my devices (Shared storage, the File Pool copy): encrypted
   // on the devices, opaque here. It shares the size cap with the mailbox.
-  const drive = new DriveStore({ dir: dataDir, budget: () => store.maxBytes - store.used() - drive.used() });
+  const drive = new DriveStore({ dir: dataDir, budget: () => store.maxBytes - store.used() - drive.used(), log: say });
   const mesh = new Mesh({ identity, peers, port, discovery, approvePairing: async () => true, role: 'relay', log: say });
   const paired = (id) => mesh.peers.has(id);
 
@@ -117,12 +118,27 @@ function createRelay({ dataDir = DATA, port = PORT, name = NAME, maxBytes, ttlMs
     return { id: it.meta.id, from: it.meta.from, kind: it.meta.kind, key: it.meta.key, at: it.meta.at, data: it.data.toString('base64') };
   });
   mesh.handle('relay.ack', null, async (a, from) => ({ removed: store.ack(from.id, a.ids) }));
-  mesh.handle('drive.index', null, async () => ({ objects: drive.index(), used: store.used() + drive.used(), maxBytes: store.maxBytes }));
-  mesh.handle('drive.begin', null, async (a) => ({ id: drive.begin(a.meta, a.size) }));
-  mesh.handle('drive.chunk', null, async (a) => ({ ok: drive.chunk(String(a.id), a.offset, a.data) }));
-  mesh.handle('drive.commit', null, async (a, from) => { drive.commit(String(a.id)); say(`stored object ${String(a.id).slice(0, 9)} from ${from.id.slice(0, 7)}`); return { ok: true }; });
+  // Storage. drive.index: everything, or what changed since a sequence
+  // number. Uploads are resumable (drive.status) and committed with the
+  // version they replace (base) - a mismatch is a conflict, not an overwrite.
+  let stored = 0;
+  let storedTimer = null;
+  const noteStored = (from) => {
+    stored++;
+    if (!storedTimer) storedTimer = setTimeout(() => { say(`stored ${stored} object(s) from ${from.slice(0, 7)} (${drive.count()} in all)`); stored = 0; storedTimer = null; }, 10000);
+  };
+  mesh.handle('drive.index', null, async (a) => ({ ...drive.index(a && a.since), used: store.used() + drive.used(), maxBytes: store.maxBytes, version: 2 }));
+  mesh.handle('drive.begin', null, async (a, from) => ({ id: drive.begin(a.meta, a.size, { key: a.key, base: a.base, by: from.id }) }));
+  mesh.handle('drive.status', null, async (a) => drive.status(String(a.id)));
+  mesh.handle('drive.chunk', null, async (a, from) => ({ ok: true, ...drive.chunk(String(a.id), a.offset, a.data, from.id) }));
+  mesh.handle('drive.commit', null, async (a, from) => {
+    const r = drive.commit(String(a.id), { force: !!a.force, asNew: a.asNew || null, by: from.id });
+    if (r.ok && !r.already) noteStored(from.id);
+    return r;
+  });
+  mesh.handle('drive.abort', null, async (a, from) => ({ ok: drive.abort(String(a.id), from.id) }));
   mesh.handle('drive.read', null, async (a) => drive.read(String(a.id), a.offset, a.length));
-  mesh.handle('drive.meta', null, async (a) => ({ ok: drive.setMeta(String(a.id), a.meta) }));
+  mesh.handle('drive.meta', null, async (a) => ({ ok: drive.setMeta(String(a.id), a.meta, a.key) }));
   mesh.handle('drive.remove', null, async (a) => ({ removed: drive.remove(a.ids) }));
 
   mesh.on('online', (id) => { say(`online: ${(mesh.peers.get(id) || {}).name || id}`); setTimeout(() => nudge(id), 1500); });
@@ -135,7 +151,7 @@ function createRelay({ dataDir = DATA, port = PORT, name = NAME, maxBytes, ttlMs
     identity, mesh, store,
     drive,
     async start() { await mesh.start(); sweeper = setInterval(() => { const n = store.sweep(); if (n) say(`expired ${n} item(s)`); drive.sweep(); }, 3600 * 1000); return mesh.port; },
-    stop() { clearInterval(sweeper); mesh.stop(); }
+    stop() { clearInterval(sweeper); drive.flush(); mesh.stop(); }
   };
 }
 

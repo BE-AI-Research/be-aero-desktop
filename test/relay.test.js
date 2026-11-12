@@ -157,3 +157,99 @@ test('relay storage: encrypted Shared storage and the File Pool copy, opened by 
     fs.rmSync(base, { recursive: true, force: true });
   }
 });
+
+test('relay storage: conflicts are settled, never overwritten blindly', async () => {
+  const { RelayDrive } = require('../src/main/relay-drive');
+  const { DriveKeyring } = require('../src/main/mesh/drive-crypto');
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'aero-conflict-'));
+  const relay = createRelay({ dataDir: path.join(base, 'relay'), port: 0, discovery: false, quiet: true });
+  const mk = (name) => {
+    const mesh = new Mesh({ identity: loadIdentity(path.join(base, name, 'id'), { name }), peers: memPeers(), port: 0, discovery: false, approvePairing: async () => true });
+    const client = new RelayClient({});
+    client.attach(mesh);
+    const drive = new RelayDrive({ getMesh: () => mesh, relayClient: client, keyring: new DriveKeyring({ file: path.join(base, name, 'keys.json') }), deviceName: () => name });
+    drive.attach(mesh);
+    return { mesh, client, drive };
+  };
+  const a = mk('Desk');
+  const b = mk('Laptop');
+  const file = (n, text) => { const p = path.join(base, n); fs.writeFileSync(p, text); return p; };
+  try {
+    await relay.start(); await a.mesh.start(); await b.mesh.start();
+    await pair(a, b); await pair({ mesh: relay.mesh }, a); await pair({ mesh: relay.mesh }, b);
+    const R = relay.identity.id;
+    await until(() => a.mesh.peers.get(R).role === 'relay' && b.mesh.peers.get(R).role === 'relay' && a.mesh.conns.has(R) && b.mesh.conns.has(R));
+    await a.drive.upload(R, 0, 'plan.txt', file('a1.txt', 'v1'));
+    await until(() => b.drive.keyring.has());
+    // both start from v1 and save at the same time
+    await a.drive.index(R, { fresh: true }); await b.drive.index(R, { fresh: true });
+    const [ra, rb] = await Promise.all([a.drive.upload(R, 0, 'plan.txt', file('a2.txt', 'desk edit')), b.drive.upload(R, 0, 'plan.txt', file('b2.txt', 'laptop edit'))]);
+    const names = (await a.drive.list(R, 0, '')).entries.map((e) => e.name).sort();
+    assert.strictEqual(names.length, 2, `both kept: ${names}`);
+    assert.ok(names.includes('plan.txt'));
+    assert.ok(names.some((n) => /^plan \(conflict (Desk|Laptop) \d{4}-\d\d-\d\d\)\.txt$/.test(n)), names.join(', '));
+    assert.ok([ra, rb].filter((r) => r.conflictCopy).length === 1, 'exactly one became the conflict copy');
+    // the same content from another device is not stored twice
+    const same = await b.drive.upload(R, 0, 'plan.txt', file('b3.txt', (await (async () => { const t = path.join(base, 'cur.txt'); await a.drive.download(R, 0, 'plan.txt', t); return fs.readFileSync(t, 'utf8'); })())));
+    assert.strictEqual(same.skipped, 'same content');
+    // the File Pool copy: the newer file wins, without a conflict copy
+    const old = file('p-old.txt', 'older'); fs.utimesSync(old, new Date(Date.now() - 60000), new Date(Date.now() - 60000));
+    const neu = file('p-new.txt', 'newer');
+    await a.drive.index(R, { fresh: true }); await b.drive.index(R, { fresh: true });
+    await Promise.all([a.drive.upload(R, 1, 'doc.txt', neu), b.drive.upload(R, 1, 'doc.txt', old)]);
+    const pool = (await b.drive.list(R, 1, '')).entries;
+    assert.deepStrictEqual(pool.map((e) => e.name), ['doc.txt']);
+    const t = path.join(base, 'doc-out.txt');
+    await b.drive.download(R, 1, 'doc.txt', t);
+    assert.strictEqual(fs.readFileSync(t, 'utf8'), 'newer');
+  } finally {
+    relay.stop(); a.mesh.stop(); b.mesh.stop(); a.client.stop(); b.client.stop(); a.drive.stop(); b.drive.stop();
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test('relay storage on disk: resumable uploads, one index (fast restart), changes-only reads, old stores converted', () => {
+  const { DriveStore } = require('../relay/drive');
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'aero-drivestore-'));
+  try {
+    const s = new DriveStore({ dir: base });
+    const key = 'a'.repeat(40);
+    const id = s.begin('META1', 10, { key, by: 'DEV' });
+    s.chunk(id, 0, Buffer.from('hello').toString('base64'), 'DEV');
+    assert.deepStrictEqual(s.status(id), { next: 5, size: 10 });
+    assert.throws(() => s.chunk(id, 8, Buffer.from('xx').toString('base64'), 'DEV'), /out of order/);
+    assert.throws(() => s.chunk(id, 5, Buffer.from('world').toString('base64'), 'OTHER'), /not your upload/);
+    // the relay restarts mid-upload: it can resume
+    s.flush();
+    const s2 = new DriveStore({ dir: base });
+    assert.deepStrictEqual(s2.status(id), { next: 5, size: 10 });
+    s2.chunk(id, 5, Buffer.from('world').toString('base64'), 'DEV');
+    assert.deepStrictEqual(s2.commit(id, { by: 'DEV' }), { ok: true });
+    assert.deepStrictEqual(s2.commit(id, { by: 'DEV' }), { ok: true, already: true }, 'a retried commit is fine');
+    const since = s2.index().seq;
+    // a second version without naming the first: a conflict, nothing replaced
+    const id2 = s2.begin('META2', 3, { key, by: 'DEV2' });
+    s2.chunk(id2, 0, Buffer.from('abc').toString('base64'), 'DEV2');
+    const c = s2.commit(id2, { by: 'DEV2' });
+    assert.ok(c.conflict && c.current[0].id === id);
+    // naming it as the base replaces it
+    const id3 = s2.begin('META3', 3, { key, base: id, by: 'DEV2' });
+    s2.chunk(id3, 0, Buffer.from('xyz').toString('base64'), 'DEV2');
+    assert.deepStrictEqual(s2.commit(id3, { by: 'DEV2' }), { ok: true });
+    const d = s2.index(since);
+    assert.deepStrictEqual(d.objects.map((o) => o.id), [id3]);
+    assert.deepStrictEqual(d.removed, [id]);
+    s2.flush();
+    // fast restart from index.json
+    const s3 = new DriveStore({ dir: base });
+    assert.deepStrictEqual(s3.index().objects.map((o) => o.id), [id3]);
+    // an old store (one .meta per object) is converted once
+    const old = path.join(base, 'old');
+    fs.mkdirSync(path.join(old, 'drive'), { recursive: true });
+    fs.writeFileSync(path.join(old, 'drive', 'd0123456789abcdef0123456.meta'), 'OLDMETA');
+    fs.writeFileSync(path.join(old, 'drive', 'd0123456789abcdef0123456.bin'), 'x');
+    const s4 = new DriveStore({ dir: old });
+    assert.deepStrictEqual(s4.index().objects.map((o) => o.meta), ['OLDMETA']);
+    assert.ok(fs.existsSync(path.join(old, 'drive', 'index.json')) && !fs.existsSync(path.join(old, 'drive', 'd0123456789abcdef0123456.meta')));
+  } finally { fs.rmSync(base, { recursive: true, force: true }); }
+});

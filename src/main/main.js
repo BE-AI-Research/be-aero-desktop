@@ -2490,6 +2490,7 @@ app.whenReady().then(() => {
   });
   relayDrive = new (require('./relay-drive').RelayDrive)({
     getMesh: () => (deviceService && deviceService.mesh) || null,
+    deviceName: () => String((store.get('devices') || {}).name || require('os').hostname()),
     relayClient,
     keyring: new (require('./mesh/drive-crypto').DriveKeyring)({
       file: path.join(app.getPath('userData'), 'mesh', 'drive-keys.enc'),
