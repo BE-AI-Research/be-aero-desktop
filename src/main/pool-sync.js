@@ -57,7 +57,9 @@ async function walk(root, rel = '', out = []) {
 
 class PoolSync {
   // { poolDir(), indexFile, deviceName(), trash(path), log, onChange(info) }
-  constructor({ poolDir, indexFile, deviceName = () => 'another device', trash, log = () => {}, onChange = () => {} }) {
+  // shared(): false when this device keeps its File Pool to itself (no syncing either way).
+  constructor({ poolDir, indexFile, deviceName = () => 'another device', trash, log = () => {}, onChange = () => {}, shared = () => true }) {
+    this.shared = shared;
     this.poolDir = poolDir;
     this.indexFile = indexFile;
     this.deviceName = deviceName;
@@ -239,13 +241,15 @@ class PoolSync {
   // ---- wiring
   attach(mesh) {
     this.mesh = mesh;
-    mesh.handle('pool.manifest', 'pool', async () => { await this.scan(); return { entries: this.manifest() }; });
-    mesh.handle('pool.read', 'pool', async (a) => this.read(a.rel, a.offset, a.length));
-    mesh.handle('pool.changed', 'pool', async (_a, from) => { setTimeout(() => this.syncWith(from.id), 300); return { ok: true }; });
+    const off = () => { if (!this.shared()) throw new Error('this device does not share its File Pool'); };
+    mesh.handle('pool.manifest', 'pool', async () => { off(); await this.scan(); return { entries: this.manifest() }; });
+    mesh.handle('pool.read', 'pool', async (a) => { off(); return this.read(a.rel, a.offset, a.length); });
+    mesh.handle('pool.changed', 'pool', async (_a, from) => { off(); setTimeout(() => this.syncWith(from.id), 300); return { ok: true }; });
     mesh.on('online', (id) => { if (this.allowed(id)) setTimeout(() => this.syncWith(id), 1000); });
   }
 
   allowed(peerId) {
+    if (!this.shared()) return false;
     const p = this.mesh && this.mesh.peers.get(peerId);
     return !!(p && p.perms && p.perms.pool);
   }

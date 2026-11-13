@@ -168,6 +168,7 @@
     // Keep an open panel current when widgets change elsewhere.
     if (aero.onAiWidgets) aero.onAiWidgets(() => { if (panel) load(); });
     if (aero.onSettingsChanged) aero.onSettingsChanged(() => { if (panel) load(); });
+    if (aero.onWidgetsAsk) aero.onWidgetsAsk(() => askAssistant());      // from the BE-Aero menu
     window.addEventListener('resize', () => place());
   }
 

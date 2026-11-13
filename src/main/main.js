@@ -803,9 +803,11 @@ function buildMenuTemplate() {
       click: () => spotlight && spotlight.show() },
     { label: 'Settings...', click: () => { showWindow(); win.webContents.send('settings:open'); } },
     { label: 'Check for updates...', click: () => runUpdateCheck({ manual: true }) },
-    { label: 'Create widget from web address...',
-      click: () => { showWindow(); win.webContents.send('settings:open', 'webwidget'); } },
+    widgetsMenuItem(),
     ...clipMenuItems(),
+    { label: 'Share my File Pool with my devices', type: 'checkbox', checked: poolShared(),
+      toolTip: 'Off: this device keeps its File Pool to itself - no syncing, browsing or relay copy - so you can connect to other people\'s devices',
+      click: (item) => setPoolShared(item.checked) },
     { type: 'separator' },
     { label: 'Widgets', submenu: [
       widgetItem('Search bar', 'search'),
@@ -907,10 +909,10 @@ const soundCall = (fn) => async (_e, ...args) => {
 };
 ipcMain.handle('relay:status', () => (relayClient ? relayClient.status() : []));
 
-// The widget tray (dock): the widgets you made - AI widgets (also those made
-// from .html files) and web widgets - with show/hide, open and delete.
-// Built-in widgets are not listed.
-ipcMain.handle('widgets:created', () => {
+// The widget tray (dock, and "Your widgets" in the BE-Aero menu): the
+// widgets you made - AI widgets (also those made from .html files) and web
+// widgets - with show/hide, open and delete. Built-in widgets are not listed.
+function createdWidgets() {
   const out = [];
   for (const w of (aiService && aiService.widgets ? aiService.widgets.list() : [])) {
     out.push({ kind: 'ai', id: w.id, name: w.title, shown: !w.hidden, where: w.dir, sites: (w.approvedHosts || []).length });
@@ -921,17 +923,27 @@ ipcMain.handle('widgets:created', () => {
     out.push({ kind: 'web', id: w.id, name: w.name || host, shown: !w.hidden, where: w.url, shared: !!w.shared });
   }
   return out;
-});
-ipcMain.handle('widgets:toggle', async (_e, kind, id, on) => {
+}
+async function toggleWidget(kind, id, on) {
   if (kind === 'ai' && aiService) return aiService.widgets.setHidden(String(id), !on);
   if (kind === 'web') {
     updateSettings({ webWidgets: (store.get('webWidgets') || []).map((w) => (w.id === id ? { ...w, hidden: !on, ...(on ? { minimized: false } : {}) } : w)) });
     return true;
   }
   return false;
-});
-// Add a widget from the tray: an .html file (copied into AI Widgets), or a web page.
-ipcMain.handle('widgets:add-html', async () => {
+}
+function openWidget(kind, id) {
+  if (kind === 'ai' && aiService) { const w = aiService.widgets.get(String(id)); if (w) { shell.openPath(w.dir); return true; } }
+  if (kind === 'web') { const w = (store.get('webWidgets') || []).find((x) => x.id === id); if (w) return openSafe(w.url); }
+  return false;
+}
+async function deleteWidget(kind, id) {
+  if (kind === 'ai' && aiService) return aiService.widgets.remove(String(id), (dir) => shell.trashItem(dir));
+  if (kind === 'web') { updateSettings({ webWidgets: (store.get('webWidgets') || []).filter((w) => w.id !== id) }); return true; }
+  return false;
+}
+// An .html file -> a widget (copied into AI Widgets).
+async function addHtmlWidget() {
   if (!aiService) return { error: 'Turn on the AI assistant first - widgets made from files live in its folder.' };
   const { canceled, filePaths } = await dialog.showOpenDialog(win, {
     title: 'Make a widget from an HTML file', properties: ['openFile'],
@@ -939,7 +951,10 @@ ipcMain.handle('widgets:add-html', async () => {
   });
   if (canceled || !filePaths || !filePaths[0]) return { canceled: true };
   try { return { ok: true, ...(await aiService.widgets.createFromFile(filePaths[0])) }; } catch (err) { return { error: String(err && err.message || err) }; }
-});
+}
+ipcMain.handle('widgets:created', () => createdWidgets());
+ipcMain.handle('widgets:toggle', (_e, kind, id, on) => toggleWidget(kind, id, on));
+ipcMain.handle('widgets:add-html', () => addHtmlWidget());
 ipcMain.handle('widgets:add-web', async (_e, rawUrl, rawName) => {
   let url = String(rawUrl || '').trim();
   if (!url) return { error: 'Enter the page address.' };
@@ -949,16 +964,77 @@ ipcMain.handle('widgets:add-web', async (_e, rawUrl, rawName) => {
   updateSettings({ webWidgets: [...(store.get('webWidgets') || []), entry] });
   return { ok: true, id: entry.id };
 });
-ipcMain.handle('widgets:open', async (_e, kind, id) => {
-  if (kind === 'ai' && aiService) { const w = aiService.widgets.get(String(id)); if (w) { shell.openPath(w.dir); return true; } }
-  if (kind === 'web') { const w = (store.get('webWidgets') || []).find((x) => x.id === id); if (w && /^https?:/i.test(w.url)) { shell.openExternal(w.url); return true; } }
-  return false;
-});
-ipcMain.handle('widgets:delete', async (_e, kind, id) => {
-  if (kind === 'ai' && aiService) return aiService.widgets.remove(String(id), (dir) => shell.trashItem(dir));
-  if (kind === 'web') { updateSettings({ webWidgets: (store.get('webWidgets') || []).filter((w) => w.id !== id) }); return true; }
-  return false;
-});
+ipcMain.handle('widgets:open', (_e, kind, id) => openWidget(kind, id));
+ipcMain.handle('widgets:delete', (_e, kind, id) => deleteWidget(kind, id));
+
+// The widget tray's icon, for the menu: four tiles, the last one a "+".
+// Drawn as pixels (menus take bitmaps, not SVG); grey reads on light and dark menus.
+let widgetMenuIconCache = null;
+function widgetMenuIcon() {
+  if (widgetMenuIconCache) return widgetMenuIconCache;
+  const draw = (size) => {
+    const buf = Buffer.alloc(size * size * 4);
+    const k = size / 16;
+    const dot = (x, y) => {
+      for (let dy = 0; dy < k; dy++) for (let dx = 0; dx < k; dx++) {
+        const px = Math.floor(x * k + dx); const py = Math.floor(y * k + dy);
+        if (px < 0 || py < 0 || px >= size || py >= size) continue;
+        const i = (py * size + px) * 4;
+        buf[i] = 0x80; buf[i + 1] = 0x80; buf[i + 2] = 0x80; buf[i + 3] = 0xff;
+      }
+    };
+    const box = (x0, y0) => { for (let i = 0; i < 6; i++) { dot(x0 + i, y0); dot(x0 + i, y0 + 5); dot(x0, y0 + i); dot(x0 + 5, y0 + i); } };
+    box(1, 1); box(9, 1); box(1, 9);
+    for (let i = 0; i < 6; i++) { dot(11.5, 9 + i); dot(9 + i, 11.5); }
+    return buf;
+  };
+  const img = nativeImage.createFromBitmap(draw(16), { width: 16, height: 16, scaleFactor: 1 });
+  img.addRepresentation({ scaleFactor: 2, width: 32, height: 32, buffer: draw(32) });
+  widgetMenuIconCache = img;
+  return img;
+}
+
+// "Your widgets" in the BE-Aero menu: the same as the widget tray.
+function widgetsMenuItem() {
+  const list = createdWidgets();
+  const confirmDelete = async (w) => {
+    const { response } = await dialog.showMessageBox(win && !win.isDestroyed() ? win : undefined, {
+      type: 'warning', buttons: ['Delete', 'Cancel'], defaultId: 1, cancelId: 1, noLink: true,
+      message: `Delete the widget "${w.name}"?`,
+      detail: w.kind === 'ai' ? 'Its folder goes to the Recycle Bin / Trash.' : 'It is removed from the desktop.'
+    });
+    if (response === 0) { await deleteWidget(w.kind, w.id); rebuildTrayMenu(); }
+  };
+  return {
+    label: 'Your widgets', icon: widgetMenuIcon(), submenu: [
+      { label: 'Add a widget', submenu: [
+        { label: 'Ask the assistant to make one', click: () => { showWindow(); win.webContents.send('widgets:ask'); } },
+        { label: 'From an HTML file...', click: async () => { const r = await addHtmlWidget(); if (r && r.error) dialog.showMessageBox({ type: 'error', message: 'Could not make a widget', detail: r.error }); rebuildTrayMenu(); } },
+        { label: 'A web page...', click: () => { showWindow(); win.webContents.send('settings:open', 'webwidget'); } }
+      ] },
+      { type: 'separator' },
+      ...(list.length ? list.map((w) => ({
+        label: `${w.name}${w.kind === 'ai' ? '  (AI)' : '  (web)'}${w.shown ? '' : '  - hidden'}`,
+        submenu: [
+          { label: 'Show on the desktop', type: 'checkbox', checked: w.shown, click: async (item) => { await toggleWidget(w.kind, w.id, item.checked); rebuildTrayMenu(); } },
+          { label: w.kind === 'ai' ? 'Open its folder' : 'Open the page in your browser', click: () => openWidget(w.kind, w.id) },
+          { type: 'separator' },
+          { label: 'Delete...', click: () => confirmDelete(w) }
+        ]
+      })) : [{ label: 'None yet', enabled: false }])
+    ]
+  };
+}
+
+// Sharing this device's File Pool with my other devices (sync, browsing,
+// and its copy on a relay). Off: connect to others without sharing it.
+const poolShared = () => (store.get('devices') || {}).poolShared !== false;
+let onPoolSharingChanged = null;
+function setPoolShared(on) {
+  updateSettings({ devices: { poolShared: !!on } });
+  if (onPoolSharingChanged) onPoolSharingChanged(!!on);
+  rebuildTrayMenu();
+}
 ipcMain.handle('sound:state', async (_e, dev) => {
   if (dev) {
     try { return await meshCall(String(dev), 'sound.state', {}, 20000); } catch (err) { return { error: String(err && err.message || err), devices: [], sessions: [] }; }
@@ -2321,6 +2397,7 @@ app.whenReady().then(() => {
   const remoteFiles = new (require('./remote-files').RemoteFiles)({
     getMesh: () => (deviceService && deviceService.mesh) || null,
     poolDir: () => fileService.poolDir(),
+    poolShared,
     cacheDir: path.join(app.getPath('userData'), 'remote-cache'),
     shareStore: { get: (peerId) => { const m = deviceService && deviceService.mesh; const p = m && m.peers.get(peerId); return (p && p.shares) || []; } }
   });
@@ -2657,6 +2734,7 @@ app.whenReady().then(() => {
   // File Pool sync rides on the mesh: it runs while device connections are on.
   const poolListeners = [];
   const poolSync = new (require('./pool-sync').PoolSync)({
+    shared: poolShared,
     poolDir: () => fileService.poolDir(),
     indexFile: path.join(app.getPath('userData'), 'mesh', 'pool-index.json'),
     deviceName: () => String((store.get('devices') || {}).name || require('os').hostname()),
@@ -2681,9 +2759,16 @@ app.whenReady().then(() => {
       file: path.join(app.getPath('userData'), 'mesh', 'drive-keys.enc'),
       protect: { available: () => require('electron').safeStorage.isEncryptionAvailable(), encrypt: (t) => require('electron').safeStorage.encryptString(String(t)), decrypt: (b) => require('electron').safeStorage.decryptString(b) }
     }),
-    pool: { dir: () => fileService.poolDir(), index: () => poolSync.index, onChange: (cb) => poolListeners.push(cb) },
+    pool: { dir: () => fileService.poolDir(), index: () => poolSync.index, onChange: (cb) => poolListeners.push(cb), shared: poolShared },
     log: (m) => console.log('[relay storage]', m)
   });
+  // Sharing the File Pool turned back on: catch up with my devices and the relay now.
+  onPoolSharingChanged = (on) => {
+    if (!on) return;
+    poolSync.announce();
+    if (poolSync.mesh) for (const id of poolSync.mesh.conns.keys()) if (poolSync.allowed(id)) poolSync.syncWith(id);
+    relayDrive.mirrorPool().catch(() => {});
+  };
   remoteFiles.drive = relayDrive;
   deviceService = new (require('./mesh/service').DeviceService)({
     userDataDir: app.getPath('userData'), store, getWindow: () => win,
@@ -2745,6 +2830,12 @@ app.whenReady().then(() => {
     }
   });
   aiService.bus.relay = relayClient;
+  // AI widgets made, hidden or deleted: "Your widgets" in the BE-Aero menu follows.
+  if (aiService.widgets) {
+    const told = aiService.widgets.onChange;
+    let t = null;
+    aiService.widgets.onChange = (list) => { told(list); clearTimeout(t); t = setTimeout(rebuildTrayMenu, 300); };
+  }
   if (deviceService && deviceService.mesh) { aiService.bus.attach(deviceService.mesh); aiService.shared.attach(deviceService.mesh); }
   spotlight.aiEnabled = () => aiService.enabled();
   spotlight.askAi = (q) => aiService.askFromSearch(q);

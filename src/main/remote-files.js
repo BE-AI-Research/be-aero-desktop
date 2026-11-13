@@ -90,7 +90,8 @@ async function confine(rootDir, rel) {
 
 class RemoteFiles {
   // { getMesh(), poolDir(), cacheDir, shareStore: { get(peerId) -> [{ path, name }] } }
-  constructor({ getMesh, poolDir, cacheDir, shareStore }) {
+  constructor({ getMesh, poolDir, cacheDir, shareStore, poolShared = () => true }) {
+    this.poolShared = poolShared;
     this.getMesh = getMesh;
     this.poolDir = poolDir;
     this.cacheDir = cacheDir;
@@ -111,11 +112,13 @@ class RemoteFiles {
   // ---- serving
   roots(peerId) {
     const extra = (this.shareStore.get(peerId) || []).filter((s) => s && s.path);
-    return [{ name: 'File Pool', path: this.poolDir(), kind: 'pool' }, ...extra.map((s) => ({ name: s.name || path.basename(s.path), path: s.path, kind: 'folder' }))];
+    // Index 0 is always the File Pool's slot (null while it is not shared), so
+    // the other shared folders keep their numbers.
+    return [this.poolShared() ? { name: 'File Pool', path: this.poolDir(), kind: 'pool' } : null, ...extra.map((s) => ({ name: s.name || path.basename(s.path), path: s.path, kind: 'folder' }))];
   }
 
   attach(mesh) {
-    mesh.handle('files.roots', 'files', async (_a, from) => ({ roots: this.roots(from.id).map((r, i) => ({ index: i, name: r.name, kind: r.kind })) }));
+    mesh.handle('files.roots', 'files', async (_a, from) => ({ roots: this.roots(from.id).map((r, i) => (r ? { index: i, name: r.name, kind: r.kind } : null)).filter(Boolean) }));
     mesh.handle('files.list', 'files', async (a, from) => {
       const root = this.roots(from.id)[Number(a.root)];
       if (!root) throw new Error('no such shared folder');
@@ -138,6 +141,7 @@ class RemoteFiles {
       const results = [];
       const roots = this.roots(from.id);
       for (let i = 0; i < roots.length && results.length < SEARCH_LIMIT; i++) {
+        if (!roots[i]) continue;
         for (const e of await this.namesOf(roots[i].path)) {
           if (!nameMatches(e.name, words)) continue;
           results.push({ root: i, rootName: roots[i].name, rel: e.rel, name: e.name, dir: e.dir });

@@ -389,6 +389,7 @@ class RelayDrive {
   // ---- the File Pool copy: new and changed files go up (a few at a time);
   // a file deleted here goes when the relay's copy is that same version.
   mirrorPool() {
+    if (this.pool && this.pool.shared && !this.pool.shared()) return Promise.resolve();   // kept to this device
     if (this.mirroring) return this.mirroring;
     this.mirroring = this.mirrorNow().catch((err) => this.log(`pool copy: ${err.message}`)).finally(() => { this.mirroring = null; });
     return this.mirroring;
