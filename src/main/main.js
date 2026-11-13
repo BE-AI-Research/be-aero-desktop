@@ -2004,6 +2004,57 @@ function canAutoUpdate() {
   return process.platform === 'win32' && app.isPackaged && !process.env.PORTABLE_EXECUTABLE_DIR;
 }
 
+// Linux: automatic updates through the root helper install-linux.sh puts in
+// /usr/local/sbin. It installs only a published, checksum-verified release
+// by version. Allowed (sudo without a password, for that helper only) once
+// the user turns automatic updates on - pkexec asks for the password then.
+const LINUX_UPDATER = '/usr/local/sbin/be-aero-desktop-update';
+function linuxUpdaterState() {
+  if (process.platform !== 'linux' || !app.isPackaged) return { available: false };
+  if (!require('fs').existsSync(LINUX_UPDATER)) return { available: false, why: 'Reinstall with the latest install-linux.sh to get automatic updates.' };
+  // sudo -n -l <cmd> <arg>: 0 = allowed without a password.
+  try { require('child_process').execFileSync('sudo', ['-n', '-l', LINUX_UPDATER, '1.0.0'], { stdio: 'ignore', timeout: 5000 }); return { available: true, allowed: true }; } catch { return { available: true, allowed: false }; }
+}
+async function linuxAllowUpdates(on) {
+  const user = require('os').userInfo().username;
+  return new Promise((resolve) => {
+    require('child_process').execFile('pkexec', [LINUX_UPDATER, on ? '--allow' : '--disallow', user], { timeout: 120000 }, (err, out) => resolve(!err && /ok/.test(String(out || ''))));
+  });
+}
+let linuxPending = null;          // a version waiting for a quiet moment
+let linuxIdleTimer = null;
+function linuxInstallWhenIdle(version) {
+  const v = String(version || '').replace(/^v/, '');
+  if (!/^\d+\.\d+\.\d+$/.test(v)) return;
+  linuxPending = v;
+  if (linuxIdleTimer) return;
+  // Installing restarts the app: wait until nobody has touched the computer for 5 minutes.
+  linuxIdleTimer = setInterval(() => {
+    if (!linuxPending) { clearInterval(linuxIdleTimer); linuxIdleTimer = null; return; }
+    let idle = 0;
+    try { idle = require('electron').powerMonitor.getSystemIdleTime(); } catch { idle = 0; }
+    if (idle >= 300) linuxInstallNow();
+  }, 60000);
+}
+function linuxInstallNow() {
+  const v = linuxPending;
+  if (!v) return false;
+  linuxPending = null;
+  if (notifyCenter) notifyCenter.add({ source: 'system', title: `Updating to v${v}`, body: 'Installing and restarting...', toast: false });
+  // Outside this app's process (the installer stops the running app), then
+  // start the new version: a transient user unit keeps going after we exit.
+  const cmd = `sudo -n ${LINUX_UPDATER} ${v} && exec /usr/local/bin/be-aero-desktop`;
+  try {
+    require('child_process').spawn('systemd-run', ['--user', '--collect', `--unit=be-aero-update-${Date.now()}`, 'sh', '-c', cmd], { detached: true, stdio: 'ignore' }).unref();
+    lastUpdateStatus = { state: 'restarting', release: { version: `v${v}` }, checkedAt: Date.now(), repo: UPDATE_REPO };
+    if (win) win.webContents.send('updates:status', lastUpdateStatus);
+    return true;
+  } catch (err) { console.warn('linux update failed to start:', err.message); return false; }
+}
+ipcMain.handle('updates:linux', () => ({ ...linuxUpdaterState(), pending: linuxPending }));
+ipcMain.handle('updates:linux-allow', async (_e, on) => { const ok = await linuxAllowUpdates(!!on); return { ok, ...linuxUpdaterState() }; });
+ipcMain.handle('updates:linux-install-now', () => linuxInstallNow());
+
 let autoUpdaterReady = null;
 function getAutoUpdater() {
   if (autoUpdaterReady) return autoUpdaterReady;
@@ -2063,6 +2114,14 @@ async function runUpdateCheck({ manual = false } = {}) {
 
   const result = await updater.checkLatest(UPDATE_REPO, app.getVersion());
   lastUpdateStatus = { ...result, checkedAt: Date.now(), repo: UPDATE_REPO };
+  // Linux with automatic updates allowed: install at the next quiet moment.
+  if (result.state === 'update' && u0.auto !== false && process.platform === 'linux') {
+    const lx = linuxUpdaterState();
+    if (lx.available && lx.allowed) {
+      linuxInstallWhenIdle(result.release.version);
+      lastUpdateStatus = { ...lastUpdateStatus, linuxPending: linuxPending };
+    }
+  }
   if (win) win.webContents.send('updates:status', lastUpdateStatus);
 
   if (result.state === 'update') {

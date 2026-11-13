@@ -25,6 +25,7 @@ if [[ "${1:-}" == "--uninstall" ]]; then
   rm -rf "$APP_DIR"
   rm -f "$BIN_LINK" "$DESKTOP" "$ICON"
   rm -rf /usr/share/gnome-shell/extensions/be-aero-dock@be-ai-research
+  rm -f /usr/local/sbin/be-aero-desktop-update /etc/sudoers.d/be-aero-desktop-update
   command -v update-desktop-database >/dev/null && update-desktop-database || true
   echo "BE-Aero Desktop removed."
   exit 0
@@ -125,6 +126,58 @@ if [ -d /usr/share/gnome-shell ] && [ -d "$APP_DIR/resources/gnome-extension/$EX
   echo "GNOME dock helper installed. Enable it (then log out and back in on Wayland):"
   echo "    gnome-extensions enable $EXT_UUID"
 fi
+
+# Automatic updates (Linux): a root helper that installs ONE thing - a
+# published release of BE-Aero Desktop, by version number, downloaded from
+# GitHub and checked against the release's SHA256SUMS.txt. The app runs it
+# through sudo; "--allow USER" (asked once, through pkexec, when the user
+# turns automatic updates on) lets that user run it without a password.
+UPD=/usr/local/sbin/be-aero-desktop-update
+cat > "$UPD" <<'HELPER'
+#!/bin/sh
+# be-aero-desktop-update X.Y.Z      install that published release
+# be-aero-desktop-update --allow USER | --disallow USER
+set -eu
+REPO=BE-AI-Research/be-aero-desktop
+RULE=/etc/sudoers.d/be-aero-desktop-update
+case "${1:-}" in
+  --allow|--disallow)
+    U="${2:-}"
+    printf '%s' "$U" | grep -Eq '^[a-z_][a-z0-9_.-]{0,31}$' || { echo "bad user name" >&2; exit 2; }
+    id "$U" >/dev/null 2>&1 || { echo "no such user" >&2; exit 2; }
+    if [ "$1" = "--disallow" ]; then
+      [ -f "$RULE" ] && grep -v "^$U " "$RULE" > "$RULE.tmp" || : > "$RULE.tmp"
+    else
+      { [ -f "$RULE" ] && grep -v "^$U " "$RULE" || true; echo "$U ALL=(root) NOPASSWD: /usr/local/sbin/be-aero-desktop-update [0-9]*"; } > "$RULE.tmp"
+    fi
+    chmod 440 "$RULE.tmp"
+    if [ -s "$RULE.tmp" ]; then
+      visudo -cf "$RULE.tmp" >/dev/null || { rm -f "$RULE.tmp"; echo "sudoers check failed" >&2; exit 1; }
+      mv "$RULE.tmp" "$RULE"
+    else
+      rm -f "$RULE.tmp" "$RULE"
+    fi
+    echo ok; exit 0 ;;
+esac
+V="${1:-}"
+printf '%s' "$V" | grep -Eq '^[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,4}$' || { echo "usage: $0 X.Y.Z" >&2; exit 2; }
+T="$(mktemp -d)"; trap 'rm -rf "$T"' EXIT
+B="https://github.com/$REPO/releases/download/v$V"
+get() { if command -v curl >/dev/null; then curl -fsSL "$1" -o "$2"; else wget -qO "$2" "$1"; fi; }
+get "$B/SHA256SUMS.txt" "$T/SHA256SUMS.txt" || { echo "v$V has no published checksums - not installing it automatically" >&2; exit 1; }
+WANT="$(grep -E " \*?be-aero-desktop-$V\.tar\.gz$" "$T/SHA256SUMS.txt" | awk '{print $1}' | head -1)"
+[ -n "$WANT" ] || { echo "no checksum for be-aero-desktop-$V.tar.gz" >&2; exit 1; }
+get "$B/be-aero-desktop-$V.tar.gz" "$T/app.tar.gz"
+GOT="$(sha256sum "$T/app.tar.gz" | awk '{print $1}')"
+[ "$GOT" = "$WANT" ] || { echo "checksum mismatch - not installing" >&2; exit 1; }
+WANT_SH="$(grep -E " \*?install-linux\.sh$" "$T/SHA256SUMS.txt" | awk '{print $1}' | head -1)"
+get "$B/install-linux.sh" "$T/install-linux.sh"
+[ -n "$WANT_SH" ] && [ "$(sha256sum "$T/install-linux.sh" | awk '{print $1}')" = "$WANT_SH" ] || { echo "installer checksum missing or wrong - not installing" >&2; exit 1; }
+bash "$T/install-linux.sh" "$T/app.tar.gz"
+HELPER
+chmod 755 "$UPD"
+chown root:root "$UPD"
+
 echo "Done. Launch 'BE-Aero Desktop' from your app menu, or run: be-aero-desktop"
 echo "Uninstall any time with: sudo bash install-linux.sh --uninstall"
 }

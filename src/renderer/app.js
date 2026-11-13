@@ -1377,7 +1377,41 @@
   $('set-24h').addEventListener('change', (e) => aero.setSettings({ use24h: e.target.checked }));
   $('set-top').addEventListener('change', (e) => aero.setSettings({ alwaysOnTop: e.target.checked }));
   $('set-startup').addEventListener('change', (e) => aero.setSettings({ launchAtStartup: e.target.checked }));
-  $('set-update-auto').addEventListener('change', (e) => aero.setSettings({ updates: { auto: e.target.checked } }));
+  $('set-update-auto').addEventListener('change', async (e) => {
+    aero.setSettings({ updates: { auto: e.target.checked } });
+    // Linux: turning it on lets this user run the update helper (pkexec asks once).
+    if (aero.updatesLinux) {
+      const lx = await aero.updatesLinux();
+      if (lx.available && e.target.checked && !lx.allowed) await aero.updatesLinuxAllow(true);
+      renderLinuxUpdates();
+    }
+  });
+  // Linux: what automatic updates need, and "install now" when one waits.
+  async function renderLinuxUpdates() {
+    if (!aero.updatesLinux || !navigator.userAgent.includes('Linux')) return;
+    const box = $('update-linux');
+    let lx;
+    try { lx = await aero.updatesLinux(); } catch { return; }
+    box.classList.remove('hidden');
+    box.textContent = '';
+    if (!lx.available) { box.textContent = lx.why || ''; box.classList.toggle('hidden', !lx.why); return; }
+    if (!lx.allowed) {
+      box.append('Automatic updates need your password once (they install as the system).');
+      const b = document.createElement('button'); b.className = 'btn'; b.textContent = 'Allow';
+      b.addEventListener('click', async () => { b.disabled = true; await aero.updatesLinuxAllow(true); renderLinuxUpdates(); });
+      box.append(' ', b);
+      return;
+    }
+    if (lx.pending) {
+      box.append(`v${lx.pending} installs when the computer is idle. `);
+      const b = document.createElement('button'); b.className = 'btn'; b.textContent = 'Install now';
+      b.addEventListener('click', () => aero.updatesLinuxInstallNow());
+      box.append(b);
+      return;
+    }
+    box.textContent = 'Automatic updates are allowed: new releases install when the computer is idle, then BE-Aero restarts.';
+  }
+  renderLinuxUpdates();
   $('set-update-notify').addEventListener('change', (e) => aero.setSettings({ updates: { notify: e.target.checked } }));
 
   function renderUpdateStatus(st) {
