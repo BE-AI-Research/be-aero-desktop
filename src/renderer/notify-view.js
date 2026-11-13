@@ -52,11 +52,11 @@
 
   // One notification row. opts: { level: 0 app parent | 1 conversation | 2 older
   // in a conversation, more: { key, count, label, unread }, dismiss: [items] }
-  function itemRow(it, { level = 0, more = null, dismiss = [it] } = {}) {
+  function itemRow(it, { level = 0, more = null, dismiss = [it], source = level === 0, rerender = renderPanel } = {}) {
     const row = document.createElement('div');
     row.className = `notify-item${it.read ? '' : ' unread'}${level ? ` child lvl${level}` : ''}`;
     const open = more && expanded.has(more.key);
-    const meta = level === 0 ? `${esc(sourceLabel(it))} · ${ago(it.ts)}` : ago(it.ts);
+    const meta = source ? `${esc(sourceLabel(it))} · ${ago(it.ts)}` : ago(it.ts);
     row.innerHTML = `<div class="n-ico">${sourceGlyph(it)}</div>
       <div class="n-body"><div class="n-title">${esc(it.title)}</div>
       ${it.body ? `<div class="n-text">${esc(it.body)}</div>` : ''}
@@ -66,7 +66,7 @@
     row.addEventListener('click', (e) => {
       if (e.target.closest('.n-more')) {
         if (expanded.has(more.key)) expanded.delete(more.key); else expanded.add(more.key);
-        renderPanel();
+        rerender();
         return;
       }
       if (e.target.closest('.n-x')) { for (const x of dismiss) aero.notifyRemove(x.id); return; }
@@ -216,5 +216,25 @@
     aero.notifyList().then((s) => { state = s || state; if (opts.onChange) opts.onChange(state); });
   }
 
-  window.AeroNotify = { init, renderTile, togglePanel };
+  // One source's notifications (a web widget's own list): by conversation,
+  // each with its earlier messages folded under it, as in the panel.
+  function renderConversations(box, items, keyPrefix, rerender) {
+    box.textContent = '';
+    if (!items.length) { const e = document.createElement('div'); e.className = 'notify-empty'; e.textContent = 'Nothing new.'; box.appendChild(e); return; }
+    for (const th of bucket(items, convKey)) {
+      const k = `${keyPrefix}#${th.key}`;
+      const [head, ...older] = th.items;
+      const conv = document.createElement('div');
+      conv.className = 'notify-group';
+      conv.appendChild(itemRow(head, { level: 0, source: false, rerender, more: older.length ? { key: k, label: `${older.length} earlier`, unread: unreadIn(older) } : null, dismiss: th.items }));
+      if (older.length && expanded.has(k)) {
+        const t = tree();
+        for (const it of older) t.appendChild(itemRow(it, { level: 2, rerender }));
+        conv.appendChild(t);
+      }
+      box.appendChild(conv);
+    }
+  }
+
+  window.AeroNotify = { init, renderTile, togglePanel, renderConversations, sourceGlyph, esc };
 })();

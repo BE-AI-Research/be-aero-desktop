@@ -85,6 +85,7 @@
   if (window.AeroMedia) AeroMedia.init({ aero });
   if (window.AeroSound) AeroSound.init({ aero });
   if (window.AeroWidgetTray) AeroWidgetTray.init({ aero });
+  if (window.AeroWebNotify) AeroWebNotify.init({ aero });          // bells and banners on web widget frames
   if (window.AeroPower) AeroPower.init({ aero });
   if (window.AeroUac) AeroUac.init({ aero });
   if (window.AeroTrash) AeroTrash.init({ aero });
