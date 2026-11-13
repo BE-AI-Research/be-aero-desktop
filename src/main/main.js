@@ -1653,6 +1653,7 @@ ipcMain.handle('displays:list', () => screen.getAllDisplays().map((d, i) => ({
 // ---------------------------------------------------------------- Power menu
 // Only the five fixed verbs reach the OS; the renderer never names a command.
 ipcMain.handle('power:action', (_e, action) => require('./power').runPower(String(action || '')));
+ipcMain.handle('power:can-hibernate', () => require('./power').canHibernate().catch(() => ({ ok: true })));
 // The dock's gear: the operating system's own Settings app.
 ipcMain.handle('os:settings', async () => {
   if (process.platform === 'win32') { await shell.openExternal('ms-settings:'); return true; }

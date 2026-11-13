@@ -1,6 +1,8 @@
 // BE-Aero Desktop - power menu: a tile at the far end of the dock, apart
-// from the app icons, opening Lock / Switch user / Log off / Sleep /
-// Restart / Shut down. Log off, restart and shut down ask for confirmation inside the menu.
+// from the app icons, opening Lock / Switch user / Log off / Suspend /
+// Hibernate / Restart / Shut down. Log off, restart and shut down ask for
+// confirmation inside the menu. Hibernate is greyed out (with how to turn
+// it on) when the machine cannot hibernate.
 (function () {
   'use strict';
 
@@ -8,7 +10,8 @@
     { id: 'lock', label: 'Lock', glyph: '🔒', confirm: false },
     { id: 'switchuser', label: 'Switch user', glyph: '👥', confirm: false },
     { id: 'logout', label: 'Log off', glyph: '↪', confirm: true },
-    { id: 'sleep', label: 'Sleep', glyph: '☾', confirm: false },
+    { id: 'sleep', label: 'Suspend (sleep)', glyph: '☾', confirm: false, title: 'Sleep: keeps everything in memory, wakes in seconds' },
+    { id: 'hibernate', label: 'Hibernate', glyph: '❄', confirm: false, title: 'Saves everything to disk and powers off; you continue where you left off' },
     { id: 'restart', label: 'Restart', glyph: '↻', confirm: true },
     { id: 'shutdown', label: 'Shut down', glyph: '⏻', confirm: true }
   ];
@@ -51,17 +54,29 @@
     panel.style.top = `${above ? Math.max(8, r.top - ph - 8) : r.bottom + 8}px`;
   }
 
+  let hibernate = null;            // { ok, why } once asked
   function renderItems() {
     panel.textContent = '';
     el('div', 'power-head', panel, 'Power');
     for (const it of ITEMS) {
       const b = el('button', `power-item power-${it.id}`, panel);
       b.dataset.action = it.id;
+      if (it.title) b.title = it.title;
       el('span', 'power-glyph', b, it.glyph);
       el('span', 'power-label', b, it.label);
+      if (it.id === 'hibernate' && hibernate && !hibernate.ok) {
+        b.disabled = true;
+        b.classList.add('off');
+        b.title = hibernate.why || 'Hibernate is not available on this computer';
+      }
       b.addEventListener('click', () => (it.confirm ? askConfirm(it) : act(it)));
     }
     place();
+    // Ask once whether hibernation is available; grey it out if not.
+    if (hibernate === null && aero.powerCanHibernate) {
+      hibernate = { ok: true };
+      aero.powerCanHibernate().then((r) => { hibernate = r || { ok: true }; if (panel && panel.querySelector('.power-hibernate')) renderItems(); }).catch(() => {});
+    }
   }
 
   function askConfirm(it) {
@@ -114,7 +129,7 @@
     el('span', 'dock-ico power-ico', gear).innerHTML = GEAR_SVG;
     gear.addEventListener('click', () => { closePanel(); if (aero && aero.openOsSettings) aero.openOsSettings(); });
     tile = el('button', 'dock-tile power-tile', wrap);
-    tile.title = 'Power: lock, switch user, log off, sleep, restart, shut down';
+    tile.title = 'Power: lock, switch user, log off, suspend, hibernate, restart, shut down';
     const ic = el('span', 'dock-ico power-ico', tile);
     ic.innerHTML = POWER_SVG;
     tile.addEventListener('click', togglePanel);

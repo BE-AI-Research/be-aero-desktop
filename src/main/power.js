@@ -1,10 +1,10 @@
 // Power actions for the dock's power menu: lock, switch user, log off,
-// sleep, restart, shut down. Only these six verbs exist; the renderer cannot name a
+// suspend (sleep), hibernate, restart, shut down. Only these verbs exist; the renderer cannot name a
 // command. Each platform maps them to its own tools, and the runner is
 // injectable so tests never touch the machine.
 const { execFile } = require('child_process');
 
-const ACTIONS = ['lock', 'switchuser', 'logout', 'sleep', 'restart', 'shutdown'];
+const ACTIONS = ['lock', 'switchuser', 'logout', 'sleep', 'hibernate', 'restart', 'shutdown'];
 
 // [command, args] per action. Linux tries each candidate in order until one
 // succeeds (desktops differ in which session tools they ship).
@@ -20,6 +20,8 @@ function commandsFor(action, platform = process.platform, env = process.env) {
       // SetSuspendState through .NET sleeps (not hibernates) when the OS allows it.
       sleep: [['powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
         "Add-Type -AssemblyName System.Windows.Forms; [void][System.Windows.Forms.Application]::SetSuspendState('Suspend', $false, $false)"]]],
+      // Needs hibernation turned on (powercfg /hibernate on); canHibernate() says.
+      hibernate: [['shutdown.exe', ['/h']]],
       restart: [['shutdown.exe', ['/r', '/t', '0']]],
       shutdown: [['shutdown.exe', ['/s', '/t', '0']]]
     }[action] || null;
@@ -36,6 +38,7 @@ function commandsFor(action, platform = process.platform, env = process.env) {
         ...(sid ? [['loginctl', ['terminate-session', sid]]] : [])
       ],
       sleep: [['systemctl', ['suspend']]],
+      hibernate: [['systemctl', ['hibernate']]],
       restart: [['systemctl', ['reboot']]],
       shutdown: [['systemctl', ['poweroff']]]
     }[action] || null;
@@ -69,4 +72,29 @@ async function runPower(action, { run = defaultRun, platform = process.platform,
   return { ok: false, error: (last && last.error) || 'the command failed' };
 }
 
-module.exports = { ACTIONS, commandsFor, runPower };
+// Can this machine hibernate right now? -> { ok: bool, why? }
+// Windows: powercfg /a lists what is available ("Hibernate" before the
+// "not available" section). Linux: logind's CanHibernate ("yes").
+async function canHibernate({ platform = process.platform, exec = null } = {}) {
+  const run = exec || ((cmd, args) => new Promise((resolve) => execFile(cmd, args, { windowsHide: true, timeout: 8000 }, (err, out) => resolve(err && !out ? null : String(out || '')))));
+  if (platform === 'win32') {
+    const out = await run('powercfg.exe', ['/a']);
+    if (out == null) return { ok: false, why: 'Could not ask Windows whether hibernation is on.' };
+    return parsePowercfg(out);
+  }
+  if (platform === 'linux') {
+    const out = await run('busctl', ['call', 'org.freedesktop.login1', '/org/freedesktop/login1', 'org.freedesktop.login1.Manager', 'CanHibernate']);
+    if (out == null) return { ok: true };            // no logind answer: let systemctl try, and say why if it fails
+    return /"yes"/.test(out) ? { ok: true } : { ok: false, why: 'Hibernation is not set up on this computer (it needs swap at least as big as memory).' };
+  }
+  return { ok: false, why: 'Hibernate is not available here.' };
+}
+function parsePowercfg(out) {
+  const text = String(out || '');
+  const cut = text.search(/not available|n'est pas disponible|nicht verf/i);
+  const available = cut >= 0 ? text.slice(0, cut) : text;
+  if (/^\s*Hibernate\s*$/im.test(available) || /^\s*Hibernate\b/im.test(available)) return { ok: true };
+  return { ok: false, why: 'Hibernation is turned off. To turn it on: open Terminal as administrator and run  powercfg /hibernate on' };
+}
+
+module.exports = { ACTIONS, commandsFor, runPower, canHibernate, parsePowercfg };
