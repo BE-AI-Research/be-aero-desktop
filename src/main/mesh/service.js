@@ -48,6 +48,18 @@ class DeviceService {
 
   deviceName() { return String(this.settings().name || os.hostname()).slice(0, 60); }
 
+  // Devices removed here that still need telling (mesh.js "forget").
+  loadForgotten() {
+    try { const l = JSON.parse(fs.readFileSync(path.join(this.dir, 'forgotten.json'), 'utf8')); return Array.isArray(l) ? l : []; } catch { return []; }
+  }
+
+  saveForgotten(list) {
+    try {
+      fs.mkdirSync(this.dir, { recursive: true });
+      fs.writeFileSync(path.join(this.dir, 'forgotten.json'), JSON.stringify(list), { mode: 0o600 });
+    } catch (err) { this.log(`could not save removed devices: ${err.message}`); }
+  }
+
   loadPeers() {
     try { const l = JSON.parse(fs.readFileSync(this.peersFile, 'utf8')); return Array.isArray(l) ? l : []; } catch { return []; }
   }
@@ -77,6 +89,7 @@ class DeviceService {
       this.mesh = new Mesh({
         identity,
         peers: { load: () => this.loadPeers(), save: (l) => this.savePeers(l) },
+        forgotten: { load: () => this.loadForgotten(), save: (l) => this.saveForgotten(l) },
         approvePairing: (req) => this.approve(req),
         port: Number(this.settings().port) || DEFAULT_PORT,
         log: this.log
@@ -173,7 +186,14 @@ class DeviceService {
         return { error: /ECONNREFUSED/.test(msg) ? 'Nothing answered at that address. Is BE-Aero running there with device connections on?' : /timed out|ETIMEDOUT|EHOSTUNREACH/.test(msg) ? 'That address did not answer.' : msg };
       }
     });
-    ipcMain.handle('devices:remove', (_e, id) => (this.mesh ? this.mesh.removePeer(String(id)) : (this.savePeers(this.loadPeers().filter((p) => p.id !== id)), this.broadcast(), true)));
+    ipcMain.handle('devices:remove', (_e, id) => {
+      if (this.mesh) return this.mesh.removePeer(String(id));
+      // Connections are off: remove it, and tell it once they are on again.
+      if (this.loadPeers().some((p) => p.id === id)) this.saveForgotten([...this.loadForgotten().filter((f) => f.id !== id), { id: String(id), at: Date.now() }]);
+      this.savePeers(this.loadPeers().filter((p) => p.id !== id));
+      this.broadcast();
+      return true;
+    });
     ipcMain.handle('devices:set-address', (_e, id, address) => {
       if (!this.mesh) return { error: 'Turn on device connections first.' };
       const m = /^\s*\[?([^\]\s]+?)\]?(?::(\d+))?\s*$/.exec(String(address || ''));
