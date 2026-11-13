@@ -19,7 +19,7 @@
 
   function appNameFromExe(exe) {
     if (typeof exe !== 'string' || !exe) return 'App';
-    const base = exe.replace(/\\/g, '/').split('/').pop().replace(/\.exe$/i, '').replace(/\.desktop$/i, '');
+    const base = exe.replace(/\\/g, '/').split('/').pop().replace(/\.exe$/i, '').replace(/\.desktop$/i, '').replace(/\.lnk$/i, '');
     const key = base.toLowerCase();
     if (NAME_OVERRIDES[key]) return NAME_OVERRIDES[key];
     return base

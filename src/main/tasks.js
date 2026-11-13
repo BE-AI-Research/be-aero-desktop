@@ -55,6 +55,37 @@ public struct SHQUERYRBINFO { public int cbSize; public long i64Size; public lon
 public class WinBin {
   [DllImport("shell32.dll", CharSet = CharSet.Unicode)] public static extern int SHQueryRecycleBin(string root, ref SHQUERYRBINFO info);
 }
+[StructLayout(LayoutKind.Sequential, Pack = 4)]
+public struct AumKey { public Guid fmtid; public uint pid; }
+[StructLayout(LayoutKind.Explicit, Size = 24)]
+public struct AumVar { [FieldOffset(0)] public ushort vt; [FieldOffset(8)] public IntPtr p; }
+[ComImport, Guid("886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+public interface IAumStore {
+  [PreserveSig] int GetCount(out uint c);
+  [PreserveSig] int GetAt(uint i, out AumKey k);
+  [PreserveSig] int GetValue(ref AumKey k, out AumVar v);
+  [PreserveSig] int SetValue(ref AumKey k, ref AumVar v);
+  [PreserveSig] int Commit();
+}
+public class WinAum {
+  [DllImport("shell32.dll")] static extern int SHGetPropertyStoreForWindow(IntPtr h, ref Guid iid, out IAumStore store);
+  [DllImport("ole32.dll")] static extern int PropVariantClear(ref AumVar v);
+  // A window's AppUserModelID (how the taskbar tells apps apart), or null.
+  public static string Get(IntPtr h) {
+    IAumStore s = null;
+    try {
+      Guid iid = typeof(IAumStore).GUID;
+      if (SHGetPropertyStoreForWindow(h, ref iid, out s) != 0 || s == null) return null;
+      AumKey k = new AumKey(); k.fmtid = new Guid("9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3"); k.pid = 5;
+      AumVar v;
+      if (s.GetValue(ref k, out v) != 0) return null;
+      string r = (v.vt == 31 && v.p != IntPtr.Zero) ? Marshal.PtrToStringUni(v.p) : null;
+      PropVariantClear(ref v);
+      return r;
+    } catch { return null; }
+    finally { if (s != null) Marshal.ReleaseComObject(s); }
+  }
+}
 '@
 while ($true) {
   $line = [Console]::In.ReadLine()
@@ -86,7 +117,7 @@ while ($true) {
       $proc = Get-Process -Id $wpid
       $null = $list.Add([PSCustomObject]@{
         hwnd = [int64]$h; title = $title; pid = $wpid
-        exe = $proc.Path; min = [WinEnum]::IsIconic($h)
+        exe = $proc.Path; min = [WinEnum]::IsIconic($h); aumid = [WinAum]::Get($h)
         fg = ($h -eq [WinEnum]::GetForegroundWindow())
       })
       $true
@@ -246,6 +277,7 @@ class TaskWindows {
         title: String(r.title).slice(0, 120),
         pid: Number(r.pid) || 0,
         exe: typeof r.exe === 'string' ? r.exe : null,
+        aumid: typeof r.aumid === 'string' ? r.aumid.slice(0, 200) : null,
         min: !!r.min,
         fg: !!r.fg
       }));

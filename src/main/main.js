@@ -1695,6 +1695,15 @@ ipcMain.handle('tasks:icon', async (_e, exe) => {
   let url = null;
   if (linuxTasks && exe.endsWith('.desktop')) {
     url = linuxTasks.icon(exe);
+  } else if (/\.lnk$/i.test(exe)) {
+    // A web app's shortcut: the app's own icon (the .ico the browser saved),
+    // else the shortcut's, without the arrow overlay.
+    try {
+      const link = shell.readShortcutLink(exe);
+      const ico = link.icon && require('fs').existsSync(link.icon) ? nativeImage.createFromPath(link.icon) : null;
+      if (ico && !ico.isEmpty()) url = ico.resize({ width: 32, height: 32, quality: 'best' }).toDataURL();
+    } catch { /* not a shortcut */ }
+    if (!url) { try { const img = await app.getFileIcon(exe, { size: 'normal' }); url = img.isEmpty() ? null : img.toDataURL(); } catch { /* none */ } }
   } else {
     try {
       const img = await app.getFileIcon(exe, { size: 'normal' });
@@ -1709,7 +1718,7 @@ ipcMain.handle('tasks:icon', async (_e, exe) => {
 // about (a stored pin, or a window the worker reported) are launchable.
 function dockKnowsExe(exe) {
   if (typeof exe !== 'string') return false;
-  if (process.platform === 'linux' ? !/\.desktop$/i.test(exe) : !/\.exe$/i.test(exe)) return false;
+  if (process.platform === 'linux' ? !/\.desktop$/i.test(exe) : !/\.(exe|lnk)$/i.test(exe)) return false;
   const pinned = (store.get('appDock') || {}).pinned || [];
   return isPinned(pinned, exe) || lastDockExes.has(exe.toLowerCase());
 }
@@ -1801,9 +1810,31 @@ ipcMain.handle('uac:menu', async () => {
   return true;
 });
 
+// Chrome / Edge web apps (pwa.js): each window says which app it is; its
+// Start Menu shortcut stands in for the browser's exe - own tile, name,
+// icon, launch and pin.
+let pwaShortcuts = null;
+function pwas() {
+  if (!pwaShortcuts && process.platform === 'win32') {
+    const start = (base) => path.join(base, 'Microsoft', 'Windows', 'Start Menu', 'Programs');
+    pwaShortcuts = new (require('./pwa').PwaShortcuts)({
+      readShortcut: (p) => shell.readShortcutLink(p),
+      dirs: [process.env.APPDATA, process.env.ProgramData].filter(Boolean).map(start)
+    });
+    pwaShortcuts.scan();
+  }
+  return pwaShortcuts;
+}
 ipcMain.handle('tasks:list', async () => {
-  const list = taskWindows ? await taskWindows.list()
+  let list = taskWindows ? await taskWindows.list()
     : linuxTasks ? await linuxTasks.list() : [];
+  if (taskWindows && list.some((w) => w.aumid && /_crx_/i.test(w.aumid))) {
+    const p = pwas();
+    list = list.map((w) => {
+      const app = p && w.aumid ? p.lookup(w.aumid, w.exe) : null;
+      return app ? { ...w, exe: app.lnk, app: app.name } : w;
+    });
+  }
   lastDockExes = new Set(list.map((w) => (w.exe || '').toLowerCase()).filter(Boolean));
   return list;
 });
