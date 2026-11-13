@@ -738,6 +738,10 @@ input[type=color] {
 }
 .web-widget:hover .webw-controls, .visual-widget:hover .webw-controls, .webw-controls:focus-within { opacity: 1; }
 .webw-btn { width: 22px; height: 20px; font-size: 12px; line-height: 1; }
+/* The close button on widgets the AI makes: always there, top right. */
+.wclose { flex: 0 0 auto; width: 24px; height: 22px; margin-left: 4px; padding: 0; font-size: 12px; line-height: 1; opacity: .75; border-radius: 6px; }
+.wclose:hover { opacity: 1; background: rgba(248,113,113,.4); }
+.visual-widget .plugin-head .webw-controls { margin-right: 0; }
 .webw-zoom { width: auto; min-width: 34px; padding: 0 3px; font-size: 10px; font-variant-numeric: tabular-nums; }
 
 /* The guest page fills the pane below the header. */

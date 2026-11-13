@@ -73,9 +73,10 @@
       const del = el('button', 'icon-btn webw-btn visual-del', controls);
       del.innerHTML = '<svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>';
       del.title = 'Remove this widget (its folder goes to the Recycle Bin)';
-      const close = el('button', 'icon-btn webw-btn aiw-close', controls, '✕');
-      close.title = 'Close - it keeps its saved state; bring it back from the widget tray in the dock';
       el('span', 'badge', head, 'AI');
+      // Close: always visible at the end of the header (the other controls show on hover).
+      const close = el('button', 'icon-btn wclose aiw-close', head, '✕');
+      close.title = 'Close - it keeps its saved state; bring it back from the widget tray in the dock or the BE-Aero menu > Your widgets';
       const f = document.createElement('iframe');
       f.className = 'visual-frame';
       f.setAttribute('sandbox', 'allow-scripts');
