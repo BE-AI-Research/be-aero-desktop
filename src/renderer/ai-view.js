@@ -1052,10 +1052,6 @@
     root.querySelector('.ai-new').addEventListener('click', () => newTab(null, null, true));
     root.querySelector('.ai-label').addEventListener('click', editLabel);
     root.querySelector('.ai-min').addEventListener('click', () => aero.setSettings({ ai: { minimized: true } }));
-    // Close: the widget goes away (like turning it off in Settings > Widgets);
-    // conversations, tabs and running work are kept.
-    const closeBtn = root.querySelector('.ai-close');
-    if (closeBtn) closeBtn.addEventListener('click', (e) => { e.stopPropagation(); aero.setSettings({ widgets: { ai: false } }); });
     titleEl.addEventListener('dblclick', editLabel);
     root.querySelector('.ai-delete').addEventListener('click', async () => {
       const t = activeTab();
