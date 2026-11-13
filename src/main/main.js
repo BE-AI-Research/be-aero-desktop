@@ -1695,6 +1695,8 @@ ipcMain.handle('tasks:icon', async (_e, exe) => {
   let url = null;
   if (linuxTasks && exe.endsWith('.desktop')) {
     url = linuxTasks.icon(exe);
+  } else if (/^shell:AppsFolder\\/i.test(exe)) {
+    try { url = spotlight ? await spotlight.icon(exe) : null; } catch { url = null; }
   } else if (/\.lnk$/i.test(exe)) {
     // A web app's shortcut: the app's own icon (the .ico the browser saved),
     // else the shortcut's, without the arrow overlay.
@@ -1718,7 +1720,7 @@ ipcMain.handle('tasks:icon', async (_e, exe) => {
 // about (a stored pin, or a window the worker reported) are launchable.
 function dockKnowsExe(exe) {
   if (typeof exe !== 'string') return false;
-  if (process.platform === 'linux' ? !/\.desktop$/i.test(exe) : !/\.(exe|lnk)$/i.test(exe)) return false;
+  if (process.platform === 'linux' ? !/\.desktop$/i.test(exe) : !(/\.(exe|lnk)$/i.test(exe) || /^shell:AppsFolder\\[^\\]+![^\\]+$/i.test(exe))) return false;
   const pinned = (store.get('appDock') || {}).pinned || [];
   return isPinned(pinned, exe) || lastDockExes.has(exe.toLowerCase());
 }
@@ -1810,6 +1812,16 @@ ipcMain.handle('uac:menu', async () => {
   return true;
 });
 
+// A Store app's name from Search's index of the Start menu, else made from its id
+// ("Microsoft.WindowsCalculator_8wekyb3d8bbwe!App" -> "Windows Calculator").
+function storeAppName(aumid) {
+  const id = String(aumid).toLowerCase();
+  const hit = spotlight && spotlight.index && (spotlight.index.entries || []).find((e) => e.aumid && e.aumid.toLowerCase() === id);
+  if (hit && hit.name) return hit.name;
+  const fam = String(aumid).split('!')[0].replace(/_[a-z0-9]{13}$/i, '');
+  const last = fam.split('.').filter(Boolean).pop() || fam;
+  return last.replace(/([a-z])([A-Z])/g, '$1 $2');
+}
 // Chrome / Edge web apps (pwa.js): each window says which app it is; its
 // Start Menu shortcut stands in for the browser's exe - own tile, name,
 // icon, launch and pin.
@@ -1835,6 +1847,15 @@ ipcMain.handle('tasks:list', async () => {
       return app ? { ...w, exe: app.lnk, app: app.name } : w;
     });
   }
+  // Store apps (Settings, Calculator, Photos...) all run in ApplicationFrameHost.exe;
+  // their windows say which app they are: shell:AppsFolder\<id> stands in -
+  // own tile, name (from the Start menu list Search keeps) and icon, launch and pin.
+  if (taskWindows) {
+    list = list.map((w) => {
+      if (!w.aumid || !w.aumid.includes('!') || !/\\ApplicationFrameHost\.exe$/i.test(w.exe || '')) return w;
+      return { ...w, exe: `shell:AppsFolder\\${w.aumid}`, app: storeAppName(w.aumid) };
+    });
+  }
   lastDockExes = new Set(list.map((w) => (w.exe || '').toLowerCase()).filter(Boolean));
   return list;
 });
@@ -1847,6 +1868,8 @@ ipcMain.handle('dock:launch', (_e, exe) => {
 });
 
 function spawnDetached(exe) {
+  // A Store app: Explorer starts it from the Apps folder, as the Start menu does.
+  if (/^shell:AppsFolder\\/i.test(exe)) { require('child_process').spawn('explorer.exe', [exe], { detached: true, stdio: 'ignore' }).unref(); return true; }
   if (!require('fs').existsSync(exe)) return false;
   // ShellExecute semantics, not a raw CreateProcess: Windows 11 system apps
   // (Notepad, Paint, ...) are trampolines to Store packages and exit silently

@@ -19,6 +19,10 @@
 
   function appNameFromExe(exe) {
     if (typeof exe !== 'string' || !exe) return 'App';
+    if (/^shell:AppsFolder\\/i.test(exe)) {
+      const fam = exe.slice(exe.indexOf('\\') + 1).split('!')[0].replace(/_[a-z0-9]{13}$/i, '');
+      return (fam.split('.').filter(Boolean).pop() || 'App').replace(/([a-z])([A-Z])/g, '$1 $2');
+    }
     const base = exe.replace(/\\/g, '/').split('/').pop().replace(/\.exe$/i, '').replace(/\.desktop$/i, '').replace(/\.lnk$/i, '');
     const key = base.toLowerCase();
     if (NAME_OVERRIDES[key]) return NAME_OVERRIDES[key];
