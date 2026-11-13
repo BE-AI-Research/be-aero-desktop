@@ -1232,7 +1232,13 @@ webview.plugin-frame { background: #fff; }
 .files-crumb:hover { opacity: 1; background: rgba(255,255,255,.08); }
 .files-crumb:last-child { opacity: 1; font-weight: 600; }
 .files-widget .files-filter { width: 100%; font-size: 12px; flex: 0 0 auto; padding: 4px 8px; }
-.files-body { flex: 1; min-height: 0; display: flex; gap: 6px; }
+.files-body { flex: 1; min-height: 0; display: flex; gap: 0; }
+.files-split { flex: 0 0 9px; align-self: stretch; cursor: col-resize; position: relative; touch-action: none; }
+.files-split::after { content: ''; position: absolute; top: 6px; bottom: 6px; left: 3px; width: 3px; border-radius: 2px; background: rgba(255,255,255,.1); transition: background .12s; }
+.files-split:hover::after, .files-split.dragging::after { background: color-mix(in srgb, var(--accent) 70%, transparent); }
+.files-split.folded { flex-basis: 11px; }
+.files-split.folded::after { background: rgba(255,255,255,.22); width: 4px; }
+.files-places.folded { overflow: hidden; padding: 0; }
 .files-places { width: 108px; flex: 0 0 auto; overflow-y: auto; display: flex; flex-direction: column; gap: 1px; scrollbar-width: thin; scrollbar-color: rgba(255,255,255,.22) transparent; }
 .files-place { display: flex; align-items: center; gap: 5px; border: none; background: transparent; color: inherit; font: inherit; font-size: 11.5px; text-align: left; padding: 3px 5px; border-radius: 6px; cursor: pointer; opacity: .85; }
 .files-place .n { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

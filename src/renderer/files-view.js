@@ -771,6 +771,63 @@
     });
   }
 
+  // The places sidebar is resizable: drag the divider left or right; drag it
+  // all the way left (or double-click it) to fold the sidebar away. The
+  // desktop widget and the file browser windows remember their own width.
+  function sidebar(saved) {
+    const body = root.querySelector('.files-body');
+    if (!body || root.querySelector('.files-split')) return;
+    const key = opts0.window ? 'placesWidthWin' : 'placesWidth';
+    const DEFAULT = opts0.window ? 168 : 108;
+    const MIN = 72;
+    const split = document.createElement('div');
+    split.className = 'files-split no-drag';
+    split.title = 'Drag to resize the sidebar; double-click to hide or show it';
+    placesEl.after(split);
+    let width = Number.isFinite(saved) ? saved : DEFAULT;
+    let last = width > 0 ? width : DEFAULT;          // to come back to after folding
+    const max = () => Math.max(MIN, Math.floor(body.clientWidth * 0.6));
+    const apply = (w) => {
+      width = w <= 0 ? 0 : Math.min(max(), Math.max(MIN, Math.round(w)));
+      placesEl.style.width = `${width}px`;
+      placesEl.classList.toggle('folded', width === 0);
+      split.classList.toggle('folded', width === 0);
+    };
+    const save = () => aero.setSettings({ files: { [key]: width } });
+    apply(width);
+    split.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const x0 = e.clientX;
+      const w0 = width;
+      split.classList.add('dragging');
+      try { split.setPointerCapture(e.pointerId); } catch { /* gone */ }
+      const move = (ev) => {
+        const w = w0 + (ev.clientX - x0);
+        // Below half the minimum it folds away; past that it snaps to the minimum.
+        apply(w < MIN / 2 ? 0 : w);
+      };
+      const up = () => {
+        split.classList.remove('dragging');
+        split.removeEventListener('pointermove', move);
+        split.removeEventListener('pointerup', up);
+        split.removeEventListener('pointercancel', up);
+        if (width > 0) last = width;
+        save();
+      };
+      split.addEventListener('pointermove', move);
+      split.addEventListener('pointerup', up);
+      split.addEventListener('pointercancel', up);
+    });
+    split.addEventListener('dblclick', () => {
+      if (width > 0) { last = width; apply(0); } else apply(last || DEFAULT);
+      save();
+    });
+    // A smaller widget or window: keep the sidebar within its limit.
+    if (window.ResizeObserver) new ResizeObserver(() => { if (width > max()) apply(width); }).observe(body);
+  }
+
   async function init(opts) {
     aero = opts.aero;
     opts0 = opts;
@@ -801,6 +858,7 @@
     }
     const s = (await aero.getSettings()).files || {};
     showHidden = !!s.showHidden;
+    sidebar(Number(opts.window ? s.placesWidthWin : s.placesWidth));
     view = s.view === 'grid' ? 'grid' : 'list';
     setView(view);
     const pr = await aero.filesPlaces();
