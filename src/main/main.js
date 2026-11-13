@@ -315,6 +315,37 @@ function displayGeometry() {
   }
 }
 
+// The screen saver: while it runs the widget layer steps aside - hidden,
+// never on top (an Always-on-top sidebar, a summoned dock or a pinned
+// assistant would otherwise show over it), and with its window hidden the
+// page's polling and animations pause. When it ends, everything comes back
+// as it was. Windows: SPI_GETSCREENSAVERRUNNING through the tasks helper.
+let saverOn = false;
+let saverHid = false;
+function watchScreenSaver() {
+  setInterval(async () => {
+    if (!win || win.isDestroyed() || !taskWindows) return;
+    let running = null;
+    try { running = await taskWindows.screenSaverRunning(); } catch { running = null; }
+    if (running === null || running === saverOn) return;
+    saverOn = running;
+    if (running) {
+      console.log('[screen saver] started: widgets step aside');
+      if (dockSummoned) unsummonDock();
+      saverHid = win.isVisible();
+      if (win.isAlwaysOnTop()) win.setAlwaysOnTop(false);
+      if (saverHid) win.hide();
+    } else {
+      console.log('[screen saver] ended');
+      if (saverHid) win.showInactive();
+      saverHid = false;
+      if (store.get('alwaysOnTop')) win.setAlwaysOnTop(true, 'floating');
+      else if (aiService && aiService.isPinned()) win.setAlwaysOnTop(true, 'pop-up-menu');
+      else sinkToDesktop();
+    }
+  }, 3000);
+}
+
 // The widget layer belongs at the BACK: on the desktop, behind every app
 // window the user works with. Re-assert that whenever we might have risen
 // (bounds changes, startup, losing focus) - unless Always on top is chosen.
@@ -650,7 +681,7 @@ function summonDock() {
   if (dockSummoned) { unsummonDock(); return; }
   dockSummoned = true;
   console.log('[dock] summoned');
-  if (!store.get('alwaysOnTop')) { liftFromDesktop(); win.setAlwaysOnTop(true, 'screen-saver'); }
+  if (!store.get('alwaysOnTop')) { liftFromDesktop(); win.setAlwaysOnTop(true, 'pop-up-menu'); }
   win.show();
   win.focus();
   win.webContents.send('dock:summon', true);
@@ -2337,6 +2368,7 @@ app.whenReady().then(() => {
   startApi();
 
   if (process.platform === 'win32') taskWindows = new TaskWindows({ ownExePath: process.execPath });
+  if (taskWindows) watchScreenSaver();
   // UAC shield: prompt status and the prompt level, for the dock tile.
   if (taskWindows) {
     uacMonitor = new (require('./uac').UacMonitor)({
@@ -2880,7 +2912,7 @@ app.whenReady().then(() => {
     }),
     setPinned: (on) => {
       if (!win) return;
-      if (on) { liftFromDesktop(); win.setAlwaysOnTop(true, 'screen-saver'); win.show(); }
+      if (on) { liftFromDesktop(); win.setAlwaysOnTop(true, 'pop-up-menu'); win.show(); }
       else if (!store.get('alwaysOnTop')) { win.setAlwaysOnTop(false); sinkToDesktop(); }
     }
   });

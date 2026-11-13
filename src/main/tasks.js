@@ -49,6 +49,7 @@ public class WinEnum {
   [DllImport("user32.dll")] public static extern bool BringWindowToTop(IntPtr h);
   [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int cmd);
   [DllImport("kernel32.dll")] public static extern uint GetCurrentThreadId();
+  [DllImport("user32.dll")] public static extern bool SystemParametersInfo(uint action, uint param, ref int value, uint winIni);
 }
 [StructLayout(LayoutKind.Sequential)]
 public struct SHQUERYRBINFO { public int cbSize; public long i64Size; public long i64NumItems; }
@@ -124,6 +125,11 @@ while ($true) {
     }
     [WinEnum]::EnumWindows($cb, [IntPtr]::Zero) | Out-Null
     [Console]::Out.WriteLine((ConvertTo-Json -InputObject @($list) -Compress))
+  } elseif ($cmd -eq 'saver') {
+    # SPI_GETSCREENSAVERRUNNING (0x72): is the screen saver on screen now?
+    $v = 0
+    [WinEnum]::SystemParametersInfo(0x72, 0, [ref]$v, 0) | Out-Null
+    [Console]::Out.WriteLine([string]$v)
   } elseif ($cmd -eq 'act' -and $parts.Length -gt 1) {
     $h = [IntPtr][int64]$parts[1]
     if ([WinEnum]::IsIconic($h)) { [WinEnum]::ShowWindowAsync($h, 9) | Out-Null }
@@ -281,6 +287,12 @@ class TaskWindows {
         min: !!r.min,
         fg: !!r.fg
       }));
+  }
+
+  // Is the screen saver running? (true / false; null when the helper did not answer)
+  async screenSaverRunning() {
+    const r = await this.send('saver');
+    return r === '1' ? true : r === '0' ? false : null;
   }
 
   // Push a window to the bottom of the z-order without activating it - how a
