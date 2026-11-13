@@ -47,7 +47,7 @@ test('removing an offline device: it is told when it next connects', async () =>
     b.peers.get(a.identity.id).addresses = [`127.0.0.1:${a.port}`];
     b.reconnectAll();
     assert.ok(await until(() => !b.peers.has(a.identity.id)), 'B forgot A on reconnecting');
-    assert.ok(!a.forgotten.has(b.identity.id), 'told: nothing left to tell');
+    assert.ok(a.told && a.told.has(b.identity.id), 'told (and kept telling for a while)');
   } finally { done(); }
 });
 

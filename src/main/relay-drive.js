@@ -22,6 +22,8 @@
 // The key: made by the first device that needs it, given to my other paired
 // devices (permission "Browse files") over the mesh, or sealed through the
 // relay for one that is offline. Everyone uses the oldest key they know.
+// Index entries per answer from the relay (a full index of 27,000 files is ~15 MB; a message may be 16 MB).
+const INDEX_PAGE = 4000;
 const fs = require('fs');
 const fsp = require('fs/promises');
 const path = require('path');
@@ -136,20 +138,49 @@ class RelayDrive {
   async index(relayId, { fresh = false } = {}) {
     let c = this.cache.get(relayId);
     if (c && !fresh && Date.now() - c.at < INDEX_MS) return c;
-    const r = await this.req(relayId, 'drive.index', { since: c ? c.seq : 0 }, 60000);
-    if (!c || r.full || r.version !== 2) c = { seq: 0, objects: new Map() };
-    if (r.full || !c.objects.size) c.objects = new Map();
-    for (const o of r.objects || []) c.objects.set(o.id, o);
-    for (const id of r.removed || []) c.objects.delete(id);
-    c.seq = Number(r.seq) || 0;
+    // One refresh at a time per relay: callers in between share it.
+    if (!this.indexing) this.indexing = new Map();
+    if (this.indexing.has(relayId)) return this.indexing.get(relayId);
+    const job = this.refreshIndex(relayId, c).finally(() => this.indexing.delete(relayId));
+    this.indexing.set(relayId, job);
+    return job;
+  }
+
+  async refreshIndex(relayId, c) {
+    // Pages of INDEX_PAGE changes: a large store does not fit in one message.
+    let since = c ? c.seq : 0;
+    let cont = false;
+    for (let page = 0; page < 1000; page++) {
+      const r = await this.req(relayId, 'drive.index', { since, limit: INDEX_PAGE, cont }, 60000);
+      if (!cont && (!c || r.full || r.version !== 2)) c = { seq: 0, objects: new Map(), decoded: new Map() };
+      if (!c.decoded) c.decoded = new Map();
+      for (const o of r.objects || []) c.objects.set(o.id, o);
+      for (const id of r.removed || []) { c.objects.delete(id); c.decoded.delete(id); }
+      c.seq = Number(r.seq) || 0;
+      c.used = r.used;
+      c.maxBytes = r.maxBytes;
+      if (!r.more) break;
+      since = c.seq;
+      cont = true;
+    }
     c.at = Date.now();
-    c.used = r.used;
-    c.maxBytes = r.maxBytes;
-    c.entries = [];
-    c.unreadable = 0;
-    for (const o of c.objects.values()) { const e = this.decode(o); if (e) c.entries.push(e); else c.unreadable++; }
+    this.rebuildEntries(c);
     this.cache.set(relayId, c);
     return c;
+  }
+
+  // The decoded view of the relay's objects: only new or changed ones are
+  // decrypted again (27,000 objects took ~0.2 s per folder open otherwise).
+  rebuildEntries(c) {
+    if (!c.decoded) c.decoded = new Map();
+    c.entries = [];
+    c.unreadable = 0;
+    for (const o of c.objects.values()) {
+      let d = c.decoded.get(o.id);
+      if (!d || d.meta !== o.meta || d.key !== (o.key || '')) { d = { meta: o.meta, key: o.key || '', entry: this.decode(o) }; c.decoded.set(o.id, d); }
+      if (d.entry) c.entries.push(d.entry); else c.unreadable++;
+    }
+    if (c.decoded.size > c.objects.size) for (const id of c.decoded.keys()) if (!c.objects.has(id)) c.decoded.delete(id);
   }
 
   // What we just did, without asking the relay again.
@@ -158,9 +189,7 @@ class RelayDrive {
     if (!c) return;
     if (raw) c.objects.set(raw.id, raw);
     for (const id of removedIds) c.objects.delete(id);
-    c.entries = [];
-    c.unreadable = 0;
-    for (const o of c.objects.values()) { const e = this.decode(o); if (e) c.entries.push(e); else c.unreadable++; }
+    this.rebuildEntries(c);
   }
 
   find(idx, ns, rel) { const p = clean(rel); return idx.entries.filter((e) => e.ns === ns && e.path === p && !e.dir).sort((a, b) => b.at - a.at)[0] || null; }
